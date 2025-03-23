@@ -1,0 +1,28 @@
+2025-03-23 13:10:10 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-131010\training.log
+2025-03-23 13:10:10 - === LOGGING STARTED AT 2025-03-23 13:10:10 ===
+2025-03-23 13:10:10 - Logger initialized with console and file output
+2025-03-23 13:10:11 - Random seed set to 42 for reproducibility
+2025-03-23 13:10:11 - Arguments saved to runs\run_20250323-131010\args.json
+2025-03-23 13:10:11 - Using GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 13:10:11 - Number of GPUs: 1
+2025-03-23 13:10:11 - CUDA Version: 11.8
+2025-03-23 13:10:11 - GPU Memory: 4.00 GB (Free: 3.23 GB)
+2025-03-23 13:10:11 - Detected 4096MB total VRAM - optimizing for maximum utilization
+2025-03-23 13:10:11 - Applied GTX 1650 Ti specific settings for MAXIMUM throughput and VRAM utilization
+2025-03-23 13:10:11 - Forced aggressive memory optimization (99% VRAM utilization target)
+2025-03-23 13:10:11 - [MEMORY] Using optimized gradient accumulation steps: 1
+2025-03-23 13:10:11 - [MEMORY] Setting VRAM utilization target to 99.0%
+2025-03-23 13:10:11 - [MEMORY] Pre-allocating maximum CUDA memory to force high throughput...
+2025-03-23 13:10:11 - [MEMORY] Pre-allocating maximum CUDA memory to force high throughput...
+2025-03-23 13:10:11 - [MEMORY] Allocation stage 1/4: Targeting 50% of allocation goal
+2025-03-23 13:10:11 -   - Current VRAM: 0.0MB (0.0% of total VRAM)
+2025-03-23 13:10:11 - [MEMORY] Allocation stage 2/4: Targeting 75% of allocation goal
+2025-03-23 13:10:11 -   - Current VRAM: 0.0MB (0.0% of total VRAM)
+2025-03-23 13:10:11 - [MEMORY] Allocation stage 3/4: Targeting 90% of allocation goal
+2025-03-23 13:10:11 -   - Current VRAM: 0.0MB (0.0% of total VRAM)
+2025-03-23 13:10:11 - [MEMORY] Allocation stage 4/4: Targeting 98% of allocation goal
+2025-03-23 13:10:11 -   - Current VRAM: 0.0MB (0.0% of total VRAM)
+2025-03-23 13:10:11 - [MEMORY] Successfully pre-allocated 0.0MB of CUDA memory (0.0MB total, 0.0% of VRAM)
+2025-03-23 13:10:11 - [MEMORY] Released pre-allocated memory, now available for training
+2025-03-23 13:10:11 - [MEMORY] Memory after release: 0.0MB (0.0% of VRAM)
+2025-03-23 13:10:11 - Memory pre-allocation failed: cannot access local variable 'permanent_buffer' where it is not associated with a value

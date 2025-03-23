@@ -1,0 +1,85 @@
+2025-03-23 16:06:48 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-160648\training.log
+2025-03-23 16:06:48 - === LOGGING STARTED AT 2025-03-23 16:06:48 ===
+2025-03-23 16:06:48 - Logger initialized with console and file output
+2025-03-23 16:06:49 - Random seed set to 42 for reproducibility
+2025-03-23 16:06:49 - Arguments saved to runs\run_20250323-160648\args.json
+2025-03-23 16:06:49 - Using CUDA with 1 GPU(s)
+2025-03-23 16:06:49 - PyTorch version: 2.6.0+cu118
+2025-03-23 16:06:50 - GPU Memory Info:
+GPU 0: NVIDIA GeForce GTX 1650 Ti, 4.00 GB total, 3.23 GB free
+2025-03-23 16:06:50 - Enabled TF32 precision for faster training
+2025-03-23 16:06:50 - Enabled cuDNN benchmark mode for faster training
+2025-03-23 16:06:50 - Detected 4096MB total VRAM - optimizing for maximum utilization
+2025-03-23 16:06:50 - Applied ULTRA-AGGRESSIVE GTX 1650 Ti settings for MAXIMUM throughput and VRAM utilization
+2025-03-23 16:06:50 - [MEMORY] Setting VRAM utilization target to 99.0%
+2025-03-23 16:06:50 - ================================================================================
+2025-03-23 16:06:50 -                                   LOADING DATA                                  
+2025-03-23 16:06:50 - ================================================================================
+2025-03-23 16:06:50 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 16:06:50 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 16:06:50 - Vocabulary size: 89 characters
+2025-03-23 16:06:50 - Created data loaders: 2408 training batches, 67 validation batches
+2025-03-23 16:06:50 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 16:06:50 - ================================================================================
+2025-03-23 16:06:50 -                                  CREATING MODEL                                 
+2025-03-23 16:06:50 - ================================================================================
+2025-03-23 16:06:50 - Model initialized with 768 dimensions, 85,192,793 parameters
+2025-03-23 16:06:50 - Trainable parameters: 85,192,793
+2025-03-23 16:06:50 - Estimated model size: 327.98MB
+2025-03-23 16:06:50 - Created transformer model with 85,192,793 parameters
+2025-03-23 16:06:50 - Model config: d_model=768, n_head=12, d_hid=3072, n_layers=12
+2025-03-23 16:06:50 - Using standard GPT-2 Small architecture
+2025-03-23 16:06:50 - Using memory-efficient attention implementation
+2025-03-23 16:06:50 - Model moved to cuda
+2025-03-23 16:06:52 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 16:06:52 - ================================================================================
+2025-03-23 16:06:52 -                              TRAINING CONFIGURATION                             
+2025-03-23 16:06:52 - ================================================================================
+2025-03-23 16:06:52 - Device: cuda
+2025-03-23 16:06:52 - GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 16:06:52 - CUDA: 11.8
+2025-03-23 16:06:52 - PyTorch CUDA: 11.8
+2025-03-23 16:06:52 - GPU Memory: 4.00 GB
+2025-03-23 16:06:52 - [MEMORY] Target GPU memory usage: 3.96 GB (99.0%)
+2025-03-23 16:06:52 - Model Architecture: Transformer (GPT-2 Style)
+2025-03-23 16:06:52 - Total Parameters: 85,192,793
+2025-03-23 16:06:52 - Trainable Parameters: 85,192,793
+2025-03-23 16:06:52 - Estimated Model Size: 324.98 MB (FP32)
+2025-03-23 16:06:52 - Estimated Training Memory: 2274.89 MB
+2025-03-23 16:06:52 - Batch Size: 8
+2025-03-23 16:06:52 - Gradient Accumulation Steps: 4
+2025-03-23 16:06:52 - Effective Batch Size: 32
+2025-03-23 16:06:52 - Learning Rate: 5e-05
+2025-03-23 16:06:52 - Number of Epochs: 2
+2025-03-23 16:06:52 - Using AMP: False
+2025-03-23 16:06:52 - Max Gradient Norm: 1.0
+2025-03-23 16:06:52 - Optimizer: AdamW
+2025-03-23 16:06:52 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 16:06:52 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 16:06:52 - Output Directory: runs\run_20250323-160648
+2025-03-23 16:06:52 - Checkpoint Directory: checkpoints
+2025-03-23 16:06:52 - Log File: runs\run_20250323-160648\training.log
+2025-03-23 16:06:52 - Random Seed: 42
+2025-03-23 16:06:52 - [SPEED] Enabled cuDNN benchmarking for faster training
+2025-03-23 16:06:52 - ================================================================================
+2025-03-23 16:06:53 -                                STARTING TRAINING                                
+2025-03-23 16:06:53 - ================================================================================
+2025-03-23 16:06:53 - Error occurred during training: cannot access local variable 'torch' where it is not associated with a value
+Traceback (most recent call last):
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\src\train_optimized.py", line 653, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\src\train_optimized.py", line 521, in main
+    train_loss, tokens_per_sec = train_epoch(
+                                 ~~~~~~~~~~~^
+        model=model,
+        ^^^^^^^^^^^^
+    ...<11 lines>...
+        scaler=scaler
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\src\trainer.py", line 71, in train_epoch
+    if use_torch_compile and hasattr(torch, 'compile') and device.type == 'cuda':
+                                     ^^^^^
+UnboundLocalError: cannot access local variable 'torch' where it is not associated with a value

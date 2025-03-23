@@ -1,0 +1,93 @@
+2025-03-23 13:15:37 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-131537\training.log
+2025-03-23 13:15:37 - === LOGGING STARTED AT 2025-03-23 13:15:37 ===
+2025-03-23 13:15:37 - Logger initialized with console and file output
+2025-03-23 13:15:39 - Random seed set to 42 for reproducibility
+2025-03-23 13:15:39 - Arguments saved to runs\run_20250323-131537\args.json
+2025-03-23 13:15:39 - Using GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 13:15:39 - Number of GPUs: 1
+2025-03-23 13:15:39 - CUDA Version: 11.8
+2025-03-23 13:15:39 - GPU Memory: 4.00 GB (Free: 3.23 GB)
+2025-03-23 13:15:39 - Detected 4096MB total VRAM - optimizing for maximum utilization
+2025-03-23 13:15:39 - Applied ULTRA-AGGRESSIVE GTX 1650 Ti settings for MAXIMUM throughput and VRAM utilization
+2025-03-23 13:15:39 - Forced aggressive memory optimization (99% VRAM utilization target)
+2025-03-23 13:15:39 - [MEMORY] Using optimized gradient accumulation steps: 1
+2025-03-23 13:15:39 - [MEMORY] Setting VRAM utilization target to 99.0%
+2025-03-23 13:15:39 - [MEMORY] Pre-allocating maximum CUDA memory to force high throughput...
+2025-03-23 13:15:39 - [MEMORY] Pre-allocating maximum CUDA memory to force high throughput...
+2025-03-23 13:15:39 - [MEMORY] Allocation stage 1/4: Targeting 50% of allocation goal
+2025-03-23 13:15:39 -   - Current VRAM: 500.0MB (12.2% of total VRAM)
+2025-03-23 13:15:39 - [MEMORY] Allocation stage 2/4: Targeting 75% of allocation goal
+2025-03-23 13:15:39 -   - Current VRAM: 1244.9MB (30.4% of total VRAM)
+2025-03-23 13:15:39 - [MEMORY] Allocation stage 3/4: Targeting 90% of allocation goal
+2025-03-23 13:15:39 -   - Current VRAM: 2138.9MB (52.2% of total VRAM)
+2025-03-23 13:15:39 - [MEMORY] Allocation stage 4/4: Targeting 98% of allocation goal
+2025-03-23 13:15:39 -   - Current VRAM: 3112.3MB (76.0% of total VRAM)
+2025-03-23 13:15:39 - [MEMORY] Successfully pre-allocated 3112.3MB of CUDA memory (3112.3MB total, 76.0% of VRAM)
+2025-03-23 13:15:39 - [MEMORY] Attempting to allocate final 942.5MB of VRAM for maximum utilization
+2025-03-23 13:15:39 - [MEMORY] Allocated additional 923.6MB in final pass (total: 4035.9MB, 98.5% of VRAM)
+2025-03-23 13:15:39 - [MEMORY] Creating permanent VRAM buffer of 202.0MB to maintain high utilization
+2025-03-23 13:15:39 - [MEMORY] Released pre-allocated memory, now available for training
+2025-03-23 13:15:39 - [MEMORY] Memory after release: 386.7MB (9.4% of VRAM)
+2025-03-23 13:15:39 - [MEMORY] Ready for training with 386.7MB reserved (9.4% of VRAM)
+2025-03-23 13:15:39 - ================================================================================
+2025-03-23 13:15:39 -                                   LOADING DATA                                  
+2025-03-23 13:15:39 - ================================================================================
+2025-03-23 13:15:39 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 13:15:39 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 13:15:39 - Vocabulary size: 89 characters
+2025-03-23 13:15:39 - Created data loaders: 75 training batches, 17 validation batches
+2025-03-23 13:15:39 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 13:15:39 - ================================================================================
+2025-03-23 13:15:39 -                                  CREATING MODEL                                 
+2025-03-23 13:15:39 - ================================================================================
+2025-03-23 13:15:40 - Model initialized with 768 dimensions, 85,192,793 parameters
+2025-03-23 13:15:40 - Trainable parameters: 85,192,793
+2025-03-23 13:15:40 - Estimated model size: 327.98MB
+2025-03-23 13:15:40 - Created transformer model with 85,192,793 parameters
+2025-03-23 13:15:40 - Model config: d_model=768, n_head=12, d_hid=3072, n_layers=12
+2025-03-23 13:15:40 - Using standard GPT-2 Small architecture
+2025-03-23 13:15:40 - Using memory-efficient attention implementation
+2025-03-23 13:15:40 - Model moved to cuda
+2025-03-23 13:15:40 - [MEMORY] Enabling aggressive GPU memory strategies for data loading and processing
+2025-03-23 13:15:40 - [MEMORY] Current VRAM utilization: 8.0%
+2025-03-23 13:15:43 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 13:15:43 - Automatic Mixed Precision enabled with torch.float16
+2025-03-23 13:15:43 - ================================================================================
+2025-03-23 13:15:43 -                              TRAINING CONFIGURATION                             
+2025-03-23 13:15:43 - ================================================================================
+2025-03-23 13:15:43 - Device: cuda
+2025-03-23 13:15:43 - GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 13:15:43 - CUDA: 11.8
+2025-03-23 13:15:43 - PyTorch CUDA: 11.8
+2025-03-23 13:15:43 - GPU Memory: 4.00 GB
+2025-03-23 13:15:43 - [MEMORY] Target GPU memory usage: 3.96 GB (99.0%)
+2025-03-23 13:15:43 - Model Architecture: Transformer (GPT-2 Style)
+2025-03-23 13:15:43 - Total Parameters: 85,192,793
+2025-03-23 13:15:43 - Trainable Parameters: 85,192,793
+2025-03-23 13:15:43 - Estimated Model Size: 324.98 MB (FP32)
+2025-03-23 13:15:43 - Estimated Training Memory: 2274.89 MB
+2025-03-23 13:15:43 - Batch Size: 256
+2025-03-23 13:15:43 - Gradient Accumulation Steps: 1
+2025-03-23 13:15:43 - Effective Batch Size: 256
+2025-03-23 13:15:43 - Learning Rate: 0.0005
+2025-03-23 13:15:43 - Number of Epochs: 1
+2025-03-23 13:15:43 - Using AMP: True
+2025-03-23 13:15:43 - AMP Precision: float16
+2025-03-23 13:15:43 - Max Gradient Norm: 1.0
+2025-03-23 13:15:43 - Optimizer: AdamW
+2025-03-23 13:15:43 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 13:15:43 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 13:15:43 - Output Directory: runs\run_20250323-131537
+2025-03-23 13:15:43 - Checkpoint Directory: checkpoints
+2025-03-23 13:15:43 - Log File: runs\run_20250323-131537\training.log
+2025-03-23 13:15:43 - [MEMORY] Aggressive memory optimization enabled
+2025-03-23 13:15:43 - Random Seed: 42
+2025-03-23 13:15:43 - [SPEED] Enabled cuDNN benchmarking for faster training
+2025-03-23 13:15:43 - ================================================================================
+2025-03-23 13:15:43 -                                STARTING TRAINING                                
+2025-03-23 13:15:43 - ================================================================================
+2025-03-23 13:15:43 - Starting training epoch 0 with gradient accumulation steps: 1
+2025-03-23 13:15:43 - Total batches: 75, Batch size: 256
+2025-03-23 13:15:43 - [MEMORY] Current VRAM utilization is low (8.0%). Allocating cache tensors to increase GPU utilization.
+2025-03-23 13:15:43 - [MEMORY] Allocating additional 2743.0MB to increase GPU utilization
+2025-03-23 13:15:43 - [MEMORY] Increased VRAM utilization to 75.0%

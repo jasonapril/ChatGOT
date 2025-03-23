@@ -1,0 +1,17 @@
+2025-03-23 12:37:46 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-123746\training.log
+2025-03-23 12:37:46 - === LOGGING STARTED AT 2025-03-23 12:37:46 ===
+2025-03-23 12:37:46 - Logger initialized with console and file output
+2025-03-23 12:37:46 - Random seed set to 42 for reproducibility
+2025-03-23 12:37:46 - Arguments saved to runs\run_20250323-123746\args.json
+2025-03-23 12:37:47 - Using CPU (CUDA not available)
+2025-03-23 12:37:47 - ================================================================================
+2025-03-23 12:37:47 -                                   LOADING DATA                                  
+2025-03-23 12:37:47 - ================================================================================
+2025-03-23 12:37:47 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 12:37:47 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 12:37:47 - Vocabulary size: 89 characters
+2025-03-23 12:37:47 - Created data loaders: 1204 training batches, 34 validation batches
+2025-03-23 12:37:47 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 12:37:47 - ================================================================================
+2025-03-23 12:37:47 -                                  CREATING MODEL                                 
+2025-03-23 12:37:47 - ================================================================================

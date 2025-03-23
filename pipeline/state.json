@@ -1,0 +1,32 @@
+{
+  "last_completed_stage": "optimize",
+  "start_time": 1742756687.944722,
+  "stages": {
+    "process": {
+      "completed": true,
+      "timestamp": 1742756687.9625528,
+      "output_path": "processed_data/got_char_data.pkl"
+    },
+    "optimize": {
+      "completed": true,
+      "timestamp": 1742756693.5404828,
+      "settings": {
+        "batch_size": 1,
+        "gradient_accumulation_steps": 1,
+        "use_amp": false,
+        "cuda_optimized": true
+      }
+    },
+    "train": {
+      "completed": false,
+      "timestamp": null,
+      "checkpoint_path": null,
+      "best_validation_loss": Infinity
+    },
+    "generate": {
+      "completed": false,
+      "timestamp": null,
+      "output_file": null
+    }
+  }
+}

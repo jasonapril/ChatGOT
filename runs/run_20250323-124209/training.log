@@ -1,0 +1,62 @@
+2025-03-23 12:42:09 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-124209\training.log
+2025-03-23 12:42:09 - === LOGGING STARTED AT 2025-03-23 12:42:09 ===
+2025-03-23 12:42:09 - Logger initialized with console and file output
+2025-03-23 12:42:09 - Random seed set to 42 for reproducibility
+2025-03-23 12:42:09 - Arguments saved to runs\run_20250323-124209\args.json
+2025-03-23 12:42:10 - Using CPU (CUDA not available)
+2025-03-23 12:42:10 - ================================================================================
+2025-03-23 12:42:10 -                                   LOADING DATA                                  
+2025-03-23 12:42:10 - ================================================================================
+2025-03-23 12:42:11 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 12:42:11 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 12:42:11 - Vocabulary size: 89 characters
+2025-03-23 12:42:11 - Created data loaders: 1204 training batches, 34 validation batches
+2025-03-23 12:42:11 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 12:42:11 - ================================================================================
+2025-03-23 12:42:11 -                                  CREATING MODEL                                 
+2025-03-23 12:42:11 - ================================================================================
+2025-03-23 12:42:11 - Model initialized with 768 dimensions, 85,192,793 parameters
+2025-03-23 12:42:11 - Trainable parameters: 85,192,793
+2025-03-23 12:42:11 - Estimated model size: 327.98MB
+2025-03-23 12:42:11 - Created transformer model with 85,192,793 parameters
+2025-03-23 12:42:11 - Model config: d_model=768, n_head=12, d_hid=3072, n_layers=12
+2025-03-23 12:42:11 - Using standard GPT-2 Small architecture
+2025-03-23 12:42:11 - Using memory-efficient attention implementation
+2025-03-23 12:42:11 - Model moved to cpu
+2025-03-23 12:42:13 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 12:42:13 - Automatic Mixed Precision disabled (not supported on CPU)
+2025-03-23 12:42:13 - ================================================================================
+2025-03-23 12:42:13 -                              TRAINING CONFIGURATION                             
+2025-03-23 12:42:13 - ================================================================================
+2025-03-23 12:42:13 - Device: cpu
+2025-03-23 12:42:13 - Model Architecture: Transformer
+2025-03-23 12:42:13 - Embedding Dimension: 768
+2025-03-23 12:42:13 - Number of Attention Heads: 12
+2025-03-23 12:42:13 - Number of Layers: 12
+2025-03-23 12:42:13 - Hidden Dimension: 3072
+2025-03-23 12:42:13 - Dropout: 0.1
+2025-03-23 12:42:13 - Context Length: 1024
+2025-03-23 12:42:13 - Vocabulary Size: 89
+2025-03-23 12:42:13 - Total Parameters: 85,192,793
+2025-03-23 12:42:13 - Trainable Parameters: 85,192,793
+2025-03-23 12:42:13 - Estimated Model Size: 324.98 MB (FP32)
+2025-03-23 12:42:13 - Estimated Training Memory: 2274.89 MB
+2025-03-23 12:42:13 - Batch Size: 16
+2025-03-23 12:42:13 - Gradient Accumulation Steps: 1
+2025-03-23 12:42:13 - Effective Batch Size: 16
+2025-03-23 12:42:13 - Learning Rate: 0.0005
+2025-03-23 12:42:13 - Number of Epochs: 1
+2025-03-23 12:42:13 - Using AMP: False
+2025-03-23 12:42:13 - Max Gradient Norm: 1.0
+2025-03-23 12:42:13 - Optimizer: AdamW
+2025-03-23 12:42:13 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 12:42:13 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 12:42:13 - Output Directory: runs\run_20250323-124209
+2025-03-23 12:42:13 - Checkpoint Directory: checkpoints
+2025-03-23 12:42:13 - Log File: runs\run_20250323-124209\training.log
+2025-03-23 12:42:13 - Random Seed: 42
+2025-03-23 12:42:13 - ================================================================================
+2025-03-23 12:42:13 -                                STARTING TRAINING                                
+2025-03-23 12:42:13 - ================================================================================
+2025-03-23 12:42:13 - Starting training epoch 0 with gradient accumulation steps: 1
+2025-03-23 12:42:13 - Total batches: 1204, Batch size: 16

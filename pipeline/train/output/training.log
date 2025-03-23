@@ -1,0 +1,299 @@
+2025-03-23 13:59:24 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\pipeline\train\output\training.log
+2025-03-23 13:59:24 - === LOGGING STARTED AT 2025-03-23 13:59:24 ===
+2025-03-23 13:59:24 - Logger initialized with console and file output
+2025-03-23 13:59:24 - Random seed set to 42 for reproducibility
+2025-03-23 13:59:24 - Arguments saved to pipeline\train\output\args.json
+2025-03-23 13:59:24 - Using GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 13:59:24 - Number of GPUs: 1
+2025-03-23 13:59:24 - CUDA Version: 11.8
+2025-03-23 13:59:24 - GPU Memory: 4.00 GB (Free: 3.23 GB)
+2025-03-23 13:59:24 - Detected 4096MB total VRAM - optimizing for maximum utilization
+2025-03-23 13:59:24 - Applied ULTRA-AGGRESSIVE GTX 1650 Ti settings for MAXIMUM throughput and VRAM utilization
+2025-03-23 13:59:24 - [MEMORY] Setting VRAM utilization target to 99.0%
+2025-03-23 13:59:24 - ================================================================================
+2025-03-23 13:59:24 -                                   LOADING DATA                                  
+2025-03-23 13:59:24 - ================================================================================
+2025-03-23 13:59:24 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 13:59:24 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 13:59:24 - Vocabulary size: 89 characters
+2025-03-23 13:59:24 - Created data loaders: 1204 training batches, 34 validation batches
+2025-03-23 13:59:24 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 13:59:24 - ================================================================================
+2025-03-23 13:59:24 -                                  CREATING MODEL                                 
+2025-03-23 13:59:24 - ================================================================================
+2025-03-23 13:59:25 - Model initialized with 768 dimensions, 85,192,793 parameters
+2025-03-23 13:59:25 - Trainable parameters: 85,192,793
+2025-03-23 13:59:25 - Estimated model size: 327.98MB
+2025-03-23 13:59:25 - Created transformer model with 85,192,793 parameters
+2025-03-23 13:59:25 - Model config: d_model=768, n_head=12, d_hid=3072, n_layers=12
+2025-03-23 13:59:25 - Using standard GPT-2 Small architecture
+2025-03-23 13:59:25 - Using memory-efficient attention implementation
+2025-03-23 13:59:26 - Model moved to cuda
+2025-03-23 13:59:27 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 13:59:27 - ================================================================================
+2025-03-23 13:59:27 -                              TRAINING CONFIGURATION                             
+2025-03-23 13:59:27 - ================================================================================
+2025-03-23 13:59:27 - Device: cuda
+2025-03-23 13:59:27 - GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 13:59:27 - CUDA: 11.8
+2025-03-23 13:59:27 - PyTorch CUDA: 11.8
+2025-03-23 13:59:27 - GPU Memory: 4.00 GB
+2025-03-23 13:59:27 - [MEMORY] Target GPU memory usage: 3.96 GB (99.0%)
+2025-03-23 13:59:27 - Model Architecture: Transformer (GPT-2 Style)
+2025-03-23 13:59:27 - Total Parameters: 85,192,793
+2025-03-23 13:59:27 - Trainable Parameters: 85,192,793
+2025-03-23 13:59:27 - Estimated Model Size: 324.98 MB (FP32)
+2025-03-23 13:59:27 - Estimated Training Memory: 2274.89 MB
+2025-03-23 13:59:27 - Batch Size: 16
+2025-03-23 13:59:27 - Gradient Accumulation Steps: 1
+2025-03-23 13:59:27 - Effective Batch Size: 16
+2025-03-23 13:59:27 - Learning Rate: 0.0005
+2025-03-23 13:59:27 - Number of Epochs: 5
+2025-03-23 13:59:27 - Using AMP: False
+2025-03-23 13:59:27 - Max Gradient Norm: 1.0
+2025-03-23 13:59:27 - Optimizer: AdamW
+2025-03-23 13:59:27 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 13:59:27 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 13:59:27 - Output Directory: pipeline\train\output
+2025-03-23 13:59:27 - Checkpoint Directory: pipeline\train\checkpoints
+2025-03-23 13:59:27 - Log File: pipeline\train\output\training.log
+2025-03-23 13:59:27 - Random Seed: 42
+2025-03-23 13:59:27 - [SPEED] Enabled cuDNN benchmarking for faster training
+2025-03-23 13:59:27 - ================================================================================
+2025-03-23 13:59:27 -                                STARTING TRAINING                                
+2025-03-23 13:59:27 - ================================================================================
+2025-03-23 13:59:27 - Starting training epoch 0 with gradient accumulation steps: 1
+2025-03-23 13:59:27 - Total batches: 1204, Batch size: 16
+2025-03-23 13:59:27 - [MEMORY] Current VRAM utilization is low (8.0%). Allocating cache tensors to increase GPU utilization.
+2025-03-23 13:59:27 - [MEMORY] Allocating additional 2743.8MB to increase GPU utilization
+2025-03-23 13:59:28 - [MEMORY] Increased VRAM utilization to 75.0%
+2025-03-23 14:00:15 - Progress: 0.1% | Batch 1/1204 | Loss: 5.4041 | Rate: 85.8 tokens/sec | ETA: 16.0h | VRAM: 3747.8MB/4095.7MB (91.5%)
+2025-03-23 14:00:57 - Minute 1 update | Progress: 0.2% | Batch 2/1204 | ETA: 9.9h | Memory: 3747.3MB (91.5%)
+2025-03-23 14:01:38 - Progress: 0.2% | Batch 3/1204 | Loss: 5.3251 | Rate: 94.2 tokens/sec | ETA: 14.5h | VRAM: 3747.3MB/4095.7MB (91.5%)
+2025-03-23 14:02:19 - Minute 2 update | Progress: 0.3% | Batch 4/1204 | ETA: 11.4h | Memory: 3747.3MB (91.5%)
+2025-03-23 14:03:01 - Progress: 0.4% | Batch 5/1204 | Loss: 5.3399 | Rate: 95.8 tokens/sec | ETA: 14.2h | VRAM: 3747.3MB/4095.7MB (91.5%)
+2025-03-23 14:34:38 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\pipeline\train\output\training.log
+2025-03-23 14:34:38 - === LOGGING STARTED AT 2025-03-23 14:34:38 ===
+2025-03-23 14:34:38 - Logger initialized with console and file output
+2025-03-23 14:34:38 - Random seed set to 42 for reproducibility
+2025-03-23 14:34:38 - Arguments saved to pipeline\train\output\args.json
+2025-03-23 14:34:38 - Using GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 14:34:38 - Number of GPUs: 1
+2025-03-23 14:34:38 - CUDA Version: 11.8
+2025-03-23 14:34:38 - GPU Memory: 4.00 GB (Free: 3.23 GB)
+2025-03-23 14:34:38 - Detected 4096MB total VRAM - optimizing for maximum utilization
+2025-03-23 14:34:38 - Applied ULTRA-AGGRESSIVE GTX 1650 Ti settings for MAXIMUM throughput and VRAM utilization
+2025-03-23 14:34:38 - [MEMORY] Setting VRAM utilization target to 99.0%
+2025-03-23 14:34:38 - ================================================================================
+2025-03-23 14:34:38 -                                   LOADING DATA                                  
+2025-03-23 14:34:38 - ================================================================================
+2025-03-23 14:34:38 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 14:34:38 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 14:34:38 - Vocabulary size: 89 characters
+2025-03-23 14:34:38 - Created data loaders: 1204 training batches, 34 validation batches
+2025-03-23 14:34:38 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 14:34:38 - ================================================================================
+2025-03-23 14:34:38 -                                  CREATING MODEL                                 
+2025-03-23 14:34:38 - ================================================================================
+2025-03-23 14:34:38 - Model initialized with 768 dimensions, 85,192,793 parameters
+2025-03-23 14:34:38 - Trainable parameters: 85,192,793
+2025-03-23 14:34:38 - Estimated model size: 327.98MB
+2025-03-23 14:34:39 - Created transformer model with 85,192,793 parameters
+2025-03-23 14:34:39 - Model config: d_model=768, n_head=12, d_hid=3072, n_layers=12
+2025-03-23 14:34:39 - Using standard GPT-2 Small architecture
+2025-03-23 14:34:39 - Using memory-efficient attention implementation
+2025-03-23 14:34:39 - Model moved to cuda
+2025-03-23 14:34:41 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 14:34:41 - ================================================================================
+2025-03-23 14:34:41 -                              TRAINING CONFIGURATION                             
+2025-03-23 14:34:41 - ================================================================================
+2025-03-23 14:34:41 - Device: cuda
+2025-03-23 14:34:41 - GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 14:34:41 - CUDA: 11.8
+2025-03-23 14:34:41 - PyTorch CUDA: 11.8
+2025-03-23 14:34:41 - GPU Memory: 4.00 GB
+2025-03-23 14:34:41 - [MEMORY] Target GPU memory usage: 3.96 GB (99.0%)
+2025-03-23 14:34:41 - Model Architecture: Transformer (GPT-2 Style)
+2025-03-23 14:34:41 - Total Parameters: 85,192,793
+2025-03-23 14:34:41 - Trainable Parameters: 85,192,793
+2025-03-23 14:34:41 - Estimated Model Size: 324.98 MB (FP32)
+2025-03-23 14:34:41 - Estimated Training Memory: 2274.89 MB
+2025-03-23 14:34:41 - Batch Size: 16
+2025-03-23 14:34:41 - Gradient Accumulation Steps: 1
+2025-03-23 14:34:41 - Effective Batch Size: 16
+2025-03-23 14:34:41 - Learning Rate: 0.0005
+2025-03-23 14:34:41 - Number of Epochs: 5
+2025-03-23 14:34:41 - Using AMP: False
+2025-03-23 14:34:41 - Max Gradient Norm: 1.0
+2025-03-23 14:34:41 - Optimizer: AdamW
+2025-03-23 14:34:41 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 14:34:41 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 14:34:41 - Output Directory: pipeline\train\output
+2025-03-23 14:34:41 - Checkpoint Directory: pipeline\train\checkpoints
+2025-03-23 14:34:41 - Log File: pipeline\train\output\training.log
+2025-03-23 14:34:41 - Random Seed: 42
+2025-03-23 14:34:42 - [SPEED] Enabled cuDNN benchmarking for faster training
+2025-03-23 14:34:42 - ================================================================================
+2025-03-23 14:34:42 -                                STARTING TRAINING                                
+2025-03-23 14:34:42 - ================================================================================
+2025-03-23 14:34:42 - Starting training epoch 0 with gradient accumulation steps: 1
+2025-03-23 14:34:42 - Total batches: 1204, Batch size: 16
+2025-03-23 14:34:42 - [MEMORY] Current VRAM utilization is low (8.0%). Allocating cache tensors to increase GPU utilization.
+2025-03-23 14:34:42 - [MEMORY] Allocating additional 2743.8MB to increase GPU utilization
+2025-03-23 14:34:42 - [MEMORY] Increased VRAM utilization to 75.0%
+2025-03-23 14:35:29 - Progress: 0.1% | Batch 1/1204 | Loss: 5.4041 | Rate: 86.7 tokens/sec | ETA: 15.8h | VRAM: 3735.5MB/4095.7MB (91.2%)
+2025-03-23 14:36:14 - Minute 1 update | Progress: 0.2% | Batch 2/1204 | ETA: 10.3h | Memory: 3735.0MB (91.2%)
+2025-03-23 14:37:00 - Progress: 0.2% | Batch 3/1204 | Loss: 5.3251 | Rate: 89.0 tokens/sec | ETA: 15.4h | VRAM: 3735.0MB/4095.7MB (91.2%)
+2025-03-23 14:58:39 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\pipeline\train\output\training.log
+2025-03-23 14:58:39 - === LOGGING STARTED AT 2025-03-23 14:58:39 ===
+2025-03-23 14:58:39 - Logger initialized with console and file output
+2025-03-23 14:58:39 - Random seed set to 42 for reproducibility
+2025-03-23 14:58:39 - Arguments saved to pipeline\train\output\args.json
+2025-03-23 14:58:39 - Using CUDA with 1 GPU(s)
+2025-03-23 14:58:39 - PyTorch version: 2.6.0+cu118
+2025-03-23 14:58:39 - GPU Memory Info:
+GPU 0: NVIDIA GeForce GTX 1650 Ti, 4.00 GB total, 3.23 GB free
+2025-03-23 14:58:39 - Enabled TF32 precision for faster training
+2025-03-23 14:58:39 - Enabled cuDNN benchmark mode for faster training
+2025-03-23 14:58:39 - Detected 4096MB total VRAM - optimizing for maximum utilization
+2025-03-23 14:58:39 - Applied ULTRA-AGGRESSIVE GTX 1650 Ti settings for MAXIMUM throughput and VRAM utilization
+2025-03-23 14:58:39 - [MEMORY] Setting VRAM utilization target to 99.0%
+2025-03-23 14:58:39 - ================================================================================
+2025-03-23 14:58:39 -                                   LOADING DATA                                  
+2025-03-23 14:58:39 - ================================================================================
+2025-03-23 14:58:39 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 14:58:39 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 14:58:39 - Vocabulary size: 89 characters
+2025-03-23 14:58:39 - Created data loaders: 2408 training batches, 67 validation batches
+2025-03-23 14:58:39 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 14:58:39 - ================================================================================
+2025-03-23 14:58:39 -                                  CREATING MODEL                                 
+2025-03-23 14:58:39 - ================================================================================
+2025-03-23 14:58:40 - Model initialized with 768 dimensions, 85,192,793 parameters
+2025-03-23 14:58:40 - Trainable parameters: 85,192,793
+2025-03-23 14:58:40 - Estimated model size: 327.98MB
+2025-03-23 14:58:40 - Created transformer model with 85,192,793 parameters
+2025-03-23 14:58:40 - Model config: d_model=768, n_head=12, d_hid=3072, n_layers=12
+2025-03-23 14:58:40 - Using standard GPT-2 Small architecture
+2025-03-23 14:58:40 - Using memory-efficient attention implementation
+2025-03-23 14:58:40 - Model moved to cuda
+2025-03-23 14:58:43 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 14:58:43 - ================================================================================
+2025-03-23 14:58:43 -                              TRAINING CONFIGURATION                             
+2025-03-23 14:58:43 - ================================================================================
+2025-03-23 14:58:43 - Device: cuda
+2025-03-23 14:58:43 - GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 14:58:43 - CUDA: 11.8
+2025-03-23 14:58:43 - PyTorch CUDA: 11.8
+2025-03-23 14:58:43 - GPU Memory: 4.00 GB
+2025-03-23 14:58:43 - [MEMORY] Target GPU memory usage: 3.96 GB (99.0%)
+2025-03-23 14:58:43 - Model Architecture: Transformer (GPT-2 Style)
+2025-03-23 14:58:43 - Total Parameters: 85,192,793
+2025-03-23 14:58:43 - Trainable Parameters: 85,192,793
+2025-03-23 14:58:43 - Estimated Model Size: 324.98 MB (FP32)
+2025-03-23 14:58:43 - Estimated Training Memory: 2274.89 MB
+2025-03-23 14:58:43 - Batch Size: 8
+2025-03-23 14:58:43 - Gradient Accumulation Steps: 1
+2025-03-23 14:58:43 - Effective Batch Size: 8
+2025-03-23 14:58:43 - Learning Rate: 0.0005
+2025-03-23 14:58:43 - Number of Epochs: 5
+2025-03-23 14:58:43 - Using AMP: False
+2025-03-23 14:58:43 - Max Gradient Norm: 1.0
+2025-03-23 14:58:43 - Optimizer: AdamW
+2025-03-23 14:58:43 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 14:58:43 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 14:58:43 - Output Directory: pipeline\train\output
+2025-03-23 14:58:43 - Checkpoint Directory: pipeline\train\checkpoints
+2025-03-23 14:58:43 - Log File: pipeline\train\output\training.log
+2025-03-23 14:58:43 - Random Seed: 42
+2025-03-23 14:58:43 - [SPEED] Enabled cuDNN benchmarking for faster training
+2025-03-23 14:58:43 - ================================================================================
+2025-03-23 14:58:43 -                                STARTING TRAINING                                
+2025-03-23 14:58:43 - ================================================================================
+2025-03-23 14:58:43 - Starting training epoch 0 with gradient accumulation steps: 1
+2025-03-23 14:58:43 - Total batches: 2408, Batch size: 8
+2025-03-23 14:58:43 - [MEMORY] Current VRAM utilization is low (8.0%). Allocating cache tensors to increase GPU utilization.
+2025-03-23 14:58:43 - [MEMORY] Allocating additional 2743.8MB to increase GPU utilization
+2025-03-23 14:58:43 - [MEMORY] Increased VRAM utilization to 75.0%
+2025-03-23 14:59:06 - Progress: 0.0% | Batch 1/2408 | Loss: 5.4032 | Rate: 87.4 tokens/sec | ETA: 15.7h | VRAM: 3723.7MB/4095.7MB (90.9%)
+2025-03-23 14:59:49 - Minute 1 update | Progress: 0.1% | Batch 3/2408 | ETA: 11.1h | Memory: 3723.7MB (90.9%)
+2025-03-23 15:00:11 - Progress: 0.2% | Batch 4/2408 | Loss: 5.3125 | Rate: 92.7 tokens/sec | ETA: 14.8h | VRAM: 3723.7MB/4095.7MB (90.9%)
+2025-03-23 15:00:55 - Minute 2 update | Progress: 0.2% | Batch 6/2408 | ETA: 12.6h | Memory: 3723.7MB (90.9%)
+2025-03-23 15:01:16 - Progress: 0.3% | Batch 7/2408 | Loss: 5.2405 | Rate: 93.7 tokens/sec | ETA: 14.6h | VRAM: 3723.7MB/4095.7MB (90.9%)
+2025-03-23 15:04:56 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\pipeline\train\output\training.log
+2025-03-23 15:04:56 - === LOGGING STARTED AT 2025-03-23 15:04:56 ===
+2025-03-23 15:04:56 - Logger initialized with console and file output
+2025-03-23 15:04:56 - Random seed set to 42 for reproducibility
+2025-03-23 15:04:56 - Arguments saved to pipeline\train\output\args.json
+2025-03-23 15:04:56 - Using CUDA with 1 GPU(s)
+2025-03-23 15:04:56 - PyTorch version: 2.6.0+cu118
+2025-03-23 15:04:57 - GPU Memory Info:
+GPU 0: NVIDIA GeForce GTX 1650 Ti, 4.00 GB total, 3.23 GB free
+2025-03-23 15:04:57 - Enabled TF32 precision for faster training
+2025-03-23 15:04:57 - Enabled cuDNN benchmark mode for faster training
+2025-03-23 15:04:57 - Detected 4096MB total VRAM - optimizing for maximum utilization
+2025-03-23 15:04:57 - Applied ULTRA-AGGRESSIVE GTX 1650 Ti settings for MAXIMUM throughput and VRAM utilization
+2025-03-23 15:04:57 - [MEMORY] Setting VRAM utilization target to 99.0%
+2025-03-23 15:04:57 - ================================================================================
+2025-03-23 15:04:57 -                                   LOADING DATA                                  
+2025-03-23 15:04:57 - ================================================================================
+2025-03-23 15:04:57 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 15:04:57 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 15:04:57 - Vocabulary size: 89 characters
+2025-03-23 15:04:57 - Created data loaders: 19268 training batches, 536 validation batches
+2025-03-23 15:04:57 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 15:04:57 - ================================================================================
+2025-03-23 15:04:57 -                                  CREATING MODEL                                 
+2025-03-23 15:04:57 - ================================================================================
+2025-03-23 15:04:57 - Model initialized with 768 dimensions, 85,192,793 parameters
+2025-03-23 15:04:57 - Trainable parameters: 85,192,793
+2025-03-23 15:04:57 - Estimated model size: 327.98MB
+2025-03-23 15:04:58 - Created transformer model with 85,192,793 parameters
+2025-03-23 15:04:58 - Model config: d_model=768, n_head=12, d_hid=3072, n_layers=12
+2025-03-23 15:04:58 - Using standard GPT-2 Small architecture
+2025-03-23 15:04:58 - Using memory-efficient attention implementation
+2025-03-23 15:04:58 - Model moved to cuda
+2025-03-23 15:05:00 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 15:05:00 - ================================================================================
+2025-03-23 15:05:00 -                              TRAINING CONFIGURATION                             
+2025-03-23 15:05:00 - ================================================================================
+2025-03-23 15:05:00 - Device: cuda
+2025-03-23 15:05:00 - GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 15:05:00 - CUDA: 11.8
+2025-03-23 15:05:00 - PyTorch CUDA: 11.8
+2025-03-23 15:05:00 - GPU Memory: 4.00 GB
+2025-03-23 15:05:00 - [MEMORY] Target GPU memory usage: 3.96 GB (99.0%)
+2025-03-23 15:05:00 - Model Architecture: Transformer (GPT-2 Style)
+2025-03-23 15:05:00 - Total Parameters: 85,192,793
+2025-03-23 15:05:00 - Trainable Parameters: 85,192,793
+2025-03-23 15:05:00 - Estimated Model Size: 324.98 MB (FP32)
+2025-03-23 15:05:00 - Estimated Training Memory: 2274.89 MB
+2025-03-23 15:05:00 - Batch Size: 1
+2025-03-23 15:05:00 - Gradient Accumulation Steps: 1
+2025-03-23 15:05:00 - Effective Batch Size: 1
+2025-03-23 15:05:00 - Learning Rate: 0.0005
+2025-03-23 15:05:00 - Number of Epochs: 5
+2025-03-23 15:05:00 - Using AMP: False
+2025-03-23 15:05:00 - Max Gradient Norm: 1.0
+2025-03-23 15:05:00 - Optimizer: AdamW
+2025-03-23 15:05:00 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 15:05:00 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 15:05:00 - Output Directory: pipeline\train\output
+2025-03-23 15:05:00 - Checkpoint Directory: pipeline\train\checkpoints
+2025-03-23 15:05:00 - Log File: pipeline\train\output\training.log
+2025-03-23 15:05:00 - Random Seed: 42
+2025-03-23 15:05:00 - [SPEED] Enabled cuDNN benchmarking for faster training
+2025-03-23 15:05:00 - ================================================================================
+2025-03-23 15:05:00 -                                STARTING TRAINING                                
+2025-03-23 15:05:00 - ================================================================================
+2025-03-23 15:05:00 - Starting training epoch 0 with gradient accumulation steps: 1
+2025-03-23 15:05:00 - Total batches: 19268, Batch size: 1
+2025-03-23 15:05:00 - [MEMORY] Current VRAM utilization is low (8.0%). Allocating cache tensors to increase GPU utilization.
+2025-03-23 15:05:00 - [MEMORY] Allocating additional 2743.8MB to increase GPU utilization
+2025-03-23 15:05:00 - [MEMORY] Increased VRAM utilization to 75.0%
+2025-03-23 15:05:07 - Progress: 0.0% | Batch 1/19268 | Loss: 5.6027 | Rate: 36.8 tokens/sec | ETA: 37.2h | VRAM: 3722.3MB/4095.7MB (90.9%)
+2025-03-23 15:05:19 - Progress: 0.1% | Batch 10/19268 | Loss: 5.2483 | Rate: 135.4 tokens/sec | ETA: 10.1h | VRAM: 3722.3MB/4095.7MB (90.9%)
+2025-03-23 15:06:00 - Minute 1 update | Progress: 0.2% | Batch 41/19268 | ETA: 7.6h | Memory: 3722.3MB (90.9%)
+2025-03-23 15:06:20 - Progress: 0.3% | Batch 56/19268 | Loss: 3.3940 | Rate: 178.9 tokens/sec | ETA: 7.6h | VRAM: 3722.3MB/4095.7MB (90.9%)
+2025-03-23 15:07:01 - Minute 2 update | Progress: 0.5% | Batch 87/19268 | ETA: 7.3h | Memory: 3722.3MB (90.9%)
+2025-03-23 15:07:18 - Progress: 0.5% | Batch 100/19268 | Loss: 2.7562 | Rate: 185.1 tokens/sec | ETA: 7.4h | VRAM: 3722.3MB/4095.7MB (90.9%)

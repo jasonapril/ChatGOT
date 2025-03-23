@@ -1,0 +1,100 @@
+2025-03-23 12:18:42 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-121842\training.log
+2025-03-23 12:18:42 - === LOGGING STARTED AT 2025-03-23 12:18:42 ===
+2025-03-23 12:18:42 - Logger initialized with console and file output
+2025-03-23 12:18:42 - Random seed set to 42 for reproducibility
+2025-03-23 12:18:42 - Arguments saved to runs\run_20250323-121842\args.json
+2025-03-23 12:18:42 - *** CUDA NOT DETECTED - FALLING BACK TO CPU ***
+2025-03-23 12:18:42 - This may significantly slow down training!
+2025-03-23 12:18:42 - PyTorch CUDA available: False
+2025-03-23 12:18:42 - PyTorch version: 2.6.0+cpu
+2025-03-23 12:18:44 - nvidia-smi output:
+Sun Mar 23 12:18:44 2025       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 546.33                 Driver Version: 546.33       CUDA Version: 12.3     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                     TCC/WDDM  | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  NVIDIA GeForce GTX 1650 Ti   WDDM  | 00000000:01:00.0 Off |                  N/A |
+| N/A   60C    P0              17W /  55W |      0MiB /  4096MiB |      0%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|  No running processes found                                                           |
++---------------------------------------------------------------------------------------+
+
+2025-03-23 12:18:44 - Using CPU
+2025-03-23 12:18:44 - ================================================================================
+2025-03-23 12:18:44 -                                   LOADING DATA                                  
+2025-03-23 12:18:44 - ================================================================================
+2025-03-23 12:18:44 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 12:18:44 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 12:18:44 - Vocabulary size: 89 characters
+2025-03-23 12:18:44 - Created data loaders: 2408 training batches, 67 validation batches
+2025-03-23 12:18:44 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 12:18:44 - ================================================================================
+2025-03-23 12:18:44 -                                  CREATING MODEL                                 
+2025-03-23 12:18:44 - ================================================================================
+2025-03-23 12:18:44 - Creating transformer model with:
+2025-03-23 12:18:44 - - vocab_size: 89
+2025-03-23 12:18:44 - - d_model: 256
+2025-03-23 12:18:44 - - n_head: 8
+2025-03-23 12:18:44 - - n_layers: 6
+2025-03-23 12:18:44 - - d_hid: 1024
+2025-03-23 12:18:44 - - dropout: 0.1
+2025-03-23 12:18:44 - - max_seq_length: 256
+2025-03-23 12:18:44 - Model initialized with 256 dimensions, 4,784,729 parameters
+2025-03-23 12:18:44 - Trainable parameters: 4,784,729
+2025-03-23 12:18:44 - Estimated model size: 18.50MB
+2025-03-23 12:18:44 - Model moved to device: cpu
+2025-03-23 12:18:46 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 12:18:46 - ================================================================================
+2025-03-23 12:18:46 -                              TRAINING CONFIGURATION                             
+2025-03-23 12:18:46 - ================================================================================
+2025-03-23 12:18:46 - Device: cpu
+2025-03-23 12:18:46 - Model Architecture: Transformer
+2025-03-23 12:18:46 - Embedding Dimension: 256
+2025-03-23 12:18:46 - Number of Attention Heads: 8
+2025-03-23 12:18:46 - Number of Layers: 6
+2025-03-23 12:18:46 - Hidden Dimension: 1024
+2025-03-23 12:18:46 - Dropout: 0.1
+2025-03-23 12:18:46 - Context Length: 256
+2025-03-23 12:18:46 - Vocabulary Size: 89
+2025-03-23 12:18:46 - Total Parameters: 4,784,729
+2025-03-23 12:18:46 - Trainable Parameters: 4,784,729
+2025-03-23 12:18:46 - Estimated Model Size: 18.25 MB (FP32)
+2025-03-23 12:18:46 - Estimated Training Memory: 127.77 MB
+2025-03-23 12:18:46 - Batch Size: 8
+2025-03-23 12:18:46 - Gradient Accumulation Steps: 1
+2025-03-23 12:18:46 - Effective Batch Size: 8
+2025-03-23 12:18:46 - Learning Rate: 0.0005
+2025-03-23 12:18:46 - Number of Epochs: 1
+2025-03-23 12:18:46 - Using AMP: False
+2025-03-23 12:18:46 - Max Gradient Norm: 1.0
+2025-03-23 12:18:46 - Optimizer: AdamW
+2025-03-23 12:18:46 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 12:18:46 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 12:18:46 - Output Directory: runs\run_20250323-121842
+2025-03-23 12:18:46 - Checkpoint Directory: checkpoints
+2025-03-23 12:18:46 - Log File: runs\run_20250323-121842\training.log
+2025-03-23 12:18:46 - Random Seed: 42
+2025-03-23 12:18:46 - ================================================================================
+2025-03-23 12:18:46 -                                STARTING TRAINING                                
+2025-03-23 12:18:46 - ================================================================================
+2025-03-23 12:18:46 - Starting training epoch 0 with gradient accumulation steps: 1
+2025-03-23 12:18:46 - Total batches: 2408, Batch size: 8
+2025-03-23 12:18:51 - Progress: 0.0% | Batch 1/2408 | Loss: 4.7843 | Rate: 424.6 tokens/sec | ETA: 3.2h | 
+2025-03-23 12:18:59 - Progress: 0.4% | Batch 10/2408 | Loss: 4.7994 | Rate: 1592.9 tokens/sec | ETA: 51.4m | 
+2025-03-23 12:19:47 - Minute 1 update | Progress: 2.6% | Batch 63/2408 | ETA: 36.8m | 
+2025-03-23 12:19:59 - Progress: 3.2% | Batch 76/2408 | Loss: 3.8642 | Rate: 2135.6 tokens/sec | ETA: 37.3m | 
+2025-03-23 12:20:22 - Progress: 4.2% | Batch 100/2408 | Loss: 3.5202 | Rate: 2134.1 tokens/sec | ETA: 36.9m | 
+2025-03-23 12:20:47 - Minute 2 update | Progress: 5.3% | Batch 127/2408 | ETA: 35.9m | 
+2025-03-23 12:21:23 - Progress: 6.8% | Batch 164/2408 | Loss: 3.0608 | Rate: 2144.4 tokens/sec | ETA: 35.7m | 
+2025-03-23 12:21:47 - Minute 3 update | Progress: 7.8% | Batch 189/2408 | ETA: 35.2m | 
+2025-03-23 12:22:24 - Progress: 9.3% | Batch 225/2408 | Loss: 2.7941 | Rate: 2119.9 tokens/sec | ETA: 35.1m | 

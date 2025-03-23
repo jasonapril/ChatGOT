@@ -1,0 +1,172 @@
+2025-03-23 13:19:29 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-131929\training.log
+2025-03-23 13:19:29 - === LOGGING STARTED AT 2025-03-23 13:19:29 ===
+2025-03-23 13:19:29 - Logger initialized with console and file output
+2025-03-23 13:19:30 - Random seed set to 42 for reproducibility
+2025-03-23 13:19:30 - Arguments saved to runs\run_20250323-131929\args.json
+2025-03-23 13:19:30 - Using GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 13:19:30 - Number of GPUs: 1
+2025-03-23 13:19:30 - CUDA Version: 11.8
+2025-03-23 13:19:30 - GPU Memory: 4.00 GB (Free: 3.23 GB)
+2025-03-23 13:19:30 - Detected 4096MB total VRAM - optimizing for maximum utilization
+2025-03-23 13:19:30 - Applied ULTRA-AGGRESSIVE GTX 1650 Ti settings for MAXIMUM throughput and VRAM utilization
+2025-03-23 13:19:30 - Forced aggressive memory optimization (99% VRAM utilization target)
+2025-03-23 13:19:30 - [MEMORY] Using optimized gradient accumulation steps: 1
+2025-03-23 13:19:30 - [MEMORY] Setting VRAM utilization target to 99.0%
+2025-03-23 13:19:30 - [MEMORY] Pre-allocating maximum CUDA memory to force high throughput...
+2025-03-23 13:19:30 - [MEMORY] Pre-allocating maximum CUDA memory to force high throughput...
+2025-03-23 13:19:30 - [MEMORY] Allocation stage 1/4: Targeting 50% of allocation goal
+2025-03-23 13:19:30 -   - Current VRAM: 500.0MB (12.2% of total VRAM)
+2025-03-23 13:19:30 - [MEMORY] Allocation stage 2/4: Targeting 75% of allocation goal
+2025-03-23 13:19:30 -   - Current VRAM: 1244.9MB (30.4% of total VRAM)
+2025-03-23 13:19:30 - [MEMORY] Allocation stage 3/4: Targeting 90% of allocation goal
+2025-03-23 13:19:30 -   - Current VRAM: 2138.9MB (52.2% of total VRAM)
+2025-03-23 13:19:30 - [MEMORY] Allocation stage 4/4: Targeting 98% of allocation goal
+2025-03-23 13:19:30 -   - Current VRAM: 3112.3MB (76.0% of total VRAM)
+2025-03-23 13:19:30 - [MEMORY] Successfully pre-allocated 3112.3MB of CUDA memory (3112.3MB total, 76.0% of VRAM)
+2025-03-23 13:19:30 - [MEMORY] Attempting to allocate final 942.5MB of VRAM for maximum utilization
+2025-03-23 13:19:30 - [MEMORY] Allocated additional 923.6MB in final pass (total: 4035.9MB, 98.5% of VRAM)
+2025-03-23 13:19:31 - [MEMORY] Creating permanent VRAM buffer of 202.0MB to maintain high utilization
+2025-03-23 13:19:31 - [MEMORY] Released pre-allocated memory, now available for training
+2025-03-23 13:19:31 - [MEMORY] Memory after release: 386.7MB (9.4% of VRAM)
+2025-03-23 13:19:31 - [MEMORY] Ready for training with 386.7MB reserved (9.4% of VRAM)
+2025-03-23 13:19:31 - ================================================================================
+2025-03-23 13:19:31 -                                   LOADING DATA                                  
+2025-03-23 13:19:31 - ================================================================================
+2025-03-23 13:19:31 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 13:19:31 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 13:19:31 - Vocabulary size: 89 characters
+2025-03-23 13:19:31 - Created data loaders: 75 training batches, 17 validation batches
+2025-03-23 13:19:31 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 13:19:31 - ================================================================================
+2025-03-23 13:19:31 -                                  CREATING MODEL                                 
+2025-03-23 13:19:31 - ================================================================================
+2025-03-23 13:19:31 - Model initialized with 768 dimensions, 85,192,793 parameters
+2025-03-23 13:19:31 - Trainable parameters: 85,192,793
+2025-03-23 13:19:31 - Estimated model size: 327.98MB
+2025-03-23 13:19:32 - Created transformer model with 85,192,793 parameters
+2025-03-23 13:19:32 - Model config: d_model=768, n_head=12, d_hid=3072, n_layers=12
+2025-03-23 13:19:32 - Using standard GPT-2 Small architecture
+2025-03-23 13:19:32 - Using memory-efficient attention implementation
+2025-03-23 13:19:32 - Model moved to cuda
+2025-03-23 13:19:32 - [MEMORY] Enabling aggressive GPU memory strategies for data loading and processing
+2025-03-23 13:19:32 - [MEMORY] Current VRAM utilization: 8.0%
+2025-03-23 13:19:34 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 13:19:34 - Automatic Mixed Precision enabled with torch.float16
+2025-03-23 13:19:34 - ================================================================================
+2025-03-23 13:19:34 -                              TRAINING CONFIGURATION                             
+2025-03-23 13:19:34 - ================================================================================
+2025-03-23 13:19:34 - Device: cuda
+2025-03-23 13:19:34 - GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 13:19:34 - CUDA: 11.8
+2025-03-23 13:19:34 - PyTorch CUDA: 11.8
+2025-03-23 13:19:34 - GPU Memory: 4.00 GB
+2025-03-23 13:19:34 - [MEMORY] Target GPU memory usage: 3.96 GB (99.0%)
+2025-03-23 13:19:34 - Model Architecture: Transformer (GPT-2 Style)
+2025-03-23 13:19:34 - Total Parameters: 85,192,793
+2025-03-23 13:19:34 - Trainable Parameters: 85,192,793
+2025-03-23 13:19:34 - Estimated Model Size: 324.98 MB (FP32)
+2025-03-23 13:19:34 - Estimated Training Memory: 2274.89 MB
+2025-03-23 13:19:34 - Batch Size: 256
+2025-03-23 13:19:34 - Gradient Accumulation Steps: 1
+2025-03-23 13:19:34 - Effective Batch Size: 256
+2025-03-23 13:19:34 - Learning Rate: 0.0005
+2025-03-23 13:19:34 - Number of Epochs: 1
+2025-03-23 13:19:34 - Using AMP: True
+2025-03-23 13:19:34 - AMP Precision: float16
+2025-03-23 13:19:34 - Max Gradient Norm: 1.0
+2025-03-23 13:19:34 - Optimizer: AdamW
+2025-03-23 13:19:34 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 13:19:34 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 13:19:34 - Output Directory: runs\run_20250323-131929
+2025-03-23 13:19:34 - Checkpoint Directory: checkpoints
+2025-03-23 13:19:34 - Log File: runs\run_20250323-131929\training.log
+2025-03-23 13:19:34 - [MEMORY] Aggressive memory optimization enabled
+2025-03-23 13:19:34 - Random Seed: 42
+2025-03-23 13:19:34 - [SPEED] Enabled cuDNN benchmarking for faster training
+2025-03-23 13:19:34 - ================================================================================
+2025-03-23 13:19:34 -                                STARTING TRAINING                                
+2025-03-23 13:19:34 - ================================================================================
+2025-03-23 13:19:34 - Starting training epoch 0 with gradient accumulation steps: 1
+2025-03-23 13:19:34 - Total batches: 75, Batch size: 256
+2025-03-23 13:19:34 - [MEMORY] Current VRAM utilization is low (8.0%). Allocating cache tensors to increase GPU utilization.
+2025-03-23 13:19:34 - [MEMORY] Allocating additional 2743.0MB to increase GPU utilization
+2025-03-23 13:19:34 - [MEMORY] Increased VRAM utilization to 75.0%
+2025-03-23 13:20:18 - Error occurred during training: CUDA out of memory. Tried to allocate 288.00 MiB. GPU 0 has a total capacity of 4.00 GiB of which 0 bytes is free. Of the allocated memory 18.37 GiB is allocated by PyTorch, and 171.42 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Traceback (most recent call last):
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\src\train.py", line 610, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\src\train.py", line 480, in main
+    train_loss, tokens_per_sec = train_epoch(
+                                 ~~~~~~~~~~~^
+        model=model,
+        ^^^^^^^^^^^^
+    ...<9 lines>...
+        scaler=scaler
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\src\trainer.py", line 205, in train_epoch
+    outputs = model(inputs)
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\src\model.py", line 246, in forward
+    output = self.transformer_encoder(src, mask, src_key_padding_mask)
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\transformer.py", line 517, in forward
+    output = mod(
+        output,
+    ...<2 lines>...
+        src_key_padding_mask=src_key_padding_mask_for_layers,
+    )
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\transformer.py", line 913, in forward
+    x = x + self._sa_block(
+            ~~~~~~~~~~~~~~^
+        self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\transformer.py", line 934, in _sa_block
+    x = self.self_attn(
+        ~~~~~~~~~~~~~~^
+        x,
+        ^^
+    ...<5 lines>...
+        is_causal=is_causal,
+        ^^^^^^^^^^^^^^^^^^^^
+    )[0]
+    ^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\modules\activation.py", line 1373, in forward
+    attn_output, attn_output_weights = F.multi_head_attention_forward(
+                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        query,
+        ^^^^^^
+    ...<17 lines>...
+        is_causal=is_causal,
+        ^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\functional.py", line 6230, in multi_head_attention_forward
+    q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+              ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nimbu\Desktop\Code\AI\ChatGoT\.venv\Lib\site-packages\torch\nn\functional.py", line 5621, in _in_projection_packed
+    .contiguous()
+     ~~~~~~~~~~^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 288.00 MiB. GPU 0 has a total capacity of 4.00 GiB of which 0 bytes is free. Of the allocated memory 18.37 GiB is allocated by PyTorch, and 171.42 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

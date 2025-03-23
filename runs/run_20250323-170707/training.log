@@ -1,0 +1,84 @@
+2025-03-23 17:07:07 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-170707\training.log
+2025-03-23 17:07:07 - === LOGGING STARTED AT 2025-03-23 17:07:07 ===
+2025-03-23 17:07:07 - Logger initialized with console and file output
+2025-03-23 17:07:08 - Random seed set to 42 for reproducibility
+2025-03-23 17:07:08 - Arguments saved to runs\run_20250323-170707\args.json
+2025-03-23 17:07:08 - Using CUDA with 1 GPU(s)
+2025-03-23 17:07:08 - PyTorch version: 2.6.0+cu118
+2025-03-23 17:07:08 - GPU Memory Info:
+GPU 0: NVIDIA GeForce GTX 1650 Ti, 4.00 GB total, 3.23 GB free
+2025-03-23 17:07:08 - Enabled TF32 precision for faster training
+2025-03-23 17:07:08 - Enabled cuDNN benchmark mode for faster training
+2025-03-23 17:07:08 - Detected 4096MB total VRAM - optimizing for maximum utilization
+2025-03-23 17:07:08 - Applied ULTRA-AGGRESSIVE GTX 1650 Ti settings for MAXIMUM throughput and VRAM utilization
+2025-03-23 17:07:08 - [MEMORY] Using optimized gradient accumulation steps: 1
+2025-03-23 17:07:08 - [MEMORY] Setting VRAM utilization target to 99.0%
+2025-03-23 17:07:08 - ================================================================================
+2025-03-23 17:07:08 -                                   LOADING DATA                                  
+2025-03-23 17:07:08 - ================================================================================
+2025-03-23 17:07:08 - Loading data from processed_data/got_char_data.pkl
+2025-03-23 17:07:08 - Data loaded: 19268 training sequences, 2141 validation sequences
+2025-03-23 17:07:08 - Vocabulary size: 89 characters
+2025-03-23 17:07:08 - Created data loaders: 301 training batches, 17 validation batches
+2025-03-23 17:07:08 - Using 4 workers for data loading with prefetch_factor=2
+2025-03-23 17:07:08 - ================================================================================
+2025-03-23 17:07:08 -                                  CREATING MODEL                                 
+2025-03-23 17:07:08 - ================================================================================
+2025-03-23 17:07:08 - Model initialized with 768 dimensions, 85,192,793 parameters
+2025-03-23 17:07:08 - Trainable parameters: 85,192,793
+2025-03-23 17:07:08 - Estimated model size: 327.98MB
+2025-03-23 17:07:08 - Using activation checkpointing to reduce memory usage
+2025-03-23 17:07:09 - Created transformer model with 85,192,793 parameters
+2025-03-23 17:07:09 - Model config: d_model=768, n_head=12, d_hid=3072, n_layers=12
+2025-03-23 17:07:09 - Using standard GPT-2 Small architecture
+2025-03-23 17:07:09 - Using memory-efficient attention implementation
+2025-03-23 17:07:09 - Using activation checkpointing to reduce memory usage during training
+2025-03-23 17:07:09 - Model moved to cuda
+2025-03-23 17:07:09 - Using 8-bit optimizers from bitsandbytes
+2025-03-23 17:07:09 - Creating 8-bit AdamW optimizer
+2025-03-23 17:07:11 - 8-bit optimizer successfully created
+2025-03-23 17:07:11 - Using LambdaLR scheduler with warmup_steps=4000
+2025-03-23 17:07:11 - ================================================================================
+2025-03-23 17:07:11 -                              TRAINING CONFIGURATION                             
+2025-03-23 17:07:11 - ================================================================================
+2025-03-23 17:07:11 - Device: cuda
+2025-03-23 17:07:11 - GPU: NVIDIA GeForce GTX 1650 Ti
+2025-03-23 17:07:11 - CUDA: 11.8
+2025-03-23 17:07:11 - PyTorch CUDA: 11.8
+2025-03-23 17:07:11 - GPU Memory: 4.00 GB
+2025-03-23 17:07:11 - [MEMORY] Target GPU memory usage: 3.96 GB (99.0%)
+2025-03-23 17:07:11 - Model Architecture: Transformer (GPT-2 Style)
+2025-03-23 17:07:11 - Total Parameters: 85,192,793
+2025-03-23 17:07:11 - Trainable Parameters: 85,192,793
+2025-03-23 17:07:11 - Estimated Model Size: 324.98 MB (FP32)
+2025-03-23 17:07:11 - Estimated Training Memory: 2274.89 MB
+2025-03-23 17:07:11 - Batch Size: 64
+2025-03-23 17:07:11 - Gradient Accumulation Steps: 1
+2025-03-23 17:07:11 - Effective Batch Size: 64
+2025-03-23 17:07:11 - Learning Rate: 0.0005
+2025-03-23 17:07:11 - Number of Epochs: 1
+2025-03-23 17:07:11 - Using AMP: False
+2025-03-23 17:07:11 - Max Gradient Norm: 1.0
+2025-03-23 17:07:11 - Optimizer: 8-bit AdamW
+2025-03-23 17:07:11 - LR Scheduler: Linear warmup (4000 steps) then constant
+2025-03-23 17:07:11 - Data Path: processed_data/got_char_data.pkl
+2025-03-23 17:07:11 - Output Directory: runs\run_20250323-170707
+2025-03-23 17:07:11 - Checkpoint Directory: checkpoints
+2025-03-23 17:07:11 - Log File: runs\run_20250323-170707\training.log
+2025-03-23 17:07:11 - Random Seed: 42
+2025-03-23 17:07:11 - [SPEED] Enabled cuDNN benchmarking for faster training
+2025-03-23 17:07:11 - ================================================================================
+2025-03-23 17:07:11 -                                STARTING TRAINING                                
+2025-03-23 17:07:11 - ================================================================================
+2025-03-23 17:07:11 - Using 8-bit optimizer for training
+2025-03-23 17:07:11 - Starting training epoch 0 with gradient accumulation steps: 1
+2025-03-23 17:07:11 - Total batches: 301, Batch size: 64
+2025-03-23 17:07:11 - [MEMORY] Current VRAM utilization is low (8.0%). Allocating cache tensors to increase GPU utilization.
+2025-03-23 17:07:11 - [MEMORY] Allocating additional 2743.8MB to increase GPU utilization
+2025-03-23 17:07:11 - [MEMORY] Increased VRAM utilization to 75.0%
+2025-03-23 17:09:47 - Progress: 0.3% | Batch 1/301 | Loss: 5.3694 | Rate: 104.8 tokens/sec | Opt: 8-bit | Model: uncompiled | ETA: 13.0h | VRAM: 3270.5MB/4095.7MB (79.9%)
+2025-03-23 17:09:47 - Minute 2 update | Progress: 0.3% | Batch 1/301 | ETA: 6.5h | Memory: 3270.5MB (79.9%)
+2025-03-23 17:12:05 - Progress: 0.7% | Batch 2/301 | Loss: 5.3677 | Rate: 111.5 tokens/sec | Opt: 8-bit | Model: uncompiled | ETA: 12.2h | VRAM: 3270.3MB/4095.7MB (79.8%)
+2025-03-23 17:12:05 - Minute 4 update | Progress: 0.7% | Batch 2/301 | ETA: 8.1h | Memory: 3270.3MB (79.8%)
+2025-03-23 17:14:20 - Progress: 1.0% | Batch 3/301 | Loss: 5.3419 | Rate: 114.6 tokens/sec | Opt: 8-bit | Model: uncompiled | ETA: 11.8h | VRAM: 3270.5MB/4095.7MB (79.9%)
+2025-03-23 17:14:20 - Minute 7 update | Progress: 1.0% | Batch 3/301 | ETA: 8.8h | Memory: 3270.5MB (79.9%)
