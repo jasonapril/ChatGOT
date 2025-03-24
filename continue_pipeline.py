@@ -85,7 +85,7 @@ def run_stage(stage_name):
     if stage_name == "process":
         cmd = [python_exe, "-m", "chatgot.cli.main", "process", "--config", "default"]
     elif stage_name == "train":
-        # Add optimization flags as per docs/optimizations.md
+        # Use basic command with correct Hydra override syntax
         cmd = [
             python_exe, 
             "-m", 
@@ -93,11 +93,7 @@ def run_stage(stage_name):
             "train", 
             "--config", 
             "default",
-            # Add optimization flags here - these can be made configurable
-            "--use_torch_compile",  # PyTorch 2.0+ compilation
-            "--compile_mode", "reduce-overhead",
-            "--use_activation_checkpointing",  # For reduced memory usage
-            "--use_8bit"  # 8-bit optimizer for memory efficiency
+            "+pipeline.stages=[train]"  # Using + to append to non-existent key
         ]
     elif stage_name == "generate":
         cmd = [python_exe, "-m", "chatgot.cli.main", "generate", "--config", "default"]
