@@ -1,115 +1,111 @@
-# ChatGoT - Character-level GPT for Game of Thrones Text Generation
+# ChatGoT: A Text Generation Pipeline
 
-ChatGoT is a transformer-based text generation model trained on Game of Thrones content, implementing a character-level language model with a modern training pipeline.
+ChatGoT is a comprehensive framework for training and using text generation models, featuring a complete pipeline from data preprocessing to text generation.
 
 ## Features
 
-- Character-level language modeling for more precise text generation
-- Memory-efficient transformer architecture with optimized attention mechanisms
-- Comprehensive training pipeline with automatic optimization
-- GPU acceleration with mixed precision support
-- Flexible text generation with temperature control
+- **Complete Pipeline**: End-to-end text generation solution
+- **Modular Architecture**: Easily customizable components
+- **Performance Optimization**: Built-in throughput monitoring and optimization
+- **Comprehensive Benchmarking**: Tools for measuring and comparing model performance
+- **Visualization Tools**: Real-time performance visualization
 
-## Project Structure
+## Architecture
 
-```
-ChatGoT/
-├── pipeline.py                # Main entry point for all operations
-├── run_tests.py               # Test runner script
-├── requirements.txt           # Project dependencies
-├── src/                       # Source code modules
-│   ├── data_handler.py        # Data loading and processing
-│   ├── data_processor.py      # Raw text processing
-│   ├── model.py               # Transformer model architecture
-│   ├── trainer.py             # Model training logic
-│   ├── utils.py               # Utility functions
-│   ├── batch_size_finder.py   # Batch size optimization
-│   ├── cuda_optimizations.py  # CUDA-specific optimizations
-│   └── text_generator.py      # Text generation utilities
-├── tests/                     # Testing framework
-│   ├── unit/                  # Unit tests
-│   └── integration/           # Integration tests
-├── data/                      # Raw data directory
-├── processed_data/            # Processed data storage
-└── backup/                    # Deprecated scripts (for reference)
-```
+The project is organized into several core modules:
+
+- `src/`: Main source code for model, training, and data handling
+- `pipeline/`: Orchestration system for running the complete pipeline
+- `benchmarking/`: Performance measurement and comparison tools
 
 ## Installation
 
-1. Ensure you have Python 3.8+ and PyTorch 2.0+ installed
-2. Clone this repository
-3. Install dependencies: `pip install -r requirements.txt`
+```bash
+git clone https://github.com/yourusername/ChatGoT.git
+cd ChatGoT
+pip install -r requirements.txt
+```
 
 ## Usage
 
-### Process Raw Data
+### Running the Pipeline
+
+The pipeline can be run from end-to-end or in specific stages:
 
 ```bash
-python pipeline.py --stage process --input_file data/your_text_file.txt --processed_data_path processed_data/output.pkl
+python pipeline/main.py --input-file data/input.txt --pipeline-dir runs/my_run
 ```
 
-### Optimize Training Parameters
+Key options:
+- `--stage [process|optimize|train|generate]`: Start from a specific stage
+- `--resume`: Resume from last completed stage
+- `--force-restart`: Start from the beginning, ignoring previous runs
+- `--skip-process`: Skip the data processing stage
+- `--skip-optimization`: Skip the hyperparameter optimization stage
+
+### Running Benchmarks
+
+The benchmarking system provides detailed performance metrics:
 
 ```bash
-python pipeline.py --stage optimize --processed_data_path processed_data/your_data.pkl
+python benchmarking/runner.py --output-dir benchmark_results/my_benchmark
 ```
 
-### Train the Model
+Key options:
+- `--benchmarks [training_speed inference_performance model_accuracy]`: Specify which benchmarks to run
+- `--baseline-file previous_benchmark.json`: Compare with previous results
+- `--model-checkpoint runs/my_run/train/model.pt`: Model to benchmark
 
-```bash
-python pipeline.py --stage train --processed_data_path processed_data/your_data.pkl
-```
+## Benchmarking
 
-### Generate Text
+The benchmarking system measures and reports on:
 
-```bash
-python pipeline.py --stage generate --processed_data_path processed_data/your_data.pkl --generate_seed "In the seven kingdoms, " --generate_length 200
-```
+### Training Performance
+- Throughput (samples/second)
+- Memory usage
+- Component timing breakdown
+- Optimal batch size determination
 
-### Run the Full Pipeline
+### Inference Performance
+- Token generation speed
+- First token and subsequent token latency
+- Batch size scaling
+- Memory usage during generation
 
-```bash
-python pipeline.py --input_file data/your_text_file.txt
-```
+### Model Accuracy
+- Perplexity on validation data
+- Token prediction accuracy
+- Text quality metrics
 
-### Skip Stages
+## Pipeline Architecture
 
-You can skip stages if you've already completed them:
+The pipeline consists of four main stages:
 
-```bash
-python pipeline.py --skip_process --processed_data_path processed_data/your_data.pkl
-```
+1. **Process**: Data preprocessing, tokenization, and dataset creation
+2. **Optimize**: Hyperparameter optimization for best model configuration
+3. **Train**: Model training with optimized parameters
+4. **Generate**: Text generation with the trained model
 
-## Testing
+## Documentation
 
-Run all tests:
+Detailed documentation is available in the `docs/` directory:
 
-```bash
-python run_tests.py
-```
+- [Organization](docs/organization.md): Overview of the project structure and components
+- [Optimizations](docs/optimizations.md): Performance optimization techniques implemented in the project
 
-## Model Architecture
+## Monitoring
 
-ChatGoT uses a standard GPT-2 Small architecture with:
-- Character-level embeddings
-- Multi-head self-attention
-- Transformer encoder layers
-- Memory-efficient implementation options
+Real-time monitoring is available during training:
 
-## Performance Optimization
-
-The pipeline automatically:
-- Determines optimal batch size
-- Enables mixed precision when available
-- Optimizes CUDA operations
-- Implements gradient accumulation for larger effective batch sizes
-
-For advanced optimization techniques and experiments, see [OPTIMIZATIONS.md](OPTIMIZATIONS.md).
-
-## Requirements
-
-See `requirements.txt` for full dependencies.
+- Performance metrics (samples/second)
+- Memory usage tracking
+- Component-level timing (data loading, forward pass, backward pass, etc.)
+- Interactive visualizations
 
 ## License
 
-[MIT License](LICENSE)
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

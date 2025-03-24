@@ -1,0 +1,34 @@
+# Default Data Configuration for ChatGoT
+
+# Dataset
+dataset:
+  name: got_char  # Name of the dataset
+  type: character  # character or token level
+  split_ratio: 0.9  # Train/validation split ratio
+  shuffle: true  # Whether to shuffle the data
+  
+# Processing
+processing:
+  lowercase: false  # Whether to lowercase the text
+  remove_special_chars: false  # Whether to remove special characters
+  min_frequency: 1  # Minimum frequency to include a character/token
+  max_vocab_size: 256  # Maximum vocabulary size
+  padding_token: 0  # Padding token ID
+  unknown_token: 1  # Unknown token ID
+  
+# Dataloader
+dataloader:
+  num_workers: ${system.num_workers}  # Number of workers
+  pin_memory: ${system.pin_memory}  # Whether to use pinned memory
+  drop_last: false  # Whether to drop the last incomplete batch
+  prefetch_factor: 2  # Number of samples loaded in advance by each worker
+  
+# Augmentation
+augmentation:
+  enabled: false  # Whether to use data augmentation
+  techniques: []  # List of augmentation techniques to use
+  
+# Caching
+caching:
+  enabled: true  # Whether to cache processed data
+  refresh: false  # Whether to force refresh the cache 

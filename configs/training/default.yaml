@@ -1,0 +1,54 @@
+# Default Training Configuration for ChatGoT
+
+# Training parameters
+epochs: 5
+batch_size: 64
+sequence_length: 1024
+learning_rate: 5.0e-5
+weight_decay: 0.01
+clip_grad_norm: 1.0
+save_every: 1  # Save checkpoint every N epochs
+eval_every: 0.5  # Evaluate every N epochs (can be fractional)
+
+# Optimizer
+optimizer:
+  name: adamw  # adamw, adam, sgd
+  beta1: 0.9
+  beta2: 0.999
+  eps: 1.0e-8
+
+# Learning rate scheduler
+scheduler:
+  name: cosine  # cosine, linear, constant
+  warmup_ratio: 0.1  # Fraction of training for warmup
+  min_lr_ratio: 0.1  # Minimum learning rate as fraction of max
+
+# Mixed precision
+mixed_precision:
+  enabled: true  # Whether to use mixed precision
+  dtype: float16  # float16, bfloat16
+
+# Checkpointing
+checkpoint:
+  save_best: true  # Whether to save best model
+  metric: loss     # Metric to track for best model
+  mode: min        # min or max for metric comparison
+  patience: 3      # Early stopping patience (0 to disable)
+
+# Gradient accumulation
+gradient_accumulation:
+  enabled: false  # Whether to use gradient accumulation
+  steps: 1        # Number of steps to accumulate gradients
+
+# Distributed training
+distributed:
+  enabled: false  # Whether to use distributed training
+  backend: nccl   # nccl, gloo
+  world_size: -1  # Number of processes (-1 for auto)
+  find_unused_parameters: false  # Whether to find unused parameters
+
+# Profiling
+profiling:
+  enabled: false  # Whether to enable profiling
+  start_step: 10  # Step to start profiling
+  end_step: 20    # Step to end profiling 

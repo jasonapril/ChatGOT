@@ -1,0 +1,55 @@
+# Fast Training Configuration for ChatGoT
+# Intended for quick iterations and testing
+
+# Training parameters
+epochs: 1
+batch_size: 32
+sequence_length: 512 # Reduced sequence length for faster training
+learning_rate: 1.0e-4 # Higher learning rate for faster convergence
+weight_decay: 0.0 # Disable weight decay for speed
+clip_grad_norm: 1.0
+save_every: 1 # Save checkpoint every epoch
+eval_every: 1.0 # Evaluate after each epoch
+
+# Optimizer
+optimizer:
+  name: adam # adam instead of adamw for speed
+  beta1: 0.9
+  beta2: 0.999
+  eps: 1.0e-8
+
+# Learning rate scheduler
+scheduler:
+  name: constant # No scheduler for simplicity
+  warmup_ratio: 0.0
+  min_lr_ratio: 1.0
+
+# Mixed precision
+mixed_precision:
+  enabled: true
+  dtype: float16
+
+# Checkpointing
+checkpoint:
+  save_best: false # Don't track best model for speed
+  metric: loss
+  mode: min
+  patience: 0 # Disable early stopping
+
+# Gradient accumulation
+gradient_accumulation:
+  enabled: false
+  steps: 1
+
+# Distributed training
+distributed:
+  enabled: false
+  backend: nccl
+  world_size: -1
+  find_unused_parameters: false
+
+# Profiling
+profiling:
+  enabled: false
+  start_step: 10
+  end_step: 20 
