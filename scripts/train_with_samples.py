@@ -271,8 +271,11 @@ def setup_tensorboard(config, config_name=None, log_file=None):
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     experiment_name = config.get('experiment_name', config_name or 'default')
     
-    log_dir = os.path.join(config.get('logging', {}).get('log_dir', 'runs'), 
-                         f"{experiment_name}_{timestamp}")
+    # Ensure the logs directory exists
+    os.makedirs("logs/tensorboard", exist_ok=True)
+    
+    # Always use logs/tensorboard, ignoring any config setting
+    log_dir = os.path.join('logs/tensorboard', f"{experiment_name}_{timestamp}")
     writer = SummaryWriter(log_dir=log_dir)
     
     # Log the tensorboard directory
@@ -1029,10 +1032,10 @@ def train_with_samples(
                                 f"Max: {memory_stats['max_allocated']:.1f} MB / {memory_stats['total']:.1f} MB "
                                 f"({memory_stats['max_allocated']/memory_stats['total']*100:.1f}%)")
                     
-                    writer.add_scalar('system/gpu_memory_used_mb', memory_stats['allocated'], global_step)
-                    writer.add_scalar('system/gpu_memory_percent', 
-                                     memory_stats['allocated']/memory_stats['total']*100, 
-                                     global_step)
+                writer.add_scalar('system/gpu_memory_used_mb', memory_stats['allocated'], global_step)
+                writer.add_scalar('system/gpu_memory_percent', 
+                                 memory_stats['allocated']/memory_stats['total']*100, 
+                                 global_step)
                 
                 # Add more comprehensive OOM protection, with memory cleanup
                 if batch_idx % 500 == 0 and device.type == 'cuda':
