@@ -1,139 +1,81 @@
-# ChatGoT Project Organization
-
-This document outlines the organization of the ChatGoT project, providing guidance on where various components are located and how they interact.
+# Project Organization
 
 ## Directory Structure
 
-The project follows a modular organization with clearly separated concerns:
-
 ```
-ChatGoT/
-├── benchmarking/             # Benchmarking framework and results
-│   ├── benchmarks/           # Individual benchmark definitions
-│   ├── logs/                 # Benchmark runtime logs
-│   ├── results/              # Benchmark result data and summaries
-│   └── utils/                # Benchmark utilities and helpers
-├── data/                     # Raw training data
-├── pipeline/                 # Pipeline framework
-│   ├── core/                 # Core pipeline functionality
-│   ├── process/              # Data processing stage
-│   ├── optimize/             # Optimization stage
-│   ├── train/                # Training stage
-│   ├── generate/             # Text generation stage
-│   └── stages/               # Stage definitions
-├── processed_data/           # Processed and prepared datasets
-├── src/                      # Core library code
-│   ├── monitoring/           # Performance monitoring
-│   │   ├── throughput_core.py    # Core throughput monitoring
-│   │   ├── instrumentation.py    # Model instrumentation
-│   │   └── visualization.py      # Visualization tools
-│   ├── training/             # Training components
-│   │   ├── training_loop.py      # Core training loop
-│   │   ├── evaluation.py         # Model evaluation
-│   │   ├── generation.py         # Text generation
-│   │   ├── optimizations.py      # Training optimizations
-│   │   └── train_config.py       # Training configuration
-│   └── benchmarks/           # Framework benchmark implementations
-├── tests/                    # Test suite
-│   ├── unit/                 # Unit tests
-│   ├── integration/          # Integration tests
-│   └── run_all_tests.py      # Unified test runner
-└── requirements.txt          # Project dependencies
+.
+├── configs/                    # Configuration files
+│   ├── models/                # Model configurations
+│   │   ├── chatgot_small_char.yaml  # Character-level model based on GPT-2 small
+│   │   └── gpt2_small.yaml   # Standard GPT-2 small model
+│   ├── data/                  # Data processing configurations
+│   └── experiments/           # Experiment configurations
+├── data/                      # Data directory
+│   ├── raw/                   # Raw data files
+│   └── processed/             # Processed data files
+├── docs/                      # Documentation
+│   ├── organization.md       # This file
+│   └── experiments/          # Experiment documentation
+├── scripts/                   # Utility scripts
+│   ├── chatgot              # CLI entry point
+│   ├── continue_pipeline.py  # Pipeline continuation script
+│   └── train_with_samples.py # Training script with sample generation
+├── src/                      # Source code
+│   ├── cli/                 # CLI implementation
+│   ├── data/                # Data handling
+│   ├── experiments/         # Experiment framework
+│   ├── models/              # Model implementations
+│   ├── training/            # Training utilities
+│   └── utils/               # Utility functions
+├── tests/                   # Test files
+├── .github/                 # GitHub configuration
+├── pyproject.toml          # Project configuration
+└── README.md               # Project documentation
 ```
 
 ## Key Components
 
-### Core Modules
+### Models
+- `chatgot_small_char`: Character-level language model based on GPT-2 small architecture
+- `gpt2_small`: Standard GPT-2 small model with subword tokenization
 
-1. **src/monitoring/**
-   - Contains tools for performance monitoring, instrumentation, and visualization
-   - `throughput_core.py`: Core classes for tracking training throughput
-   - `instrumentation.py`: Instruments PyTorch models for detailed metrics
-   - `visualization.py`: Creates visualizations of performance data
+### Configuration Files
+- Model configurations in `configs/models/`
+- Data processing configurations in `configs/data/`
+- Experiment configurations in `configs/experiments/`
 
-2. **src/training/**
-   - Contains the model training infrastructure
-   - `training_loop.py`: Efficient training loop implementation
-   - `evaluation.py`: Model evaluation utilities
-   - `generation.py`: Text generation functionality
-   - `optimizations.py`: Performance optimizations for training
-   - `train_config.py`: Training configuration management
+### Training
+- Main training script: `scripts/train_with_samples.py`
+- CLI interface: `scripts/chatgot`
+- Pipeline continuation: `scripts/continue_pipeline.py`
 
-### Pipeline Framework
+### Data Processing
+- Data loading and preprocessing in `src/data/`
+- Tokenization and dataset creation utilities
 
-The pipeline framework provides a modular, resumable training pipeline:
+### Experiment Framework
+- Experiment runner in `src/experiments/`
+- MLflow integration for tracking
+- Resource monitoring
 
-1. **pipeline/core/** - Central pipeline management
-2. **pipeline/stages/** - Pipeline stage definitions
-3. **pipeline/process**, **pipeline/optimize**, etc. - Stage-specific implementations
+## Development Guidelines
 
-### Benchmarking
+1. **Configuration Management**
+   - Use YAML files in `configs/` for all configurations
+   - Follow the established naming convention for model configs
+   - Document all configuration parameters
 
-The benchmarking system provides tools for measuring and comparing performance:
+2. **Code Organization**
+   - Keep related functionality together
+   - Use clear, descriptive names
+   - Follow Python best practices
 
-1. **benchmarking/benchmarks/** - Specific benchmark definitions
-2. **benchmarking/results/** - Benchmark result data and summaries
-3. **benchmarking/logs/** - Detailed logs from benchmark runs
+3. **Testing**
+   - Write tests for new features
+   - Maintain test coverage
+   - Use pytest for testing
 
-### Testing
-
-The testing framework provides comprehensive test coverage:
-
-1. **tests/unit/** - Unit tests for individual components
-2. **tests/integration/** - Tests for component interactions
-3. **tests/run_all_tests.py** - Unified test runner
-
-## Usage Guidance
-
-### Running Tests
-
-Use the unified test runner:
-
-```bash
-python tests/run_all_tests.py
-```
-
-Run specific tests or test modules:
-
-```bash
-python tests/run_all_tests.py --test test_save_monitor_stats
-python tests/run_all_tests.py --module test_instrumentation
-```
-
-### Running the Pipeline
-
-Use the main pipeline interface:
-
-```bash
-python pipeline/main.py --input_file data/your_dataset.txt
-```
-
-Resume an interrupted pipeline:
-
-```bash
-python pipeline/main.py --resume
-```
-
-### Running Benchmarks
-
-Use the benchmark runner:
-
-```bash
-python benchmarking/main.py
-```
-
-Run specific benchmarks:
-
-```bash
-python benchmarking/main.py --benchmark training_throughput
-```
-
-## Design Principles
-
-The project follows these key design principles:
-
-1. **Modularity**: Components are separated by concern and can be used independently
-2. **Encapsulation**: Implementation details are hidden behind clean interfaces
-3. **Testability**: All components are designed to be easily testable
-4. **Instrumentation**: Performance metrics are collected throughout the system
-5. **Configurability**: Components are configurable via clear parameter interfaces 
+4. **Documentation**
+   - Update docs when making changes
+   - Document new models and configurations
+   - Keep experiment documentation current 

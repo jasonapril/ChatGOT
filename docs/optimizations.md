@@ -8,6 +8,133 @@ This document tracks optimization techniques implemented or planned for the Chat
 2. **Reduce memory usage** to enable larger batch sizes
 3. **Improve convergence** to reach better loss with same compute budget
 
+## Currently Implemented Optimizations
+
+| ID | Technique | Status | Memory Impact | Performance Impact |
+|----|-----------|--------|---------------|-------------------|
+| 01 | Mixed Precision Training | Implemented | Reduced | Faster computation |
+| 02 | Gradient Checkpointing | Implemented | Greatly Reduced | Slight slowdown, enables larger models |
+| 03 | Gradient Accumulation | Implemented | Neutral | Simulates larger batch sizes |
+| 04 | Memory Optimization Settings | Implemented | Reduced | Prevents OOM errors |
+
+## Planned Optimizations
+
+| ID | Technique | Status | Implementation Difficulty | Notes |
+|----|-----------|--------|---------------------------|-------|
+| 05 | PyTorch 2.0+ Compilation | Planned | Easy | Use `torch.compile()` with different modes |
+| 06 | Flash Attention 2 | Planned | Medium | Requires additional package, custom attention impl |
+| 07 | 8-bit Optimizers | Planned | Easy | Requires bitsandbytes package |
+| 08 | Activation Function Experiments | Planned | Medium | Try SwiGLU, GeGLU alternatives |
+| 09 | CPU Offloading | Planned | Medium | Offload optimizer states to CPU |
+| 10 | Model Parallelism | Planned | Hard | Split model across multiple GPUs |
+
+## Current Implementation Details
+
+### 1. Mixed Precision Training
+
+Mixed precision training uses both FP16 and FP32 formats to reduce memory usage and increase computation speed.
+
+```python
+# Implemented in train_with_samples.py
+from torch.amp import GradScaler, autocast
+
+# GradScaler for mixed precision training
+scaler = GradScaler(device_type='cuda' if device.type == 'cuda' else 'cpu', enabled=use_amp)
+
+# In training loop
+with autocast(device_type=device.type, dtype=torch.float16):
+    logits, loss = model(x, y)
+    
+# Backward pass with mixed precision
+scaler.scale(loss).backward()
+scaler.unscale_(optimizer)
+torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+scaler.step(optimizer)
+scaler.update()
+```
+
+### 2. Gradient Checkpointing
+
+Gradient checkpointing trades computation for memory by not storing all activations during the forward pass.
+
+```python
+# Implemented in train_with_samples.py
+if training_config.get('gradient_checkpointing', False):
+    logger.info("Enabling gradient checkpointing for memory efficiency")
+    
+    # Manual implementation for TransformerDecoder
+    for layer in model.transformer_decoder.layers:
+        # Wrap forward methods with checkpointing
+        layer.original_forward = layer.forward
+        layer.forward = lambda *args, **kwargs: torch.utils.checkpoint.checkpoint(
+            layer.original_forward, *args, **kwargs)
+```
+
+### 3. Gradient Accumulation
+
+Gradient accumulation allows simulation of larger batch sizes by accumulating gradients over multiple forward passes.
+
+```python
+# Implemented in train_with_samples.py
+accumulate_grad_batches = training_config.get('accumulate_grad_batches', 1)
+
+# Scale loss for gradient accumulation
+if accumulate_grad_batches > 1:
+    loss = loss / accumulate_grad_batches
+
+# Only update weights on non-accumulation steps
+if (batch_idx + 1) % accumulate_grad_batches == 0 or (batch_idx + 1 == len(train_loader)):
+    # Apply optimizer step and zero gradients
+```
+
+### 4. Memory Optimization Settings
+
+Various CUDA memory optimizations to prevent out-of-memory errors.
+
+```python
+# Implemented in train_with_samples.py
+# Set memory optimization settings
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+# Empty cache before starting
+torch.cuda.empty_cache()
+
+# Set environment variables for memory optimization
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+```
+
+## Hardware Configuration
+
+Current development and testing is done on:
+- GTX 1650 Ti (4GB VRAM)
+- Windows 10
+- Python 3.8+
+- PyTorch 2.0+
+
+## Testing New Optimizations
+
+To test a new optimization:
+
+1. Implement the optimization in the training script
+2. Run a baseline test without the optimization
+3. Run a test with the optimization enabled
+4. Compare throughput (tokens/sec) and memory usage
+
+Example command:
+```bash
+python scripts/train_with_samples.py --config_path configs/models/chatgot_small_char.yaml --device cuda
+```
+
+## Current Results and Limitations
+
+- Small models (~85M parameters) can be trained with batch size 8 on 4GB GPU
+- Using gradient accumulation with 8 steps simulates a batch size of 64
+- Gradient checkpointing reduces memory usage by ~30-60%
+- Mixed precision reduces memory usage by ~30-50% and increases speed
+- Current throughput: ~500-1000 tokens/sec on GTX 1650 Ti
+
 ## Experiment Tracking
 
 | ID | Technique | Status | Baseline Throughput | Optimized Throughput | Memory Impact | Implementation Difficulty | Notes |

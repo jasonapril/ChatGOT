@@ -1,44 +1,35 @@
-# Default Pipeline Configuration for ChatGoT
+# Default Pipeline Configuration
 
-# Pipeline control
 pipeline:
-  stages: [process, optimize, train, generate]  # Stages to run
-  resume: false  # Whether to resume pipeline from last stage
-  force_restart: false  # Whether to force restart the pipeline
-  parallel: false  # Whether to run stages in parallel when possible
-
-# Process stage
-process:
-  enabled: true  # Whether to run this stage
-  output_file: ${paths.processed_data}  # Output file for processed data
+  # Pipeline stages
+  stages:
+    - preprocess
+    - train
+    - evaluate
+    - generate
   
-# Optimize stage
-optimize:
-  enabled: true  # Whether to run this stage
-  strategy: bayesian  # Optimization strategy: grid, random, bayesian
-  metric: throughput  # Metric to optimize: throughput, memory, loss
-  trials: 10  # Number of trials
-  timeout: 600  # Timeout in seconds for optimization
-  parameters:  # Parameters to optimize
-    batch_size:
-      min: 1
-      max: 256
-      step: 1
-      distribution: log  # Distribution for sampling: uniform, log
-    
-# Train stage
-train:
-  enabled: true  # Whether to run this stage
-  use_optimized_params: true  # Whether to use parameters from optimize stage
+  # Stage-specific settings
+  preprocess:
+    clean_data: true
+    tokenize: true
+    create_splits: true
   
-# Generate stage
-generate:
-  enabled: true  # Whether to run this stage
-  num_samples: 5  # Number of text samples to generate
-  max_length: 500  # Maximum length of generated text
-  temperature: 0.8  # Temperature for sampling
-  top_k: 50  # Top-k sampling parameter
-  top_p: 0.95  # Top-p (nucleus) sampling parameter
-  seed_text: "TYRION: "  # Seed text for generation
-  repetition_penalty: 1.1  # Penalty for repeated tokens
-  output_file: ${paths.output_dir}/samples.txt  # Output file for generated text 
+  train:
+    resume: true  # Resume from checkpoint if available
+    validate: true  # Run validation during training
+    save_checkpoints: true
+  
+  evaluate:
+    metrics:
+      - loss
+      - perplexity
+    generate_samples: true
+    num_samples: 5
+  
+  generate:
+    max_length: 100
+    temperature: 0.8
+    top_k: 40
+    top_p: 0.9
+    num_return_sequences: 1
+    seed_text: "The" 

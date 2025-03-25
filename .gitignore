@@ -19,63 +19,35 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# Environment
+# Virtual Environment
 .env
 .venv
 env/
 venv/
 ENV/
-env.bak/
-venv.bak/
-.python-version
 
-# Distribution / packaging
-.Python
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# PyCharm
+# IDE
 .idea/
-*.iml
 .vscode/
-
-# Jupyter Notebook
-.ipynb_checkpoints
+*.swp
+*.swo
+.cursor/
 
 # Project specific
-data/processed/
-models/
-outputs/
-logs/
-checkpoints/
-mlruns/
+data/
+processed_data/
 runs/
+checkpoints/
+models/
+*.pth
+*.pt
+*.ckpt
+*.bin
+*.log
+mlruns/
+outputs/
 
-# Config overrides
-configs/local.yaml
-
-# OS specific
+# OS
 .DS_Store
 Thumbs.db 

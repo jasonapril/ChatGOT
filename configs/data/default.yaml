@@ -1,3 +1,29 @@
+# Default Data Configuration
+
+data:
+  # Dataset parameters
+  train_size: 0.9  # Fraction of data for training
+  val_size: 0.1    # Fraction of data for validation
+  sequence_length: 1024  # Length of input sequences
+  stride: 512  # Stride for sliding window
+  batch_size: 32  # Batch size for training
+  num_workers: 4  # Number of workers for data loading
+  pin_memory: true  # Use pinned memory for faster data loading
+  
+  # Tokenizer parameters
+  tokenizer:
+    type: character  # Character-level tokenization
+    special_tokens:
+      pad_token: " "
+      unk_token: "?"
+      bos_token: "^"
+      eos_token: "$"
+    
+  # Data augmentation
+  augmentation:
+    enabled: false  # Whether to use data augmentation
+    methods: []  # List of augmentation methods to use
+
 # Default Data Configuration for ChatGoT
 
 # Dataset

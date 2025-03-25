@@ -1,9 +1,0 @@
-2025-03-23 12:01:09 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-120109\training.log
-2025-03-23 12:01:09 - === LOGGING STARTED AT 2025-03-23 12:01:09 ===
-2025-03-23 12:01:09 - Logger initialized with console and file output
-2025-03-23 12:01:10 - Random seed set to 42 for reproducibility
-2025-03-23 12:01:10 - Arguments saved to runs\run_20250323-120109\args.json
-2025-03-23 12:01:10 - Using CPU (CUDA not available)
-2025-03-23 12:01:10 - ================================================================================
-2025-03-23 12:01:10 -                                   LOADING DATA                                  
-2025-03-23 12:01:10 - ================================================================================

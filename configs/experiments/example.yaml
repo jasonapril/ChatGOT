@@ -1,0 +1,71 @@
+name: "attention_variants"
+description: "Compare different attention mechanisms"
+version: "1.0.0"
+
+# Model configurations to test
+models:
+  - name: "standard_attention"
+    config: "configs/models/gpt2_small.yaml"
+    params:
+      attention_type: "standard"
+      n_head: 12
+      n_layer: 12
+      n_embd: 768
+
+  - name: "memory_efficient"
+    config: "configs/models/gpt2_small.yaml"
+    params:
+      attention_type: "memory_efficient"
+      n_head: 12
+      n_layer: 12
+      n_embd: 768
+
+  - name: "sparse_attention"
+    config: "configs/models/gpt2_small.yaml"
+    params:
+      attention_type: "sparse"
+      n_head: 12
+      n_layer: 12
+      n_embd: 768
+      sparsity_factor: 0.1
+
+# Training configurations
+training:
+  epochs: 10
+  batch_size: 32
+  learning_rate: 1e-4
+  mixed_precision: true
+  gradient_checkpointing: true
+
+# Metrics to track
+metrics:
+  - name: "tokens_per_second"
+    type: "throughput"
+    interval: 100  # batches
+
+  - name: "memory_usage"
+    type: "resource"
+    interval: 100  # batches
+
+  - name: "loss"
+    type: "training"
+    interval: 1  # batches
+
+  - name: "perplexity"
+    type: "evaluation"
+    interval: 1  # epochs
+
+# Resource monitoring
+monitoring:
+  gpu_utilization: true
+  memory_usage: true
+  power_usage: true
+  temperature: true
+
+# Output configuration
+output:
+  save_checkpoints: true
+  save_samples: true
+  log_metrics: true
+  tensorboard: true
+  mlflow: true 

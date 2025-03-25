@@ -1,1 +1,1 @@
-"""Data configuration module.""" 
+"""Data configurations.""" 

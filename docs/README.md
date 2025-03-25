@@ -1,12 +1,14 @@
 # ChatGoT Documentation
 
-This directory contains documentation for the ChatGoT project. 
+This directory contains detailed documentation for the ChatGoT project.
 
-## Available Documentation
+## Contents
 
-- [Organization](./organization.md) - Overview of the project's structure and organization
-- [Optimizations](./optimizations.md) - Details about performance optimizations implemented in the project
+- [Organization](organization.md): Overview of the project structure and components
+- [Optimizations](optimizations.md): Performance optimization techniques implemented in the project
 
-## Additional Resources
+## Getting Started
 
-For getting started with the project, please refer to the main [README.md](../README.md) in the project root. 
+1. Read the [Organization](organization.md) guide to understand the project structure
+2. Review the [Optimizations](optimizations.md) document to learn about performance features
+3. Check the main [README](../README.md) for installation and usage instructions 

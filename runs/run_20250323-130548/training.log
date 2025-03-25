@@ -1,9 +1,0 @@
-2025-03-23 13:05:48 - Logging to file: C:\Users\nimbu\Desktop\Code\AI\ChatGoT\runs\run_20250323-130548\training.log
-2025-03-23 13:05:48 - === LOGGING STARTED AT 2025-03-23 13:05:48 ===
-2025-03-23 13:05:48 - Logger initialized with console and file output
-2025-03-23 13:05:49 - Random seed set to 42 for reproducibility
-2025-03-23 13:05:49 - Arguments saved to runs\run_20250323-130548\args.json
-2025-03-23 13:05:49 - Using GPU: NVIDIA GeForce GTX 1650 Ti
-2025-03-23 13:05:49 - Number of GPUs: 1
-2025-03-23 13:05:49 - CUDA Version: 11.8
-2025-03-23 13:05:49 - GPU Memory: 4.00 GB (Free: 3.23 GB)

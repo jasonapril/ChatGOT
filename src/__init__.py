@@ -1,21 +1,20 @@
 """
 ChatGoT: Character-Level Transformer for Game of Thrones Text Generation
-========================================================================
 
-This package implements a character-level transformer model for generating
-Game of Thrones style text, optimized for NVIDIA GPUs.
+A framework for experimenting with language models and AI architectures.
 """
 
 __version__ = "1.0.0"
 __author__ = "ChatGoT Team"
 
 # Import key components for easier access
-from .model import create_transformer_model, TransformerModel
-from .trainer import train_epoch, evaluate, generate_text, sample_text
-from .data_handler import load_data
-from .memory_management import get_memory_optimized_settings, preallocate_gpu_memory
-from .logger import setup_logger, log_section_header, force_flush_logs, format_time
-from .utils import (
+from .models.transformer import create_transformer_model, TransformerModel
+from .utils.generation import generate_sample_text, sample_text
+from .data.dataset import CharDataset, load_data
+from .utils.memory import get_memory_optimized_settings, preallocate_gpu_memory
+from .utils.metrics import calculate_tokens_per_second, calculate_perplexity
+from .utils.logging import setup_logger, log_section_header, force_flush_logs, format_time
+from .utils.common import (
     set_seed,
     setup_device,
     save_checkpoint,

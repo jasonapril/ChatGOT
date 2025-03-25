@@ -1,111 +1,138 @@
-# ChatGoT: A Text Generation Pipeline
+# ChatGoT
 
-ChatGoT is a comprehensive framework for training and using text generation models, featuring a complete pipeline from data preprocessing to text generation.
+An experimental framework for exploring and developing language models and other AI architectures.
+
+## Project Goals
+
+1. **Architecture Exploration**
+   - Experiment with different model architectures
+   - Compare performance and efficiency
+   - Develop novel approaches
+
+2. **Performance Optimization**
+   - Memory efficiency
+   - Training speed
+   - Resource utilization
+
+3. **Novel Applications**
+   - Character-level language modeling
+   - Efficient attention mechanisms
+   - Custom tokenization schemes
+
+4. **Research Platform**
+   - Reproducible experiments
+   - Comprehensive monitoring
+   - Extensible framework
+
+## Project Structure
+
+```
+.
+├── configs/                    # Configuration files
+│   ├── models/                # Model configurations
+│   ├── data/                  # Data processing configurations
+│   └── experiments/           # Experiment configurations
+├── data/                      # Data directory
+├── docs/                      # Documentation
+├── scripts/                   # Utility scripts
+├── src/                      # Source code
+└── tests/                   # Test files
+```
 
 ## Features
 
-- **Complete Pipeline**: End-to-end text generation solution
-- **Modular Architecture**: Easily customizable components
-- **Performance Optimization**: Built-in throughput monitoring and optimization
-- **Comprehensive Benchmarking**: Tools for measuring and comparing model performance
-- **Visualization Tools**: Real-time performance visualization
+### Model Architectures
+- Character-level language models
+- Standard transformer architectures
+- Custom attention mechanisms
+- Efficient training optimizations
 
-## Architecture
+### Training and Optimization
+- Mixed precision training
+- Gradient checkpointing
+- Memory-efficient attention
+- Custom learning rate schedules
 
-The project is organized into several core modules:
-
-- `src/`: Main source code for model, training, and data handling
-- `pipeline/`: Orchestration system for running the complete pipeline
-- `benchmarking/`: Performance measurement and comparison tools
+### Development Tools
+- Comprehensive CLI
+- Experiment tracking
+- Resource monitoring
+- Performance profiling
 
 ## Installation
 
-```bash
-git clone https://github.com/yourusername/ChatGoT.git
-cd ChatGoT
-pip install -r requirements.txt
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/ChatGoT.git
+   cd ChatGoT
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -e ".[dev]"
+   ```
 
 ## Usage
 
-### Running the Pipeline
-
-The pipeline can be run from end-to-end or in specific stages:
+### Training a Model
 
 ```bash
-python pipeline/main.py --input-file data/input.txt --pipeline-dir runs/my_run
+# Train character-level model
+chatgot train --config-path configs/models/chatgot_small_char.yaml
+
+# Train standard GPT-2 model
+chatgot train --config-path configs/models/gpt2_small.yaml
 ```
 
-Key options:
-- `--stage [process|optimize|train|generate]`: Start from a specific stage
-- `--resume`: Resume from last completed stage
-- `--force-restart`: Start from the beginning, ignoring previous runs
-- `--skip-process`: Skip the data processing stage
-- `--skip-optimization`: Skip the hyperparameter optimization stage
-
-### Running Benchmarks
-
-The benchmarking system provides detailed performance metrics:
+### Generating Text
 
 ```bash
-python benchmarking/runner.py --output-dir benchmark_results/my_benchmark
+chatgot generate --model-path path/to/model --prompt "Your prompt here"
 ```
 
-Key options:
-- `--benchmarks [training_speed inference_performance model_accuracy]`: Specify which benchmarks to run
-- `--baseline-file previous_benchmark.json`: Compare with previous results
-- `--model-checkpoint runs/my_run/train/model.pt`: Model to benchmark
+### Running Experiments
 
-## Benchmarking
+```bash
+chatgot experiment --config-path configs/experiments/example.yaml
+```
 
-The benchmarking system measures and reports on:
+## Configuration Management
 
-### Training Performance
-- Throughput (samples/second)
-- Memory usage
-- Component timing breakdown
-- Optimal batch size determination
+We use Hydra for configuration management. Key configuration files:
 
-### Inference Performance
-- Token generation speed
-- First token and subsequent token latency
-- Batch size scaling
-- Memory usage during generation
+- `configs/models/`: Model architectures and hyperparameters
+- `configs/data/`: Data processing and tokenization settings
+- `configs/experiments/`: Experiment configurations and comparisons
 
-### Model Accuracy
-- Perplexity on validation data
-- Token prediction accuracy
-- Text quality metrics
+## Development
 
-## Pipeline Architecture
+### Running Tests
+```bash
+pytest
+```
 
-The pipeline consists of four main stages:
+### Code Formatting
+```bash
+black .
+isort .
+```
 
-1. **Process**: Data preprocessing, tokenization, and dataset creation
-2. **Optimize**: Hyperparameter optimization for best model configuration
-3. **Train**: Model training with optimized parameters
-4. **Generate**: Text generation with the trained model
+## Experiment Tracking
 
-## Documentation
+We use MLflow for tracking:
+- Training metrics
+- Model parameters
+- System resources
+- Generated samples
 
-Detailed documentation is available in the `docs/` directory:
+## Contributing
 
-- [Organization](docs/organization.md): Overview of the project structure and components
-- [Optimizations](docs/optimizations.md): Performance optimization techniques implemented in the project
-
-## Monitoring
-
-Real-time monitoring is available during training:
-
-- Performance metrics (samples/second)
-- Memory usage tracking
-- Component-level timing (data loading, forward pass, backward pass, etc.)
-- Interactive visualizations
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.

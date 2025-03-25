@@ -1,1 +1,1 @@
-"""Pipeline configuration module.""" 
+"""Pipeline configurations.""" 
