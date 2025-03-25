@@ -1,0 +1,40 @@
+# Configuration for ChatGoT Tiny model (much smaller than GPT-2 Small)
+# Designed for limited GPU memory environments
+
+architecture: gpt
+vocab_size: 95  # Character-level vocabulary
+d_model: 128     # Embedding dimension (reduced from 768)
+n_layers: 6      # Number of transformer layers (reduced from 12)
+n_head: 4        # Number of attention heads (reduced from 12)
+d_hid: 512       # Hidden dimension (reduced from 3072)
+dropout: 0.1     # Dropout rate
+activation: gelu # Activation function
+layer_norm_eps: 1.0e-5  # Layer norm epsilon
+bias: true       # Use bias in linear layers
+
+# Model initialization
+initialization:
+  method: normal    # Normal initialization
+  mean: 0.0         # Mean for normal distribution
+  std: 0.02         # Standard deviation for initialization
+
+# Positional encoding
+positional_encoding:
+  type: learned     # Learned positional embeddings
+  max_length: 512   # Maximum sequence length (reduced from 1024)
+
+# Additional parameters
+n_positions: 512    # Reduced from 1024
+embd_pdrop: 0.1
+attn_pdrop: 0.1
+initializer_range: 0.02
+scale_attn_weights: true
+use_cache: true
+
+# Training specific parameters
+training:
+  batch_size: 16    # Reduced batch size
+  learning_rate: 0.0005
+  weight_decay: 0.01
+  mixed_precision: true
+  gradient_checkpointing: true 

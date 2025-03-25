@@ -1,0 +1,25 @@
+# Small Model Configuration for ChatGoT
+# Suitable for faster training or lower resource environments
+
+# Model architecture
+architecture: gpt
+vocab_size: 256  # Character-level so we use 256 as default
+d_model: 384     # Embedding dimension (reduced)
+n_layers: 6      # Number of transformer layers (reduced)
+n_head: 6        # Number of attention heads (reduced)
+d_hid: 1536      # Hidden dimension of feedforward layers (reduced)
+dropout: 0.1     # Dropout rate
+activation: gelu # Activation function (gelu, relu, swish)
+layer_norm_eps: 1.0e-5  # Layer normalization epsilon
+bias: true       # Whether to use bias in Linear layers
+
+# Model initialization
+init:
+  method: normal  # normal, xavier, kaiming
+  mean: 0.0       # Mean for normal initialization
+  std: 0.02       # Standard deviation for normal initialization
+  
+# Positional encoding
+positional_encoding:
+  type: learned    # learned, sinusoidal
+  max_length: 1024 # Maximum sequence length for position embeddings (reduced) 

@@ -1,0 +1,65 @@
+# Configuration for ChatGoT Small (14M parameters) - with mixed precision enabled
+experiment_name: chatgot_small_25M_mixed_precision
+seed: 42
+
+architecture:
+  type: gpt
+  model_type: gpt_decoder
+  vocab_size: 96  # Will be set automatically from data
+  d_model: 512    # Matching checkpoint
+  n_layers: 8
+  n_head: 8       # Matching checkpoint
+  d_hid: 2048     # Matching checkpoint
+  dropout: 0.1
+  attention_dropout: 0.1
+  layer_norm_eps: 1e-5
+  activation: gelu
+  bias: true
+  init_method: normal
+  init_range: 0.01
+  pos_encoding_type: learned
+  max_seq_length: 256
+  prevent_dimension_adjustment: true  # Add flag to prevent automatic dimension adjustments
+
+data:
+  path: data/got/game_of_thrones.txt
+  format: text
+  block_size: 256
+
+training:
+  batch_size: 32             # Increased from 24 to maximize GPU utilization
+  learning_rate: 5e-4
+  weight_decay: 0.01
+  optimizer: adamw
+  scheduler: cosine
+  warm_up_steps: 1000
+  epochs: 10
+  clip_grad_norm: 1.0
+  accumulate_grad_batches: 1 # Changed from 2 to maximize GPU utilization
+  mixed_precision: true      # Enable mixed precision
+  compile_model: false       # PyTorch 2.0 compile not used for debug config
+  gradient_checkpointing: true # Memory savings
+  max_checkpoints_to_keep: 3  # Reduced from 5 to save disk space
+  num_workers: 4            # Increased from 2
+
+logging:
+  level: info
+  log_dir: runs
+  tensorboard: true
+  sample_every: 1000
+  sample_length: 400    # Increased from 200 for longer samples
+  sample_temperature: 0.8
+
+# Memory optimization settings
+memory:
+  optimize_memory: true
+  empty_cache_freq: 100   # Empty cache every 100 batches
+  cpu_offload: false      # Whether to offload optimizer states to CPU
+
+# Additional parameters
+n_positions: 256
+embd_pdrop: 0.1
+attn_pdrop: 0.1
+initializer_range: 0.02
+scale_attn_weights: true
+use_cache: true 
