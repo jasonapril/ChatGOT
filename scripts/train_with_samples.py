@@ -380,128 +380,25 @@ def train_with_samples(
         if "PYTORCH_CUDA_ALLOC_CONF" in os.environ:
             logger.info(f"PYTORCH_CUDA_ALLOC_CONF already set to {os.environ['PYTORCH_CUDA_ALLOC_CONF']}")
         else:
-            # Use more aggressive memory allocation settings for higher GPU utilization
-            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:1024,garbage_collection_threshold:0.8"
-            logger.info("Set PYTORCH_CUDA_ALLOC_CONF to maximize GPU utilization")
+            # Use memory allocation settings focused on performance, not memory savings
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128,garbage_collection_threshold:0.6"
+            logger.info("Set PYTORCH_CUDA_ALLOC_CONF for maximum performance")
         
-        # More aggressive memory preallocation
-        # Pre-allocate a percentage of GPU memory to prevent fragmentation
-        preallocate_percentage = 0.7  # 70% of available memory
+        # Completely disable memory pre-allocation - it causes performance issues
+        logger.info("Memory pre-allocation disabled - using dynamic allocation for best performance")
         
-        # Measure throughput with and without pre-allocation to determine impact
-        throughput_without_prealloc = None
-        try:
-            # Run a small benchmark without pre-allocation first
-            logger.info("Testing throughput without memory pre-allocation...")
-            torch.cuda.empty_cache()  # Clear any existing cache first
-            
-            # Create a small test batch and measure throughput on a warm network
-            dummy_batch = torch.randint(0, 96, (16, 256), dtype=torch.long, device=device)
-            dummy_targets = torch.randint(0, 96, (16, 256), dtype=torch.long, device=device)
-            
-            # Create a small test model just for benchmarking
-            from src.models.gpt_decoder import create_gpt_decoder
-            test_model = create_gpt_decoder(
-                vocab_size=96,
-                d_model=512,
-                n_head=8,
-                d_hid=2048,
-                n_layers=8,
-                dropout=0.1,
-                max_seq_length=256
-            ).to(device)
-            
-            # Warmup
-            for _ in range(3):
-                with torch.no_grad():
-                    test_model(dummy_batch)
-            
-            # Measure throughput
-            start_time = time.time()
-            batch_count = 10
-            for _ in range(batch_count):
-                with torch.no_grad():
-                    test_model(dummy_batch)
-            elapsed = time.time() - start_time
-            throughput_without_prealloc = (batch_count * 16 * 256) / elapsed
-            logger.info(f"Throughput without pre-allocation: {throughput_without_prealloc:.1f} tokens/s")
-            
-            # Clean up test model to free memory
-            del test_model
-            torch.cuda.empty_cache()
-            
-            # Now pre-allocate memory
-            logger.info(f"Pre-allocating {preallocate_percentage*100:.0f}% of CUDA memory to prevent fragmentation")
-            total_memory = torch.cuda.get_device_properties(0).total_memory
-            allocation_size = int(total_memory * preallocate_percentage)
-            
-            # Create a large tensor to allocate memory
-            logger.info(f"Pre-allocating {allocation_size/1024/1024/1024:.2f} GB of CUDA memory")
-            memory_allocation = torch.ones((allocation_size // 4), dtype=torch.float, device=device)
-            
-            # Test throughput with pre-allocation
-            test_model = create_gpt_decoder(
-                vocab_size=96,
-                d_model=512,
-                n_head=8,
-                d_hid=2048,
-                n_layers=8,
-                dropout=0.1,
-                max_seq_length=256
-            ).to(device)
-            
-            # Warmup
-            for _ in range(3):
-                with torch.no_grad():
-                    test_model(dummy_batch)
-            
-            # Measure throughput
-            start_time = time.time()
-            for _ in range(batch_count):
-                with torch.no_grad():
-                    test_model(dummy_batch)
-            elapsed = time.time() - start_time
-            throughput_with_prealloc = (batch_count * 16 * 256) / elapsed
-            logger.info(f"Throughput with pre-allocation: {throughput_with_prealloc:.1f} tokens/s")
-            
-            # Calculate impact
-            if throughput_without_prealloc > 0:
-                impact = ((throughput_with_prealloc - throughput_without_prealloc) / throughput_without_prealloc) * 100
-                logger.info(f"Pre-allocation impact: {impact:.1f}% throughput {'increase' if impact >= 0 else 'decrease'}")
-                
-                # Make recommendation based on results
-                if impact >= 5:
-                    logger.info("RECOMMENDATION: Keep memory pre-allocation enabled (performance benefit)")
-                elif impact <= -5:
-                    logger.info("RECOMMENDATION: Consider disabling memory pre-allocation (performance penalty)")
-                    # Free the pre-allocated memory
-                    del memory_allocation
-                    torch.cuda.empty_cache()
-                    preallocate_percentage = 0  # Don't pre-allocate later
-                else:
-                    logger.info("RECOMMENDATION: Memory pre-allocation has minimal impact, keeping it enabled")
-            
-            # Clean up test model to free memory
-            del test_model
-            del dummy_batch
-            del dummy_targets
-            torch.cuda.empty_cache()
-            
-            # Release the pre-allocated memory
-            if preallocate_percentage > 0:
-                del memory_allocation
-                logger.info(f"Memory pre-allocation complete, now available for model use")
-        except Exception as e:
-            logger.warning(f"Memory pre-allocation testing failed: {e} - continuing without testing")
-            
+        # Empty cache and reset peak memory stats
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        
         # Implement memory tracking
         memory_stats = {}
         memory_stats['init'] = torch.cuda.memory_allocated() / (1024**2)
         logger.info(f"Initial CUDA memory usage: {memory_stats['init']:.2f} MB")
         
-        # Set environment variables for better OOM handling
-        os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-        logger.info("Set CUDA_LAUNCH_BLOCKING=1 for better error reporting")
+        # Set environment variables for better OOM handling but prioritize performance
+        os.environ['CUDA_LAUNCH_BLOCKING'] = '0'  # Set to 0 for better performance
+        logger.info("Using asynchronous CUDA operations for better performance")
 
     # Parse configuration
     arch_config = config.get('architecture', {})
@@ -745,6 +642,10 @@ def train_with_samples(
                             # Clean up the now unused attribute
                             delattr(layer, 'forward_original')
                 
+                # Force garbage collection before loading checkpoint
+                gc.collect()
+                torch.cuda.empty_cache()
+                
                 # Load the checkpoint
                 checkpoint = torch.load(resume_from, map_location=device)
                 
@@ -758,6 +659,13 @@ def train_with_samples(
                 model_dict.update(filtered_dict)
                 # Load the filtered state dict
                 model.load_state_dict(model_dict)
+                
+                # Disable gradient checkpointing after loading checkpoint
+                if gradient_checkpointing:
+                    logger.info("Re-enabling gradient checkpointing after loading checkpoint")
+                    enable_gradient_checkpointing(model)
+                else:
+                    logger.info("Gradient checkpointing remains disabled after loading checkpoint")
                 
                 # Load optimizer state - if keys mismatch, start with fresh optimizer
                 try:
