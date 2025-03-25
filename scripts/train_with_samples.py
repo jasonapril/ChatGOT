@@ -92,6 +92,77 @@ def load_config(config_path):
     print(f"Parsed config:\n{config}")
     return config
 
+def enable_gradient_checkpointing(model):
+    """Safely enable gradient checkpointing with error handling."""
+    if not hasattr(model, 'layers'):
+        logger.warning("Model doesn't have 'layers' attribute, skipping gradient checkpointing")
+        return False
+    
+    try:
+        for i, layer in enumerate(model.layers):
+            # Store the original forward function if not already stored
+            if not hasattr(layer, 'forward_original'):
+                layer.forward_original = layer.forward
+                # Create safe wrapper with error handling
+                def checkpoint_wrapper(fn, *args, **kwargs):
+                    try:
+                        return torch_checkpoint(fn, *args, **kwargs)
+                    except Exception as e:
+                        logger.error(f"Error in gradient checkpointing: {e}")
+                        # Fall back to standard forward pass
+                        return fn(*args, **kwargs)
+                
+                layer.forward = functools.partial(checkpoint_wrapper, layer.forward_original)
+                logger.info(f"Gradient checkpointing enabled for layer {i}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to enable gradient checkpointing: {e}")
+        # Restore original forward functions if any error occurs
+        disable_gradient_checkpointing(model)
+        return False
+
+def disable_gradient_checkpointing(model):
+    """Safely disable gradient checkpointing and restore original forward functions."""
+    if not hasattr(model, 'layers'):
+        return
+    
+    try:
+        for i, layer in enumerate(model.layers):
+            if hasattr(layer, 'forward_original'):
+                layer.forward = layer.forward_original
+                delattr(layer, 'forward_original')
+                logger.info(f"Gradient checkpointing disabled for layer {i}")
+        return True
+    except Exception as e:
+        logger.error(f"Error disabling gradient checkpointing: {e}")
+        return False
+
+def cleanup_old_checkpoints(checkpoint_dir, config_name, timestamp, max_to_keep=5):
+    """Keep only the specified number of recent checkpoints to save disk space."""
+    # Get list of checkpoints for this specific model and run
+    checkpoint_pattern = f"{config_name}_{timestamp}_step_*.pt"
+    checkpoints = []
+    
+    try:
+        for file in os.listdir(checkpoint_dir):
+            if file.startswith(f"{config_name}_{timestamp}_step_") and file.endswith(".pt"):
+                step = int(file.split("_step_")[1].split(".pt")[0])
+                checkpoints.append((step, os.path.join(checkpoint_dir, file)))
+        
+        # Sort by step number (descending)
+        checkpoints.sort(reverse=True)
+        
+        # Keep only max_to_keep checkpoints
+        if len(checkpoints) > max_to_keep:
+            for _, checkpoint_path in checkpoints[max_to_keep:]:
+                try:
+                    os.remove(checkpoint_path)
+                    logger.info(f"Removed old checkpoint: {os.path.basename(checkpoint_path)}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove checkpoint {checkpoint_path}: {e}")
+    except Exception as e:
+        logger.warning(f"Error during checkpoint cleanup: {e}")
+
 def train_with_samples(
     config_file: str,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
@@ -289,16 +360,19 @@ def train_with_samples(
     
     # Enabling gradient checkpointing for memory efficiency
     if device.type == 'cuda' and torch_checkpoint is not None and gradient_checkpointing:
-        logger.warning("Gradient checkpointing is DISABLED due to compatibility issues")
-        # Skip the actual checkpoint enabling code
+        logger.info("Attempting to enable gradient checkpointing for memory efficiency")
+        if enable_gradient_checkpointing(model):
+            logger.info("Successfully enabled gradient checkpointing")
+        else:
+            logger.warning("Failed to enable gradient checkpointing, continuing without it")
     else:
         if gradient_checkpointing:
-            logger.warning("Gradient checkpointing requested but disabled due to compatibility issues")
-            
-        if device.type != 'cuda':
-            logger.info("Gradient checkpointing only supported on CUDA devices")
-        elif torch_checkpoint is None:
-            logger.info("torch.utils.checkpoint not available in this PyTorch version")
+            if device.type != 'cuda':
+                logger.info("Gradient checkpointing only supported on CUDA devices")
+            elif torch_checkpoint is None:
+                logger.info("torch.utils.checkpoint not available in this PyTorch version")
+            else:
+                logger.info("Gradient checkpointing not requested in configuration")
 
     # Try to free up memory before training starts
     torch.cuda.empty_cache()
@@ -461,7 +535,7 @@ def train_with_samples(
 
     try:
         for epoch in range(start_epoch, epochs):
-        model.train()
+            model.train()
             epoch_loss = 0
             batch_count = 0
             epoch_start_time = time.time()
@@ -478,8 +552,8 @@ def train_with_samples(
                 x, y = x.to(device), y.to(device)
                 
                 # Zero gradients
-            optimizer.zero_grad()
-            
+                optimizer.zero_grad()
+                
                 # Get accumulation steps
                 is_accumulating = (batch_idx % accumulate_grad_batches != 0)
                 
@@ -570,7 +644,7 @@ def train_with_samples(
                 
                 # Backward pass with optional mixed precision
                 if mixed_precision:
-                scaler.scale(loss).backward()
+                    scaler.scale(loss).backward()
                     
                     # Only update weights on non-accumulation steps
                     if (batch_idx + 1) % accumulate_grad_batches == 0 or (batch_idx + 1 == len(train_loader)):
@@ -597,10 +671,10 @@ def train_with_samples(
                         
                         # Apply actual gradient clipping
                         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss.backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
                     
                     # Only update weights on non-accumulation steps
                     if (batch_idx + 1) % accumulate_grad_batches == 0 or (batch_idx + 1 == len(train_loader)):
@@ -615,8 +689,8 @@ def train_with_samples(
                                 logger.warning(f"{params_without_grad} parameters have no gradients!")
                         
                         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                optimizer.step()
-                        optimizer.zero_grad()
+                    optimizer.step()
+                    optimizer.zero_grad()
                 
                 # Step the learning rate scheduler (after warmup period)
                 if global_step >= warmup_steps:
@@ -694,6 +768,10 @@ def train_with_samples(
                         'config': config,
                     }, checkpoint_path)
                     logger.info(f"Checkpoint saved to {checkpoint_path}")
+                    
+                    # Cleanup old checkpoints, keeping only the 5 most recent ones
+                    max_checkpoints = config.get('training', {}).get('max_checkpoints_to_keep', 5)
+                    cleanup_old_checkpoints("models", config_name, timestamp, max_to_keep=max_checkpoints)
                 
                 if elapsed_since_last_sample >= (sample_interval_minutes * 60):
                     last_sample_time = current_time
@@ -855,7 +933,7 @@ def train_with_samples(
             # Generate sample with lower temperature for better quality
             seed_text = dataset.decode(context[0].tolist())
             sample = generate_sample_text(
-            model=model,
+                model=model,
                 context=context,
                 max_new_tokens=200,  # Generate longer samples at end of epoch
                 temperature=0.7,     # Lower temperature for more coherent text
