@@ -701,15 +701,14 @@ def train_with_samples(
     # Create models directory if it doesn't exist
     os.makedirs("models", exist_ok=True)
     
-    # Checkpoint settings
-    save_checkpoint_steps = 100  # Save checkpoints every 100 steps
+    # Checkpoint settings - only time-based, not step-based
     last_checkpoint_time = time.time()
     checkpoint_interval_minutes = 2  # Save checkpoint every 2 minutes
     
     logger.info(f"Starting training for {epochs} epochs")
     logger.info(f"Model configuration: {arch_config}")
     logger.info(f"Training with batch size: {batch_size}, learning rate: {learning_rate}")
-    logger.info(f"Checkpoints will be saved every {checkpoint_interval_minutes} minutes and every {save_checkpoint_steps} steps to: models/{config_name}_{timestamp}_step_X.pt")
+    logger.info(f"Checkpoints will be saved every {checkpoint_interval_minutes} minutes to: models/{config_name}_{timestamp}_step_X.pt")
     
     # Ensure all parameters have requires_grad=True
     for param in model.parameters():
@@ -721,7 +720,7 @@ def train_with_samples(
     logger.info(f"Total parameters: {total_params}, Trainable parameters: {trainable_params}")
     
     # Time-based sampling settings
-    sample_interval_minutes = 1  # Generate sample every 1 minute (reduced from 5)
+    sample_interval_minutes = 2  # Generate sample every 2 minutes (increased from 1)
     last_sample_time = time.time()
     
     # Track tokens per second
@@ -1086,20 +1085,12 @@ def train_with_samples(
                     writer.add_scalar('training/loss_scaled', unscaled_loss.item(), global_step)
                     writer.add_scalar('training/throughput', avg_tokens_per_second, global_step)
                 
-                # Generate sample text periodically (based on time interval or step interval)
+                # Get current time for checkpoint and sampling decisions
                 current_time = time.time()
-                elapsed_since_last_sample = current_time - last_sample_time
-                
-                # Check if it's time to generate a sample (either by time or by step count)
-                generate_sample = elapsed_since_last_sample >= (sample_interval_minutes * 60)
-                
-                # Also generate sample every 500 steps
-                if global_step % 500 == 0 and global_step > 0:
-                    generate_sample = True
                 
                 # Save checkpoint periodically based on time interval
                 elapsed_since_last_checkpoint = current_time - last_checkpoint_time
-                if elapsed_since_last_checkpoint >= (checkpoint_interval_minutes * 60) or (global_step % save_checkpoint_steps == 0 and global_step > 0):
+                if elapsed_since_last_checkpoint >= (checkpoint_interval_minutes * 60):
                     last_checkpoint_time = current_time
                     # Save time-based checkpoint
                     checkpoint_path = os.path.join("models", f"{config_name}_{timestamp}_step_{global_step}.pt")
@@ -1117,7 +1108,11 @@ def train_with_samples(
                     max_checkpoints = config.get('training', {}).get('max_checkpoints_to_keep', 5)
                     cleanup_old_checkpoints("models", config_name, timestamp, max_to_keep=max_checkpoints)
                 
-                if generate_sample:
+                # Generate sample text periodically (based ONLY on time interval, not step count)
+                elapsed_since_last_sample = current_time - last_sample_time
+                
+                # Check if it's time to generate a sample (only by time, not by step count)
+                if elapsed_since_last_sample >= (sample_interval_minutes * 60):
                     last_sample_time = current_time
                     
                     model.eval()
@@ -1126,32 +1121,35 @@ def train_with_samples(
                     val_idx = random.randint(0, len(val_dataset) - 1)
                     context, _ = val_dataset[val_idx]
                     
-                    # Instead of arbitrary position, find a proper word boundary
+                    # Instead of arbitrary position, find a proper line beginning
                     seed_context = dataset.decode(context.tolist())
-                    # Find a period, question mark, or exclamation followed by space to ensure we start at sentence boundary
-                    sentence_breaks = [i+2 for i, c in enumerate(seed_context[:-2]) 
-                                      if c in ['.', '!', '?'] and seed_context[i+1] == ' ' and seed_context[i+2].isupper()]
                     
-                    if sentence_breaks and len(sentence_breaks) > 1:
-                        # Find a break point that gives us at least 30 chars but not too many
-                        valid_breaks = [p for p in sentence_breaks if p < len(seed_context) - 100]
-                        if valid_breaks:
-                            start_pos = max(valid_breaks)
-                            max_context_len = 80  # Arbitrary but reasonable length for seed
+                    # Find line beginnings (either start of text or after newline)
+                    line_starts = [0]  # Always include the start of text
+                    for i in range(1, len(seed_context)):
+                        if seed_context[i-1] == '\n':
+                            line_starts.append(i)
+                    
+                    if line_starts and len(line_starts) > 1:
+                        # Choose a random line start that gives enough context
+                        valid_starts = [p for p in line_starts if p < len(seed_context) - 100]
+                        if valid_starts:
+                            start_pos = random.choice(valid_starts)
+                            max_context_len = 100  # Increased context length for better seeds
                             end_pos = min(start_pos + max_context_len, len(seed_context))
                             seed_text = seed_context[start_pos:end_pos]
                         else:
-                            # Fallback if no valid breakpoints
-                            start_pos = max(0, len(seed_context) - 100)
-                            end_pos = len(seed_context)
+                            # Fallback if no valid line starts
+                            start_pos = line_starts[0]  # Use beginning of text
+                            end_pos = min(start_pos + 100, len(seed_context))
                             seed_text = seed_context[start_pos:end_pos]
                         
                         # Convert back to token ids
                         context = torch.tensor([dataset.char_to_idx.get(c, 0) for c in seed_text], 
                                               dtype=torch.long).unsqueeze(0).to(device)
                     else:
-                        # Fallback to first 50 tokens as before
-                        context_length = min(50, context.size(0))
+                        # Fallback to first 100 tokens as before but with longer context
+                        context_length = min(100, context.size(0))
                         context = context[:context_length].unsqueeze(0).to(device)
                         seed_text = dataset.decode(context[0].tolist())
                     
@@ -1160,7 +1158,7 @@ def train_with_samples(
                         sample = generate_sample_text(
                             model=model,
                             context=context,
-                            max_new_tokens=sample_length,
+                            max_new_tokens=250,  # Increased sample length for better output
                             temperature=0.9,  # Higher temperature for early training
                             top_p=0.95,  # Higher top_p for more diversity 
                             top_k=40,    # Add top-k filtering
