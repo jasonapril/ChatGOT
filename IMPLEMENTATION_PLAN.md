@@ -6,21 +6,21 @@
 - ⬜ Validate training metrics and convergence
 
 ## Priority 2: Memory Management
-- ⬜ Re-enable gradient checkpointing
-  - [ ] Implement safe forward function wrapping
-  - [ ] Add proper cleanup on exception
-  - [ ] Test with checkpoint loading
-  - [ ] Add configuration parameter validation
+- ✅ Re-enable gradient checkpointing
+  - [x] Implement safe forward function wrapping
+  - [x] Add proper cleanup on exception
+  - [x] Test with checkpoint loading
+  - [x] Add configuration parameter validation
 
 ## Priority 3: Training Performance
-- ⬜ Re-enable mixed precision training
-  - [ ] Add safety checks for NaN/inf values
-  - [ ] Implement fallback to full precision
-  - [ ] Add detailed logging for debugging
-  - [ ] Test with different batch sizes
+- ✅ Re-enable mixed precision training
+  - [x] Add safety checks for NaN/inf values
+  - [x] Implement fallback to full precision
+  - [x] Add detailed logging for debugging
+  - [x] Test with different batch sizes
 
 - ⬜ Restore dynamic batch size adjustment
-  - [ ] Implement batch reduction on OOM
+  - [x] Implement batch reduction on OOM
   - [ ] Add batch recovery attempt after stable training
   - [ ] Add memory tracking throughout training
   - [ ] Test with different sequence lengths
@@ -83,7 +83,7 @@ def disable_gradient_checkpointing(model):
             logger.info(f"Gradient checkpointing disabled for layer {i}")
 ```
 
-### Mixed Precision Implementation
+### Mixed Precision Implementation (COMPLETED)
 ```python
 class SafeGradScaler(GradScaler):
     """Enhanced GradScaler with NaN detection and fallback to full precision."""
@@ -92,18 +92,39 @@ class SafeGradScaler(GradScaler):
         super().__init__(*args, **kwargs)
         self.nan_counter = 0
         self.max_nan_before_fallback = 3
+        self.fallback_triggered = False
+        self.warning_logged = False
         
     def scale(self, loss):
         # Check for NaN before scaling
         if torch.isnan(loss).any() or torch.isinf(loss).any():
-            logger.warning(f"NaN/Inf detected in loss before scaling: {loss.item()}")
             self.nan_counter += 1
-            if self.nan_counter >= self.max_nan_before_fallback:
+            logger.warning(f"NaN/Inf detected in loss before scaling: {loss.item() if not torch.isinf(loss).all() else 'inf'} (occurrence {self.nan_counter}/{self.max_nan_before_fallback})")
+            
+            # If we've seen too many NaNs, disable mixed precision
+            if self.nan_counter >= self.max_nan_before_fallback and not self.fallback_triggered:
                 logger.error(f"Too many NaN/Inf values detected, disabling mixed precision")
                 self._enabled = False
-            # Return unscaled loss to avoid propagating NaN
-            return loss
-        return super().scale(loss)
+                self.fallback_triggered = True
+                
+                # Return unscaled loss to continue training in full precision
+                return loss
+        # Rest of implementation...
+```
+
+### Batch Size Recovery Implementation (NEXT PRIORITY)
+```python
+def try_increase_batch_size(batch_size, original_batch_size, loss_history, stable_epochs=2):
+    """Attempt to increase batch size if training has been stable for a while."""
+    if batch_size < original_batch_size and len(loss_history) >= stable_epochs:
+        # Check loss stability over recent epochs
+        recent_losses = loss_history[-stable_epochs:]
+        variance = torch.var(torch.tensor(recent_losses))
+        if variance < 0.01:  # Loss has been stable
+            new_batch_size = min(batch_size + 1, original_batch_size)
+            logger.info(f"Training stable for {stable_epochs} epochs, increasing batch size from {batch_size} to {new_batch_size}")
+            return new_batch_size
+    return batch_size
 ```
 
 ### Testing Methodology

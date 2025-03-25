@@ -14,9 +14,12 @@ import sys
 import time
 from pathlib import Path
 import functools
-import datetime
+from datetime import datetime
 import math
 import types
+import logging.handlers
+import re
+import gc
 
 import hydra
 import torch
@@ -29,6 +32,7 @@ from torch.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+import torch.nn as nn
 
 # Try to import checkpoint functionality
 try:
@@ -52,30 +56,56 @@ from src.utils.memory import get_memory_optimized_settings, preallocate_gpu_memo
 from src.utils.metrics import calculate_tokens_per_second
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [ %(levelname)s ] %(message)s',  # Change dash to square brackets
-    datefmt='%Y-%m-%d %H:%M:%S',  # Remove millisecond precision
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
-
-def setup_tensorboard(config):
-    """Set up TensorBoard logging."""
-    experiment_name = config.get('experiment_name', os.path.basename(config_path).replace('.yaml', ''))
-    log_dir = os.path.join(config.get('logging', {}).get('log_dir', 'runs'), 
-                          f"{experiment_name}_{time.strftime('%Y%m%d_%H%M%S')}")
-    writer = SummaryWriter(log_dir=log_dir)
+def setup_logging(config_name=None):
+    """Set up logging with both console (colored) and file (clean) output."""
+    # Create logs directory if it doesn't exist
+    os.makedirs("logs", exist_ok=True)
     
-    # Set up file handler for logging to a file
-    log_file_path = os.path.join(log_dir, 'training.log')
-    os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
-    file_handler = logging.FileHandler(log_file_path)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(file_handler)
+    # Create a formatter without color codes for file logging
+    file_formatter = logging.Formatter(
+        '%(asctime)s [ %(levelname)s ] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
     
-    logger.info(f"Logs will be saved to {log_dir}")
-    return writer
+    # Create a detailed file name with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_filename = f"logs/train_{config_name}_{timestamp}.log" if config_name else f"logs/train_{timestamp}.log"
+    
+    # Set up file handler with rotation (10 MB max size, keep 5 backups)
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_filename, 
+        maxBytes=10*1024*1024,  # 10 MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(file_formatter)
+    file_handler.setLevel(logging.INFO)
+    
+    # Setup console handler with colors for terminal
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter(
+        '%(asctime)s [ %(levelname)s ] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    console_handler.setFormatter(console_formatter)
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Remove any existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Add both handlers
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logs will be saved to {log_filename}")
+    
+    return logger, log_filename
 
 def load_config(config_path):
     """Load configuration from YAML file."""
@@ -94,6 +124,9 @@ def load_config(config_path):
 
 def enable_gradient_checkpointing(model):
     """Safely enable gradient checkpointing with error handling."""
+    # Get logger instance
+    logger = logging.getLogger(__name__)
+    
     if not hasattr(model, 'layers'):
         logger.warning("Model doesn't have 'layers' attribute, skipping gradient checkpointing")
         return False
@@ -108,6 +141,7 @@ def enable_gradient_checkpointing(model):
                     try:
                         return torch_checkpoint(fn, *args, **kwargs)
                     except Exception as e:
+                        logger = logging.getLogger(__name__)
                         logger.error(f"Error in gradient checkpointing: {e}")
                         # Fall back to standard forward pass
                         return fn(*args, **kwargs)
@@ -123,6 +157,9 @@ def enable_gradient_checkpointing(model):
 
 def disable_gradient_checkpointing(model):
     """Safely disable gradient checkpointing and restore original forward functions."""
+    # Get logger instance
+    logger = logging.getLogger(__name__)
+    
     if not hasattr(model, 'layers'):
         return
     
@@ -138,16 +175,21 @@ def disable_gradient_checkpointing(model):
         return False
 
 def cleanup_old_checkpoints(checkpoint_dir, config_name, timestamp, max_to_keep=5):
-    """Keep only the specified number of recent checkpoints to save disk space."""
-    # Get list of checkpoints for this specific model and run
-    checkpoint_pattern = f"{config_name}_{timestamp}_step_*.pt"
-    checkpoints = []
+    """Remove old checkpoints, keeping only the latest max_to_keep."""
+    logger = logging.getLogger(__name__)
     
     try:
+        # Find all checkpoints matching the pattern
+        prefix = f"{config_name}_{timestamp}_step_"
+        checkpoints = []
+        
         for file in os.listdir(checkpoint_dir):
-            if file.startswith(f"{config_name}_{timestamp}_step_") and file.endswith(".pt"):
-                step = int(file.split("_step_")[1].split(".pt")[0])
-                checkpoints.append((step, os.path.join(checkpoint_dir, file)))
+            if file.startswith(prefix) and file.endswith(".pt"):
+                # Extract step number
+                step_str = file[len(prefix):-3]
+                if step_str.isdigit():
+                    step = int(step_str)
+                    checkpoints.append((step, os.path.join(checkpoint_dir, file)))
         
         # Sort by step number (descending)
         checkpoints.sort(reverse=True)
@@ -163,6 +205,138 @@ def cleanup_old_checkpoints(checkpoint_dir, config_name, timestamp, max_to_keep=
     except Exception as e:
         logger.warning(f"Error during checkpoint cleanup: {e}")
 
+# Add SafeGradScaler class for mixed precision training
+class SafeGradScaler(GradScaler):
+    """Enhanced GradScaler with NaN detection and fallback to full precision."""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.nan_counter = 0
+        self.max_nan_before_fallback = 3
+        self.fallback_triggered = False
+        self.warning_logged = False
+        
+    def scale(self, loss):
+        # Check for NaN before scaling
+        if torch.isnan(loss).any() or torch.isinf(loss).any():
+            self.nan_counter += 1
+            logger.warning(f"NaN/Inf detected in loss before scaling: {loss.item() if not torch.isinf(loss).all() else 'inf'} (occurrence {self.nan_counter}/{self.max_nan_before_fallback})")
+            
+            # If we've seen too many NaNs, disable mixed precision
+            if self.nan_counter >= self.max_nan_before_fallback and not self.fallback_triggered:
+                logger.error(f"Too many NaN/Inf values detected, disabling mixed precision")
+                self._enabled = False
+                self.fallback_triggered = True
+                
+                # Return unscaled loss to continue training in full precision
+                return loss
+        else:
+            # Reset counter if loss is normal
+            if self.nan_counter > 0:
+                self.nan_counter = max(0, self.nan_counter - 1)  # Gradually decrease counter
+                
+        if not self._enabled and not self.warning_logged:
+            logger.warning("Mixed precision is disabled. Using full precision for forward/backward passes.")
+            self.warning_logged = True
+            return loss
+            
+        return super().scale(loss)
+    
+    def step(self, optimizer, *args, **kwargs):
+        # Additional safety around optimizer step
+        if not self._enabled:
+            # In full precision mode, just do a normal step
+            return optimizer.step(*args, **kwargs)
+            
+        try:
+            return super().step(optimizer, *args, **kwargs)
+        except RuntimeError as e:
+            if "inf or nan" in str(e).lower():
+                logger.error(f"NaN/Inf detected during optimizer step, disabling mixed precision: {e}")
+                self._enabled = False
+                self.fallback_triggered = True
+                
+                # Attempt normal optimizer step as fallback
+                try:
+                    optimizer.zero_grad()
+                    return optimizer.step(*args, **kwargs)
+                except Exception as e2:
+                    logger.error(f"Fallback optimizer step also failed: {e2}")
+                    raise
+            else:
+                raise
+
+def setup_tensorboard(config, config_name=None, log_file=None):
+    """Set up TensorBoard logging."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    experiment_name = config.get('experiment_name', config_name or 'default')
+    
+    log_dir = os.path.join(config.get('logging', {}).get('log_dir', 'runs'), 
+                         f"{experiment_name}_{timestamp}")
+    writer = SummaryWriter(log_dir=log_dir)
+    
+    # Log the tensorboard directory
+    logger = logging.getLogger(__name__)
+    logger.info(f"TensorBoard logs will be saved to {log_dir}")
+    
+    # Create a symlink to the log file in the tensorboard directory if available
+    if log_file and os.path.exists(log_file):
+        try:
+            symlink_path = os.path.join(log_dir, "training.log")
+            # On Windows, may need to use a different approach
+            if os.name == 'nt':  # Windows
+                # Just copy the file instead of symlink
+                import shutil
+                shutil.copy2(log_file, symlink_path)
+            else:
+                os.symlink(os.path.abspath(log_file), symlink_path)
+            logger.info(f"Created link to log file in TensorBoard directory")
+        except Exception as e:
+            logger.warning(f"Could not create log file link in TensorBoard directory: {e}")
+    
+    return writer
+
+def try_increase_batch_size(original_batch_size, current_batch_size, recent_losses, stable_window=5, variance_threshold=0.01):
+    """Attempt to increase batch size if training has been stable."""
+    if current_batch_size < original_batch_size and len(recent_losses) >= stable_window:
+        # Check loss stability over recent window
+        recent_losses_tensor = torch.tensor(recent_losses[-stable_window:])
+        variance = torch.var(recent_losses_tensor).item()
+        mean = torch.mean(recent_losses_tensor).item()
+        
+        # Calculate coefficient of variation (normalized variance)
+        # This helps account for different loss scales
+        cv = variance**0.5 / mean if mean > 0 else float('inf')
+        
+        # If loss is stable (low variance relative to mean)
+        if cv < variance_threshold:
+            new_batch_size = min(current_batch_size + 1, original_batch_size)
+            return new_batch_size, True
+    
+    return current_batch_size, False
+
+def get_gpu_memory_usage():
+    """Get GPU memory usage statistics in a readable format."""
+    if not torch.cuda.is_available():
+        return "CUDA not available"
+    
+    stats = {}
+    
+    # Current memory allocation
+    stats['allocated'] = torch.cuda.memory_allocated() / (1024**2)  # MB
+    stats['cached'] = torch.cuda.memory_reserved() / (1024**2)  # MB
+    
+    # Peak memory stats during training
+    stats['max_allocated'] = torch.cuda.max_memory_allocated() / (1024**2)  # MB
+    stats['max_cached'] = torch.cuda.max_memory_reserved() / (1024**2)  # MB
+    
+    # Get device properties
+    device_props = torch.cuda.get_device_properties(0)
+    stats['total'] = device_props.total_memory / (1024**2)  # MB
+    stats['device_name'] = device_props.name
+    
+    return stats
+
 def train_with_samples(
     config_file: str,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
@@ -176,13 +350,12 @@ def train_with_samples(
     resume_from: str = None,  # New parameter to specify a checkpoint to resume from
 ):
     """Train with samples at specified intervals."""
-    # Set up logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s [ %(levelname)s ] %(message)s'
-    )
-    logger = logging.getLogger(__name__)
-
+    # Get config name from file path for logging
+    config_name = os.path.basename(config_file).replace('.yaml', '')
+    
+    # Set up logging with both console and file output
+    logger, log_file = setup_logging(config_name)
+    
     logger.info(f"Loading config from {config_file}")
     # Load the config
     try:
@@ -207,12 +380,120 @@ def train_with_samples(
         if "PYTORCH_CUDA_ALLOC_CONF" in os.environ:
             logger.info(f"PYTORCH_CUDA_ALLOC_CONF already set to {os.environ['PYTORCH_CUDA_ALLOC_CONF']}")
         else:
-            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:512"
-            logger.info("Set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512")
+            # Use more aggressive memory allocation settings for higher GPU utilization
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:1024,garbage_collection_threshold:0.8"
+            logger.info("Set PYTORCH_CUDA_ALLOC_CONF to maximize GPU utilization")
         
-        # Empty cache before we start
-        torch.cuda.empty_cache()
+        # More aggressive memory preallocation
+        # Pre-allocate a percentage of GPU memory to prevent fragmentation
+        preallocate_percentage = 0.7  # 70% of available memory
         
+        # Measure throughput with and without pre-allocation to determine impact
+        throughput_without_prealloc = None
+        try:
+            # Run a small benchmark without pre-allocation first
+            logger.info("Testing throughput without memory pre-allocation...")
+            torch.cuda.empty_cache()  # Clear any existing cache first
+            
+            # Create a small test batch and measure throughput on a warm network
+            dummy_batch = torch.randint(0, 96, (16, 256), dtype=torch.long, device=device)
+            dummy_targets = torch.randint(0, 96, (16, 256), dtype=torch.long, device=device)
+            
+            # Create a small test model just for benchmarking
+            from src.models.gpt_decoder import create_gpt_decoder
+            test_model = create_gpt_decoder(
+                vocab_size=96,
+                d_model=512,
+                n_head=8,
+                d_hid=2048,
+                n_layers=8,
+                dropout=0.1,
+                max_seq_length=256
+            ).to(device)
+            
+            # Warmup
+            for _ in range(3):
+                with torch.no_grad():
+                    test_model(dummy_batch)
+            
+            # Measure throughput
+            start_time = time.time()
+            batch_count = 10
+            for _ in range(batch_count):
+                with torch.no_grad():
+                    test_model(dummy_batch)
+            elapsed = time.time() - start_time
+            throughput_without_prealloc = (batch_count * 16 * 256) / elapsed
+            logger.info(f"Throughput without pre-allocation: {throughput_without_prealloc:.1f} tokens/s")
+            
+            # Clean up test model to free memory
+            del test_model
+            torch.cuda.empty_cache()
+            
+            # Now pre-allocate memory
+            logger.info(f"Pre-allocating {preallocate_percentage*100:.0f}% of CUDA memory to prevent fragmentation")
+            total_memory = torch.cuda.get_device_properties(0).total_memory
+            allocation_size = int(total_memory * preallocate_percentage)
+            
+            # Create a large tensor to allocate memory
+            logger.info(f"Pre-allocating {allocation_size/1024/1024/1024:.2f} GB of CUDA memory")
+            memory_allocation = torch.ones((allocation_size // 4), dtype=torch.float, device=device)
+            
+            # Test throughput with pre-allocation
+            test_model = create_gpt_decoder(
+                vocab_size=96,
+                d_model=512,
+                n_head=8,
+                d_hid=2048,
+                n_layers=8,
+                dropout=0.1,
+                max_seq_length=256
+            ).to(device)
+            
+            # Warmup
+            for _ in range(3):
+                with torch.no_grad():
+                    test_model(dummy_batch)
+            
+            # Measure throughput
+            start_time = time.time()
+            for _ in range(batch_count):
+                with torch.no_grad():
+                    test_model(dummy_batch)
+            elapsed = time.time() - start_time
+            throughput_with_prealloc = (batch_count * 16 * 256) / elapsed
+            logger.info(f"Throughput with pre-allocation: {throughput_with_prealloc:.1f} tokens/s")
+            
+            # Calculate impact
+            if throughput_without_prealloc > 0:
+                impact = ((throughput_with_prealloc - throughput_without_prealloc) / throughput_without_prealloc) * 100
+                logger.info(f"Pre-allocation impact: {impact:.1f}% throughput {'increase' if impact >= 0 else 'decrease'}")
+                
+                # Make recommendation based on results
+                if impact >= 5:
+                    logger.info("RECOMMENDATION: Keep memory pre-allocation enabled (performance benefit)")
+                elif impact <= -5:
+                    logger.info("RECOMMENDATION: Consider disabling memory pre-allocation (performance penalty)")
+                    # Free the pre-allocated memory
+                    del memory_allocation
+                    torch.cuda.empty_cache()
+                    preallocate_percentage = 0  # Don't pre-allocate later
+                else:
+                    logger.info("RECOMMENDATION: Memory pre-allocation has minimal impact, keeping it enabled")
+            
+            # Clean up test model to free memory
+            del test_model
+            del dummy_batch
+            del dummy_targets
+            torch.cuda.empty_cache()
+            
+            # Release the pre-allocated memory
+            if preallocate_percentage > 0:
+                del memory_allocation
+                logger.info(f"Memory pre-allocation complete, now available for model use")
+        except Exception as e:
+            logger.warning(f"Memory pre-allocation testing failed: {e} - continuing without testing")
+            
         # Implement memory tracking
         memory_stats = {}
         memory_stats['init'] = torch.cuda.memory_allocated() / (1024**2)
@@ -301,9 +582,18 @@ def train_with_samples(
     # Try a smaller batch size if the current one isn't working well with learning
     if batch_size > 6:
         batch_size_orig = batch_size
-        batch_size = 6  # Smaller batch sizes often help with initial learning
-        logger.info(f"Reducing batch size from {batch_size_orig} to {batch_size} to improve learning")
-        config['training']['batch_size'] = batch_size
+        batch_size = batch_size_orig  # Use the original batch size to utilize more GPU memory
+        logger.info(f"Using full batch size of {batch_size} to maximize GPU utilization")
+    
+    # For higher GPU utilization, adjust the model size parameters if they're too small
+    if d_model < 512 and d_hid < 2048:
+        # Only adjust if current values are small
+        old_d_model, old_d_hid = d_model, d_hid
+        d_model = min(512, d_model * 1.5)  # Increase embedding dimension
+        d_hid = min(2048, d_hid * 1.5)     # Increase hidden dimension
+        logger.info(f"Adjusting model dimensions for better GPU utilization: d_model {old_d_model}->{d_model}, d_hid {old_d_hid}->{d_hid}")
+        arch_config['d_model'] = d_model
+        arch_config['d_hid'] = d_hid
     
     # Memory optimization parameters
     mixed_precision = config['training'].get('mixed_precision', False)
@@ -311,10 +601,8 @@ def train_with_samples(
     accumulate_grad_batches = config['training'].get('accumulate_grad_batches', 1)
     logger.info(f"Using gradient accumulation steps: {accumulate_grad_batches}")
     
-    # Set up TensorBoard
-    log_dir = os.path.join("runs", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
-    writer = SummaryWriter(log_dir)
-    logger.info(f"TensorBoard logs will be saved to {log_dir}")
+    # Set up TensorBoard with our config name and log file
+    writer = setup_tensorboard(config, config_name, log_file)
     
     # Create model based on model_type
     logger.info(f"Creating model with type: {model_type}")
@@ -385,6 +673,10 @@ def train_with_samples(
         betas=(0.9, 0.999)
     )
     
+    # Define loss function (criterion)
+    criterion = nn.CrossEntropyLoss()
+    logger.info(f"Using CrossEntropyLoss for character prediction")
+    
     # Create data loaders
     num_workers = config.get('training', {}).get('num_workers', 2)  # Reduced from 4
     
@@ -419,8 +711,15 @@ def train_with_samples(
         eta_min=learning_rate * 0.1  # Final learning rate will be 10% of initial
     )
     
+    # Replace the regular GradScaler with our SafeGradScaler
     # GradScaler for mixed precision training
-    scaler = GradScaler(enabled=mixed_precision) if mixed_precision else None
+    scaler = SafeGradScaler(enabled=mixed_precision) if mixed_precision else None
+    
+    # Add info log about mixed precision status
+    if mixed_precision:
+        logger.info("Mixed precision training enabled with SafeGradScaler (with NaN detection and fallback)")
+    else:
+        logger.info("Mixed precision training disabled, using full precision")
     
     # Add option to resume from checkpoint
     start_epoch = 0
@@ -489,7 +788,6 @@ def train_with_samples(
     start_time = time.time()
     
     # Initialize checkpoint naming variables
-    config_name = os.path.basename(config_file).replace('.yaml', '')
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     
     # Create models directory if it doesn't exist
@@ -515,7 +813,7 @@ def train_with_samples(
     logger.info(f"Total parameters: {total_params}, Trainable parameters: {trainable_params}")
     
     # Time-based sampling settings
-    sample_interval_minutes = 5  # Generate sample every 5 minutes
+    sample_interval_minutes = 1  # Generate sample every 1 minute (reduced from 5)
     last_sample_time = time.time()
     
     # Track tokens per second
@@ -545,6 +843,52 @@ def train_with_samples(
             max_loss_increase_count = 5  # How many consecutive increases before we intervene
             loss_increase_count = 0
             
+            # Track original batch size for potential recovery
+            original_batch_size = config['training'].get('batch_size', 8)
+            batch_size_recovery_attempts = 0
+            epochs_since_last_recovery = 0
+            
+            # Check if we should try to recover batch size at the start of the epoch
+            if batch_size < original_batch_size and epoch > 0:
+                # Only try recovery if we've had at least one stable epoch
+                if len(previous_losses) >= 50 and epochs_since_last_recovery >= 1:
+                    new_batch_size, increased = try_increase_batch_size(
+                        original_batch_size=original_batch_size,
+                        current_batch_size=batch_size,
+                        recent_losses=previous_losses,
+                        stable_window=50,  # Use a larger window for more confidence
+                        variance_threshold=0.02
+                    )
+                    
+                    if increased:
+                        # Batch size increased, update data loaders
+                        logger.info(f"Training has been stable. Increasing batch size from {batch_size} to {new_batch_size}")
+                        batch_size = new_batch_size
+                        batch_size_recovery_attempts += 1
+                        epochs_since_last_recovery = 0
+                        
+                        # Recreate data loaders with new batch size
+                        train_loader = DataLoader(
+                            train_dataset,
+                            batch_size=batch_size,
+                            shuffle=True,
+                            num_workers=num_workers,
+                            pin_memory=torch.cuda.is_available()
+                        )
+                        
+                        val_loader = DataLoader(
+                            val_dataset,
+                            batch_size=batch_size,
+                            shuffle=False,
+                            num_workers=num_workers,
+                            pin_memory=torch.cuda.is_available()
+                        )
+                        
+                        # Update config
+                        config['training']['batch_size'] = batch_size
+                
+                epochs_since_last_recovery += 1
+            
             for batch_idx, (x, y) in enumerate(train_loader):
                 batch_start = time.time()
                 
@@ -557,42 +901,170 @@ def train_with_samples(
                 # Get accumulation steps
                 is_accumulating = (batch_idx % accumulate_grad_batches != 0)
                 
-                # Forward pass with optional mixed precision
-                if mixed_precision:
-                    with autocast(device_type=device.type, dtype=torch.float16):
-                        try:
-                            logits, loss = model(x, y)
-                            # Keep original loss for logging/monitoring
-                            unscaled_loss = loss.item()
-                            # Scale loss only for backprop
-                            if accumulate_grad_batches > 1:
-                                loss = loss / accumulate_grad_batches
-                        except RuntimeError as e:
-                            if "CUDA out of memory" in str(e):
-                                logger.error("CUDA OOM during forward pass")
-                                # Emergency memory cleanup
-                                del logits, loss
-                                torch.cuda.empty_cache()
-                                # Try to reduce batch size
-                                if batch_size > 1:
-                                    new_batch_size = max(1, batch_size // 2)
-                                    logger.info(f"Reducing batch size from {batch_size} to {new_batch_size}")
-                                    batch_size = new_batch_size
-                                    # Recreate dataloaders with new batch size
-                                    # Continue with next epoch
-                                    break
-                            raise  # Re-raise the exception if it's not an OOM error
-                else:
-                    logits, loss = model(x, y)
-                    # Keep original loss for logging/monitoring
-                    unscaled_loss = loss.item()
-                    # Scale loss only for backprop
-                    if accumulate_grad_batches > 1:
-                        loss = loss / accumulate_grad_batches
+                # Forward and loss computation with mixed precision
+                try:
+                    # Forward pass
+                    model_outputs = model(x)
+                    
+                    # Log model output type to debug
+                    if batch_idx == 0:  # Only log once
+                        logger.info(f"Model output type: {type(model_outputs)}")
+                        if isinstance(model_outputs, tuple):
+                            logger.info(f"Model outputs tuple length: {len(model_outputs)}")
+                            for i, item in enumerate(model_outputs):
+                                logger.info(f"  Output item {i} type: {type(item)}, shape: {item.shape if hasattr(item, 'shape') else 'no shape'}")
+                    
+                    # Handle different model output formats
+                    if isinstance(model_outputs, tuple):
+                        if len(model_outputs) >= 2:
+                            # Format could be (logits, loss) or (logits, _, attn_weights)
+                            logits = model_outputs[0]
+                            
+                            # Check if second element is loss
+                            if isinstance(model_outputs[1], torch.Tensor) and model_outputs[1].numel() == 1:
+                                # Use provided loss
+                                unscaled_loss = model_outputs[1]
+                            else:
+                                # Calculate loss from logits
+                                unscaled_loss = criterion(logits.view(-1, vocab_size), y.view(-1))
+                        else:
+                            # Single item tuple
+                            logits = model_outputs[0]
+                            unscaled_loss = criterion(logits.view(-1, vocab_size), y.view(-1))
+                    else:
+                        # Direct tensor output
+                        logits = model_outputs
+                        unscaled_loss = criterion(logits.view(-1, vocab_size), y.view(-1))
+                    
+                    # Ensure unscaled_loss is tensor and has the right shape
+                    if not isinstance(unscaled_loss, torch.Tensor):
+                        logger.error(f"Loss is not a tensor: {unscaled_loss}")
+                        unscaled_loss = torch.tensor(unscaled_loss, device=device)
+                    
+                    # Enhanced loss checks to detect NaN/Inf
+                    if torch.isnan(unscaled_loss).any() or torch.isinf(unscaled_loss).any():
+                        logger.warning(f"NaN/Inf loss detected after forward pass: {unscaled_loss if not torch.isinf(unscaled_loss).all() else 'inf'}")
+                        
+                        # Try to diagnose the issue
+                        logits_info = f"Logits: min={logits.min().item():.4f}, max={logits.max().item():.4f}, mean={logits.mean().item():.4f}, std={logits.std().item():.4f}"
+                        logger.warning(f"Abnormal outputs detected: {logits_info}")
+                        
+                        # If we're accumulating gradients, skip this batch but continue training
+                        if is_accumulating:
+                            logger.info("Skipping gradient accumulation for this batch")
+                            continue
+                    
+                    # Continue with mixed precision handling
+                    if scaler is not None:
+                        # AMP: Scale the loss and compute gradients
+                        scaled_loss = scaler.scale(unscaled_loss)
+                        # Avoid accumulation on the first step of each batch
+                        if not is_accumulating:
+                            scaled_loss.backward(create_graph=False, retain_graph=False)
+                        else:
+                            # No need for model.no_sync() as we're not using distributed training
+                            scaled_loss.backward(create_graph=False, retain_graph=False)
+                    else:
+                        # Regular full precision mode
+                        if not is_accumulating:
+                            unscaled_loss.backward(create_graph=False, retain_graph=False)
+                        else:
+                            # No need for model.no_sync() as we're not using distributed training
+                            unscaled_loss.backward(create_graph=False, retain_graph=False)
+                    
+                    # Immediately delete variables no longer needed to free GPU memory
+                    # removing this to avoid errors - delete after diagnostics
+                    # del logits
+                    # torch.cuda.empty_cache()
+                    
+                    # If no scaler or if scaler with fallback to full precision
+                    if (scaler is None or not scaler._enabled) and (torch.isnan(unscaled_loss).any() or torch.isinf(unscaled_loss).any()):
+                        logger.warning("NaN/Inf detected in full precision mode, skipping parameter update")
+                        optimizer.zero_grad()  # Clear gradients to avoid accumulating bad values
+                        continue
+                    
+                    # Only update after gradient_accumulation_steps
+                    if (batch_idx + 1) % accumulate_grad_batches == 0 or batch_idx == len(train_loader) - 1:
+                        # Apply gradient clipping to prevent exploding gradients
+                        if grad_clip > 0:
+                            if scaler is not None and scaler._enabled:
+                                # For mixed precision
+                                scaler.unscale_(optimizer)
+                            
+                            # Clip gradients
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                        
+                        # Step with scaler in mixed precision or regular optimizer step
+                        if scaler is not None and scaler._enabled:
+                            # Update weights with gradient scaler for mixed precision
+                            scaler.step(optimizer)
+                            scaler.update()
+                        else:
+                            # Regular optimizer step in full precision
+                            optimizer.step()
+                        
+                        # Zero gradients
+                        optimizer.zero_grad()
+                        
+                        # Step the scheduler if it's time-based
+                        scheduler.step()
+                
+                except RuntimeError as e:
+                    if "out of memory" in str(e).lower():
+                        # Handle CUDA OOM errors
+                        logger.error(f"CUDA out of memory error: {e}")
+                        
+                        # More aggressive memory cleanup
+                        gc.collect()
+                        torch.cuda.empty_cache()
+                        optimizer.zero_grad()
+                        
+                        # Log memory state before reduction
+                        if device.type == 'cuda':
+                            memory_stats = get_gpu_memory_usage()
+                            logger.warning(f"Memory before batch reduction - Used: {memory_stats['allocated']:.1f} MB, "
+                                           f"Cached: {memory_stats['cached']:.1f} MB, "
+                                           f"Max: {memory_stats['max_allocated']:.1f} MB / {memory_stats['total']:.1f} MB")
+                        
+                        # Reduce batch size and try again
+                        if batch_size > 1:
+                            old_batch_size = batch_size
+                            batch_size = max(1, batch_size - 1)
+                            logger.warning(f"Reducing batch size from {old_batch_size} to {batch_size} due to OOM error")
+                            
+                            # Recreate data loaders with new batch size
+                            train_loader = DataLoader(
+                                train_dataset,
+                                batch_size=batch_size,
+                                shuffle=True,
+                                num_workers=num_workers,
+                                pin_memory=torch.cuda.is_available()
+                            )
+                            
+                            val_loader = DataLoader(
+                                val_dataset,
+                                batch_size=batch_size,
+                                shuffle=False,
+                                num_workers=num_workers,
+                                pin_memory=torch.cuda.is_available()
+                            )
+                            
+                            # Update config
+                            config['training']['batch_size'] = batch_size
+                            
+                            # Skip to the next epoch
+                            break
+                        else:
+                            logger.error("Batch size already at minimum, cannot reduce further")
+                            raise
+                    else:
+                        # Log other types of errors
+                        logger.error(f"Runtime error during training: {e}")
+                        raise
                 
                 # Check for NaN or inf in loss
-                if torch.isnan(loss) or torch.isinf(loss):
-                    logger.error(f"Loss is {loss.item()}, stopping training")
+                if torch.isnan(unscaled_loss) or torch.isinf(unscaled_loss):
+                    logger.error(f"Loss is {unscaled_loss}, stopping training")
                     raise ValueError("Loss is NaN or inf")
                 
                 # Detect training instability - check if loss is consistently increasing
@@ -642,68 +1114,25 @@ def train_with_samples(
                         accuracy = (predictions == y).float().mean().item()
                         logger.info(f"Batch accuracy: {accuracy:.2%}")
                 
-                # Backward pass with optional mixed precision
-                if mixed_precision:
-                    scaler.scale(loss).backward()
+                # Track memory usage periodically
+                if batch_idx % 100 == 0 and device.type == 'cuda':
+                    memory_stats = get_gpu_memory_usage()
+                    logger.info(f"GPU Memory - Allocated: {memory_stats['allocated']:.1f} MB, "
+                                f"Cached: {memory_stats['cached']:.1f} MB, "
+                                f"Max: {memory_stats['max_allocated']:.1f} MB / {memory_stats['total']:.1f} MB "
+                                f"({memory_stats['max_allocated']/memory_stats['total']*100:.1f}%)")
                     
-                    # Only update weights on non-accumulation steps
-                    if (batch_idx + 1) % accumulate_grad_batches == 0 or (batch_idx + 1 == len(train_loader)):
-                        scaler.unscale_(optimizer)
-                        
-                        # Diagnostic: check gradients
-                        if batch_idx % 100 == 0:
-                            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'))
-                            logger.info(f"Gradient norm before clipping: {grad_norm:.4f}")
-                            
-                            # Check for parameters without gradients
-                            params_without_grad = sum(1 for p in model.parameters() if p.grad is None)
-                            if params_without_grad > 0:
-                                logger.warning(f"{params_without_grad} parameters have no gradients!")
-                            
-                            # Sample some gradient values
-                            grad_sample = []
-                            for name, param in model.named_parameters():
-                                if param.grad is not None:
-                                    grad_sample.append((name, param.grad.abs().mean().item()))
-                                    if len(grad_sample) >= 5:
-                                        break
-                            logger.info(f"Gradient samples: {grad_sample}")
-                        
-                        # Apply actual gradient clipping
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    
-                    # Only update weights on non-accumulation steps
-                    if (batch_idx + 1) % accumulate_grad_batches == 0 or (batch_idx + 1 == len(train_loader)):
-                        # Diagnostic: check gradients
-                        if batch_idx % 100 == 0:
-                            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'))
-                            logger.info(f"Gradient norm before clipping: {grad_norm:.4f}")
-                            
-                            # Check for parameters without gradients
-                            params_without_grad = sum(1 for p in model.parameters() if p.grad is None)
-                            if params_without_grad > 0:
-                                logger.warning(f"{params_without_grad} parameters have no gradients!")
-                        
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                    optimizer.step()
-                    optimizer.zero_grad()
+                    writer.add_scalar('system/gpu_memory_used_mb', memory_stats['allocated'], global_step)
+                    writer.add_scalar('system/gpu_memory_percent', 
+                                     memory_stats['allocated']/memory_stats['total']*100, 
+                                     global_step)
                 
-                # Step the learning rate scheduler (after warmup period)
-                if global_step >= warmup_steps:
-                    scheduler.step()
-                else:
-                    # Linear warmup
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] = learning_rate * (global_step / warmup_steps)
-                
-                # Log current learning rate periodically
-                if batch_idx % 10 == 0:
-                    current_lr = optimizer.param_groups[0]['lr']
-                    writer.add_scalar('training/learning_rate', current_lr, global_step)
+                # Add more comprehensive OOM protection, with memory cleanup
+                if batch_idx % 500 == 0 and device.type == 'cuda':
+                    # Force garbage collection and clear cache periodically
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    logger.info("Performed memory cleanup - GC collect and CUDA cache emptied")
                 
                 # Update counters
                 global_step += 1
@@ -746,12 +1175,19 @@ def train_with_samples(
                     # Use unscaled loss for reporting to see true progress
                     logger.info(f"Epoch {epoch+1}/{epochs} - Batch {batch_idx}/{len(train_loader)} - Loss: {unscaled_loss:.4f} - {avg_tokens_per_second:.1f} tokens/s - ETA: {eta_str}")
                     writer.add_scalar('training/loss', unscaled_loss, global_step)
-                    writer.add_scalar('training/loss_scaled', loss.item(), global_step)
+                    writer.add_scalar('training/loss_scaled', unscaled_loss.item(), global_step)
                     writer.add_scalar('training/throughput', avg_tokens_per_second, global_step)
                 
-                # Generate sample text periodically (based on time interval)
+                # Generate sample text periodically (based on time interval or step interval)
                 current_time = time.time()
                 elapsed_since_last_sample = current_time - last_sample_time
+                
+                # Check if it's time to generate a sample (either by time or by step count)
+                generate_sample = elapsed_since_last_sample >= (sample_interval_minutes * 60)
+                
+                # Also generate sample every 500 steps
+                if global_step % 500 == 0 and global_step > 0:
+                    generate_sample = True
                 
                 # Save checkpoint periodically based on time interval
                 elapsed_since_last_checkpoint = current_time - last_checkpoint_time
@@ -773,7 +1209,7 @@ def train_with_samples(
                     max_checkpoints = config.get('training', {}).get('max_checkpoints_to_keep', 5)
                     cleanup_old_checkpoints("models", config_name, timestamp, max_to_keep=max_checkpoints)
                 
-                if elapsed_since_last_sample >= (sample_interval_minutes * 60):
+                if generate_sample:
                     last_sample_time = current_time
                     
                     model.eval()
