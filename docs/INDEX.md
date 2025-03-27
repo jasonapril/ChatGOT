@@ -1,59 +1,72 @@
-# ChatGoT Documentation Index
+# Documentation Index
 
-This is the central hub for all ChatGoT documentation. Use this index to find and navigate all documentation resources.
-
-## Documentation Files
-
-| Document | Category | Description | Last Updated |
-|---------|----------|-------------|--------------|
-| [README.md](README.md) | Overview | Main documentation README | 2024-03-24 |
-| [model.md](model.md) | Architecture | Model architecture details | 2024-03-24 |
-| [data_pipeline.md](data_pipeline.md) | Data | Data pipeline documentation | 2024-03-24 |
-| [optimizations.md](optimizations.md) | Performance | Performance optimizations | 2024-03-24 |
-| [logging.md](logging.md) | Utilities | Logging system documentation | 2024-03-24 |
-| [organization.md](organization.md) | Project | Project organization details | 2024-03-24 |
-| [performance.md](performance.md) | Performance | Performance measurements and tuning | 2024-03-24 |
-
-## Debugging Projects 
-
-| Document | Category | Description | Last Updated |
-|---------|----------|-------------|--------------|
-| [../DEBUGGING_PROGRESS.md](../DEBUGGING_PROGRESS.md) | Debugging | Tracks debugging progress with checklists | 2024-03-24 |
-| [../DEBUG_LOG.md](../DEBUG_LOG.md) | Debugging | Technical debug log with code modifications | 2024-03-24 |
-| [../IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) | Implementation | Prioritized implementation roadmap | 2024-03-24 |
-| [../DEBUGGING_README.md](../DEBUGGING_README.md) | Debugging | Guide for the debugging process | 2024-03-24 |
+This file serves as a central hub for all documentation in the AI model development environment.
 
 ## Documentation Structure
 
-ChatGoT documentation follows a standardized structure:
+Our documentation is organized into the following categories:
 
-### Categories
-- **Architecture**: Model design, components, and implementation details
-- **Data**: Data processing, formats, and pipelines
-- **Performance**: Optimization techniques and performance metrics
-- **Debugging**: Troubleshooting and development logs
-- **Utilities**: Supporting tools and utilities
-- **Project**: Organization and management details
+- **Guides** - Instructions and tutorials for using the system
+- **Logs** - Debugging and progress tracking
+- **Development** - Development process and workflow (in [dev/](../dev/) directory)
 
-### Naming Conventions
-- Main document files use `lowercase.md` format
-- Tracking documents use `UPPERCASE.md` format
-- Index files use `INDEX.md` or `README.md`
+## Guides
 
-## Documentation Roadmap
+| Document | Description |
+|----------|-------------|
+| [Debugging Guide](guides/debugging_guide.md) | Guide for the debugging process |
+| [Implementation Guide](guides/implementation_guide.md) | Prioritized implementation roadmap |
+| [Model Documentation](model.md) | Details about model architecture |
+| [Data Pipeline](data_pipeline.md) | Documentation for the data processing pipeline |
+| [Logging](logging.md) | Logging system documentation |
 
-- [x] Create initial documentation files
-- [x] Establish debugging tracking system
-- [ ] Organize into subdirectories by category
-- [ ] Expand architecture documentation
-- [ ] Add comprehensive API reference
-- [ ] Create user guides for training and inference
+## Development Documents
 
-## Contributing to Documentation
+| Document | Description |
+|----------|-------------|
+| [Refactoring Plan](../dev/planning/refactoring_plan.md) | Plan for project structure refactoring |
+| [Project State](../dev/planning/state.md) | Current state of the project |
+| [Project Roadmap](../dev/planning/roadmap.md) | Long-term project roadmap |
+| [Organization Guidelines](../dev/planning/organization.md) | Project organization guidelines |
+| [Project Status](../dev/planning/project_status.md) | Current project status |
+| [Performance](../dev/performance/performance.md) | Performance considerations and optimizations |
+| [Performance Optimizations](../dev/performance/optimizations.md) | Detailed performance optimizations |
 
-To add or modify documentation:
-1. Follow the established naming conventions
-2. Update this index when adding new documents
-3. Maintain consistent formatting within documents
-4. Include code examples where appropriate
-5. Link related documents for easy navigation 
+## Logs and Tracking
+
+| Document | Description |
+|----------|-------------|
+| [Debug Log](logs/debug_log.md) | Technical debug log with code modifications |
+| [Progress Log](logs/progress_log.md) | Tracks the overall debugging progress |
+
+## Development Workflow
+
+| Document | Description |
+|----------|-------------|
+| [Working Memory](../working_memory.md) | Active task tracking and current focus |
+| [Workflow System](../dev/workflow/workflow_system.md) | Development workflow guidelines |
+| [Dev Documentation](../dev/README.md) | Development structure and organization |
+| [User Preferences](../dev/preferences.md) | Long-term preferences and instructions |
+| [Preferences Loading](../dev/workflow/preferences_loading.md) | Guide for loading preferences into context |
+
+## Documentation Standards
+
+To maintain consistency across all documentation:
+
+### File Naming Conventions
+- Use lowercase with underscores for directory names (e.g., `project_docs/`)
+- Use lowercase with underscores for filenames (e.g., `debugging_guide.md`)
+- Follow consistent naming patterns within categories
+
+### Documentation Structure
+1. Start with a clear title and brief introduction
+2. Include a table of contents for longer documents
+3. Use consistent heading levels (# for title, ## for sections, etc.)
+4. Include code examples when relevant
+5. End with next steps or related documents
+
+## Next Steps
+
+- [ ] Review and update all documentation for consistency
+- [x] Complete the reorganization of development documentation
+- [x] Update cross-references between documents 

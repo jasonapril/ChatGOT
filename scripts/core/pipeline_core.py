@@ -27,7 +27,7 @@ from src.utils.device import setup_device
 from src.utils.model import set_seed
 
 class Pipeline:
-    """Pipeline manager for the complete ChatGoT training process."""
+    """Pipeline manager for the complete training process."""
     
     STAGES = ["process", "optimize", "train", "generate"]
     

@@ -20,7 +20,7 @@ import json
 
 from src.model import Model
 from src.training.generation import batch_generate, generate_text
-from src.monitoring.throughput_core import ThroughputMonitor
+from src.performance.throughput_core import ThroughputMonitor
 
 def run_benchmark(args: argparse.Namespace) -> Dict[str, Any]:
     """

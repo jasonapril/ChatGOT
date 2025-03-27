@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 """
-ChatGoT Training Pipeline
-========================
+Training Pipeline
 
-This script provides a complete pipeline for the ChatGoT project, handling:
+This script provides a complete pipeline, handling:
 1. Data processing from raw text files
 2. Optimization for the current environment (batch size, CUDA settings)
 3. Model training with checkpoints
@@ -35,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     Parse command line arguments for the pipeline.
     """
     parser = argparse.ArgumentParser(
-        description="Complete pipeline for processing data, optimizing, and training the ChatGoT model."
+        description="Complete pipeline for processing data, optimizing, and training the model."
     )
     
     # Pipeline control arguments
@@ -121,7 +120,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 class Pipeline:
-    """Pipeline manager for the complete ChatGoT training process."""
+    """Pipeline manager for the complete training process."""
     
     STAGES = ["process", "optimize", "train", "generate"]
     

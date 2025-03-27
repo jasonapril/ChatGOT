@@ -1189,7 +1189,7 @@ def train_with_samples(
                         mins = int((elapsed_seconds % 3600) // 60)
                         time_str = f"{days}d {hours}h {mins}m"
                     
-                    logger.info(f"\nSample after {time_str} of training (Epoch {epoch+1}, Batch {batch_idx}):")
+                    logger.info(f"Sample after {time_str} of training (Epoch {epoch+1}, Batch {batch_idx}):")
                     logger.info(f"Seed: {seed_text}")
                     logger.info(f"Generated: {generated_text}\n")
                     writer.add_text(f'samples/time_{time_str.replace(" ", "_")}', 

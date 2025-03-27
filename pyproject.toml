@@ -3,11 +3,11 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "chatgot"
+name = "Craft"
 version = "1.0.0"
 description = "An experimental framework for exploring and developing language models and other AI architectures"
 authors = [
-    { name = "ChatGoT Team" }
+    { name = "April Labs" }
 ]
 dependencies = [
     "torch>=2.0.0",
@@ -31,6 +31,7 @@ dependencies = [
     "scikit-learn>=1.3.0",
     "matplotlib>=3.7.0",
     "seaborn>=0.12.0",
+    "typer>=0.9.0",
 ]
 
 [project.optional-dependencies]
@@ -45,7 +46,7 @@ dev = [
 ]
 
 [project.scripts]
-chatgot = "src.cli.main:cli"
+craft = "src.cli.run:app"
 
 [tool.black]
 line-length = 100

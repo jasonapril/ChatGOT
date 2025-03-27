@@ -1,11 +1,11 @@
 """
-ChatGoT: Character-Level Transformer for Game of Thrones Text Generation
+Character-Level Transformer for Text Generation
 
 A framework for experimenting with language models and AI architectures.
 """
 
 __version__ = "1.0.0"
-__author__ = "ChatGoT Team"
+__author__ = "April Labs"
 
 # Import key components for easier access
 from .models.transformer import create_transformer_model, TransformerModel
@@ -17,9 +17,7 @@ from .utils.logging import setup_logger, log_section_header, force_flush_logs, f
 from .utils.common import (
     set_seed,
     setup_device,
-    save_checkpoint,
-    load_checkpoint,
-    get_latest_checkpoint,
-    create_output_dir,
-    save_args
+    get_memory_usage,
+    format_time,
+    format_number
 ) 

@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """
-ChatGoT Pipeline Continuation Script
+Pipeline Continuation Script
+
+This module allows continuing the pipeline from a specific stage.
 
 This script provides a convenient way to continue the pipeline
 from a specific stage, with validation checks along the way.
@@ -207,7 +209,7 @@ def run_validation():
 
 def main():
     """Main entry point for the script."""
-    parser = argparse.ArgumentParser(description="Continue ChatGoT pipeline from a specific stage.")
+    parser = argparse.ArgumentParser(description="Continue pipeline from a specific stage.")
     parser.add_argument("--stage", choices=["process", "train", "generate", "all"],
                         required=True, help="Pipeline stage to continue from")
     parser.add_argument("--skip-tests", action="store_true", help="Skip running tests")

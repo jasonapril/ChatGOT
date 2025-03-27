@@ -1,1 +1,0 @@
-"""Model definitions for the ChatGoT project.""" 

@@ -13,7 +13,7 @@ from ..data.dataset import prepare_dataloaders_from_config
 from ..training.trainer import train_with_samples
 from ..utils.metrics import calculate_metrics
 from ..utils.logging import get_logger, setup_logging
-from ..utils.monitoring import setup_monitoring, get_resource_metrics
+from ..utils.performance import setup_monitoring, get_resource_metrics
 
 logger = get_logger(__name__)
 

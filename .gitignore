@@ -37,12 +37,10 @@ ENV/
 # Project specific
 data/
 !src/data/
-!src/chatgot/data/
 checkpoints/
 models/
 !configs/models/
 !src/models/
-!src/chatgot/models/
 logs/
 *.pth
 *.pt

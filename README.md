@@ -1,149 +1,138 @@
-# ChatGoT
+# Craft
 
-An experimental framework for exploring and developing language models and other AI architectures.
+A modular framework for building, training, and evaluating AI models, with a current focus on character-level language modeling.
 
-## Project Goals
+## Overview
 
-1. **Architecture Exploration**
-   - Experiment with different model architectures
-   - Compare performance and efficiency
-   - Develop novel approaches
+Craft provides a flexible architecture for experimenting with different model types, training methods, and data sources. While initially specialized in language models like the character-level transformer for Game of Thrones-style text generation (ChatGoT), the framework is designed to be extended to other model types.
 
-2. **Performance Optimization**
-   - Memory efficiency
-   - Training speed
-   - Resource utilization
+## Features
 
-3. **Novel Applications**
-   - Character-level language modeling
-   - Efficient attention mechanisms
-   - Custom tokenization schemes
+- **Unified CLI**: Intuitive command-line interface for training, generation, and experiments
+- **Modular Design**: Clean separation between models, data processing, and training
+- **Configuration-Driven**: YAML-based configuration for experiments without code changes
+- **Optimized Training**: Performance optimizations for efficient training
+- **Checkpoint Management**: Built-in utilities for saving and loading model checkpoints
+- **Extensible Architecture**: Easily add new model types, datasets, and training methods
 
-4. **Research Platform**
-   - Reproducible experiments
-   - Comprehensive monitoring
-   - Extensible framework
+## Installation
 
-## Documentation
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/craft.git
+cd craft
 
-We maintain comprehensive documentation in the `docs/` directory:
+# Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-- [Documentation Index](docs/INDEX.md) - Central hub for all documentation
-- [Debugging Progress](DEBUGGING_PROGRESS.md) - Current debugging status
-- [Implementation Plan](IMPLEMENTATION_PLAN.md) - Feature implementation roadmap
+# Install the package
+pip install -e .
+```
 
-For debugging and development tracking, see:
-- [Debugging README](DEBUGGING_README.md) - Guide to our debugging process
-- [Technical Debug Log](DEBUG_LOG.md) - Detailed code changes and fixes
+## Quick Start
+
+### Command Line Interface
+
+Craft provides a unified command-line interface for all operations:
+
+```bash
+# Training a language model
+python scripts/craft train language --config configs/experiments/char_transformer.yaml
+
+# Generating text with a trained model
+python scripts/craft generate text --model models/char_transformer/best_model.pt --prompt "The king"
+
+# Preparing data for training
+python scripts/craft dataset prepare --input data/raw/got.txt --output-dir data/processed
+
+# Running a predefined experiment
+python scripts/craft experiment run --config configs/experiments/experiment1.yaml
+```
+
+### Python API
+
+You can also use Craft as a Python library:
+
+```python
+from src.models import create_model_from_config
+from src.data import create_data_manager
+from src.training import create_trainer_from_config
+from src.utils import load_experiment_config
+
+# Load configuration
+config = load_experiment_config("configs/experiments/char_transformer.yaml")
+
+# Create data manager and prepare data
+data_manager = create_data_manager(config["data"])
+train_loader, val_loader = data_manager.prepare_dataloaders("text", split=["train", "val"])
+
+# Create model
+model = create_model_from_config(config["model"])
+
+# Create trainer
+trainer = create_trainer_from_config(
+    model=model,
+    train_dataloader=train_loader,
+    val_dataloader=val_loader,
+    config=config["training"]
+)
+
+# Train model
+metrics = trainer.train()
+
+# Generate text
+generated_text = model.generate("In the name of", max_length=100)
+print(generated_text)
+```
 
 ## Project Structure
 
 ```
-.
-├── configs/                    # Configuration files
-│   ├── models/                # Model configurations
-│   ├── data/                  # Data processing configurations
-│   └── experiments/           # Experiment configurations
-├── data/                      # Data directory
-├── docs/                      # Documentation
-├── scripts/                   # Utility scripts
-├── src/                      # Source code
-└── tests/                   # Test files
+craft/
+├── configs/                # Configuration files
+│   ├── data/               # Data configurations
+│   ├── experiments/        # Combined experiment configurations
+│   ├── models/             # Model configurations
+│   └── training/           # Training configurations
+├── data/                   # Data storage
+│   ├── raw/                # Raw data files
+│   └── processed/          # Processed data
+├── docs/                   # Documentation
+│   ├── guides/             # User guides
+│   ├── architecture.md     # Architecture overview
+│   └── extending.md        # Extending the framework
+├── flow/                   # Task management system
+│   └── logs/               # Task logs
+├── models/                 # Saved models
+├── scripts/                # Scripts and entry points
+├── src/                    # Source code
+│   ├── cli/                # Command-line interface
+│   ├── config/             # Configuration management
+│   ├── data/               # Data loading and processing
+│   ├── models/             # Model definitions
+│   ├── training/           # Training loops and evaluation
+│   └── utils/              # Utilities
+└── tests/                  # Unit tests
 ```
 
-## Features
+## Documentation
 
-### Model Architectures
-- Character-level language models
-- Standard transformer architectures
-- Custom attention mechanisms
-- Efficient training optimizations
+Comprehensive documentation is available in the `docs/` directory:
 
-### Training and Optimization
-- Mixed precision training
-- Gradient checkpointing
-- Memory-efficient attention
-- Custom learning rate schedules
-
-### Development Tools
-- Comprehensive CLI
-- Experiment tracking
-- Resource monitoring
-- Performance profiling
-
-## Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/ChatGoT.git
-   cd ChatGoT
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -e ".[dev]"
-   ```
-
-## Usage
-
-### Training a Model
-
-```bash
-# Train character-level model
-chatgot train --config-path configs/models/chatgot_small_char.yaml
-
-# Train standard GPT-2 model
-chatgot train --config-path configs/models/gpt2_small.yaml
-```
-
-### Generating Text
-
-```bash
-chatgot generate --model-path path/to/model --prompt "Your prompt here"
-```
-
-### Running Experiments
-
-```bash
-chatgot experiment --config-path configs/experiments/example.yaml
-```
-
-## Configuration Management
-
-We use Hydra for configuration management. Key configuration files:
-
-- `configs/models/`: Model architectures and hyperparameters
-- `configs/data/`: Data processing and tokenization settings
-- `configs/experiments/`: Experiment configurations and comparisons
-
-## Development
-
-### Running Tests
-```bash
-pytest
-```
-
-### Code Formatting
-```bash
-black .
-isort .
-```
-
-## Experiment Tracking
-
-We use MLflow for tracking:
-- Training metrics
-- Model parameters
-- System resources
-- Generated samples
+- [Getting Started Guide](docs/guides/getting_started.md)
+- [Architecture Overview](docs/architecture.md)
+- [Extending Craft](docs/extending.md)
 
 ## Contributing
 
+Contributions are welcome! Please follow these steps:
+
 1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create a feature branch: `git checkout -b feature-name`
+3. Commit your changes: `git commit -m 'Add feature'`
+4. Push to the branch: `git push origin feature-name`
+5. Submit a pull request
 
 ## License
 

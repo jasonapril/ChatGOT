@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.monitoring.visualization import (
+from src.performance.visualization import (
     create_throughput_plot,
     create_component_breakdown_chart,
     create_memory_usage_chart,

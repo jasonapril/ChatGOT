@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.monitoring.instrumentation import (
+from src.performance.instrumentation import (
     InstrumentedModel,
     InstrumentedDataLoader,
     measure_batch,
@@ -20,7 +20,7 @@ from src.monitoring.instrumentation import (
     create_instrumented_dataloader,
     save_monitor_stats
 )
-from src.monitoring.throughput_core import ThroughputMonitor
+from src.performance.throughput_core import ThroughputMonitor
 
 class SimpleModel(nn.Module):
     """A simple model for testing."""

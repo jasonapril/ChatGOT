@@ -3,11 +3,13 @@ Transformer model implementation for character-level language modeling.
 """
 import math
 import logging
-from typing import Optional
+from typing import Optional, Tuple, Union, Dict, Any
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from .base import LanguageModel
 
 
 class PositionalEncoding(nn.Module):
@@ -54,7 +56,7 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-class TransformerModel(nn.Module):
+class TransformerModel(LanguageModel):
     """
     Transformer model for character-level language modeling.
     
@@ -92,9 +94,16 @@ class TransformerModel(nn.Module):
         super().__init__()
         
         # Store parameters
+        self.vocab_size = vocab_size
         self.d_model = d_model
         self.n_head = n_head
+        self.d_hid = d_hid
+        self.n_layers = n_layers
         self.max_seq_length = max_seq_length
+        self.layer_norm_eps = layer_norm_eps
+        self.activation = activation
+        self.bias = bias
+        self.dropout_rate = dropout
         
         # Token embedding
         self.token_embedding = nn.Embedding(vocab_size, d_model)
@@ -163,7 +172,7 @@ class TransformerModel(nn.Module):
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         return mask
     
-    def forward(self, x: torch.Tensor, targets: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, targets: Optional[torch.Tensor] = None) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass of the model.
         
@@ -238,64 +247,82 @@ class TransformerModel(nn.Module):
         self.eval()
         batch_size = input_ids.shape[0]
         
-        for i in range(max_new_tokens):
-            # If input_ids exceeds max length, truncate it
-            if input_ids.size(1) > self.max_seq_length:
-                input_ids = input_ids[:, -self.max_seq_length:]
-            
-            # Forward pass to get logits
-            with torch.no_grad():
-                logits = self(input_ids)
-                if isinstance(logits, tuple):
-                    logits = logits[0]  # Extract logits from (logits, loss) tuple
-                logits = logits[:, -1, :]  # Get logits for the last token
-            
-            # Apply temperature
-            logits = logits / temperature
-            
-            # Apply repetition penalty
-            if repetition_penalty != 1.0:
-                for b in range(batch_size):
-                    for token_id in set(input_ids[b].tolist()):
-                        logits[b, token_id] /= repetition_penalty
-            
-            # Apply top-k filtering
-            if top_k > 0:
-                indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-                logits[indices_to_remove] = float('-inf')
-            
-            # Apply top-p (nucleus) filtering
-            if top_p < 1.0:
-                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                
-                # Remove tokens with cumulative probability above the threshold
-                sorted_indices_to_remove = cumulative_probs > top_p
-                # Shift the indices to the right to keep also the first token above the threshold
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                sorted_indices_to_remove[..., 0] = 0
-                
-                # Scatter sorted tensors to original indexing
-                indices_to_remove = sorted_indices_to_remove.scatter(
-                    dim=1,
-                    index=sorted_indices,
-                    src=sorted_indices_to_remove
-                )
-                logits[indices_to_remove] = float('-inf')
-            
-            # Sample from the distribution
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-            
-            # Append new token to the sequence
-            input_ids = torch.cat((input_ids, next_token), dim=1)
-            
-            # Log progress if verbose
-            if verbose and (i + 1) % 10 == 0:
-                logging.info(f"Generated {i+1}/{max_new_tokens} tokens")
+        # Create list to store generated tokens
+        generated = input_ids.clone()
         
-        # Return the full sequence
-        return input_ids
+        # Create set to track generated tokens for repetition penalty
+        prev_tokens = set()
+        if repetition_penalty > 1.0:
+            for token in input_ids[0].tolist():
+                prev_tokens.add(token)
+        
+        with torch.no_grad():
+            for i in range(max_new_tokens):
+                # Get input sequence
+                curr_input_ids = generated
+                
+                # If sequence is too long, truncate from the beginning
+                if curr_input_ids.shape[1] > self.max_seq_length:
+                    curr_input_ids = curr_input_ids[:, -self.max_seq_length:]
+                
+                # Get logits for the next token
+                logits = self(curr_input_ids)
+                
+                # Get logits for the last token
+                next_token_logits = logits[:, -1, :]
+                
+                # Apply temperature
+                if temperature != 1.0:
+                    next_token_logits = next_token_logits / temperature
+                
+                # Apply repetition penalty
+                if repetition_penalty > 1.0:
+                    for token in prev_tokens:
+                        next_token_logits[:, token] /= repetition_penalty
+                
+                # Apply top-k and top-p filtering
+                from ..utils.generation import top_k_top_p_filtering
+                filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
+                
+                # Sample from the filtered distribution
+                probs = F.softmax(filtered_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                
+                # Add to generated tokens
+                generated = torch.cat((generated, next_token), dim=1)
+                
+                # Add to previous tokens set for repetition penalty
+                if repetition_penalty > 1.0:
+                    prev_tokens.add(next_token.item())
+                
+                # Print progress if verbose
+                if verbose and (i + 1) % 10 == 0:
+                    logging.info(f"Generated {i + 1}/{max_new_tokens} tokens")
+        
+        return generated
+    
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Get the model configuration.
+        
+        Returns:
+            Dictionary with the model configuration
+        """
+        config = super().get_config()
+        config.update({
+            'architecture': 'transformer',
+            'vocab_size': self.vocab_size,
+            'd_model': self.d_model,
+            'n_head': self.n_head,
+            'd_hid': self.d_hid,
+            'n_layers': self.n_layers,
+            'dropout': self.dropout_rate,
+            'max_seq_length': self.max_seq_length,
+            'layer_norm_eps': self.layer_norm_eps,
+            'activation': self.activation,
+            'bias': self.bias,
+        })
+        return config
 
 
 def create_transformer_model(

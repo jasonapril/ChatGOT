@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.monitoring.throughput_core import ThroughputMonitor
+from src.performance.throughput_core import ThroughputMonitor
 
 class TestThroughputMonitor(unittest.TestCase):
     """Unit tests for the ThroughputMonitor class."""

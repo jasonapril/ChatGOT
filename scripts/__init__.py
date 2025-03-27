@@ -1,13 +1,6 @@
-"""
-ChatGoT Pipeline Package
-========================
+"""Pipeline Package
 
-This package provides a complete pipeline for training and using
-text generation models, with stages for:
-- Data preprocessing
-- Model optimization
-- Model training
-- Text generation
-"""
+Collection of scripts and pipeline components for data processing,
+model training, and evaluation."""
 
 __version__ = '0.1.0' 

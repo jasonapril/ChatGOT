@@ -1,207 +1,138 @@
 """
-Common utility functions for the project.
+Common utilities for Craft.
+
+This module provides utility functions used across the framework.
 """
-import os
-import json
+import logging
 import random
-import torch
+from typing import Optional, Union
+
 import numpy as np
-from pathlib import Path
-from typing import Dict, Any, Optional, Union, Tuple
+import torch
 
 
-def set_seed(seed: int) -> None:
+def set_seed(seed: int = 42) -> None:
     """
-    Set random seed for reproducibility.
+    Set random seed for reproducibility across all libraries.
     
     Args:
-        seed: Random seed
+        seed: Random seed value
     """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        # Set deterministic algorithms where possible
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+    torch.cuda.manual_seed_all(seed)
+    
+    # Make CUDA operations deterministic
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    logging.info(f"Random seed set to {seed} for reproducibility")
 
 
-def setup_device(device_str: Optional[str] = None) -> torch.device:
+def setup_device(device_name: str = "auto") -> torch.device:
     """
-    Set up the device for training.
+    Set up and return the device for computation.
     
     Args:
-        device_str: Device string (e.g., 'cuda:0', 'cpu', or None for auto-detect)
+        device_name: Device specification ('auto', 'cpu', 'cuda', 'cuda:0', etc.)
         
     Returns:
-        PyTorch device
+        Configured PyTorch device
     """
-    if device_str is None or device_str == "auto":
-        device_str = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    device = torch.device(device_str)
-    
-    if device.type == "cuda":
-        # Log device info
-        device_name = torch.cuda.get_device_name(device.index or 0)
-        device_capability = torch.cuda.get_device_capability(device.index or 0)
-        print(f"Using GPU: {device_name} with CUDA capability {device_capability[0]}.{device_capability[1]}")
-        
-        # Optimize for the device
-        if device_capability[0] >= 7:  # Volta or newer
-            print("Using tensor cores for mixed precision training")
+    if device_name == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
-        print("Using CPU for training (this will be slow)")
+        device = torch.device(device_name)
+    
+    # Log device information
+    if device.type == "cuda":
+        device_properties = torch.cuda.get_device_properties(device)
+        logging.info(f"Using GPU: {torch.cuda.get_device_name(device)}")
+        logging.info(f"  - Total memory: {device_properties.total_memory / 1024**3:.2f} GB")
+        logging.info(f"  - CUDA capability: {device_properties.major}.{device_properties.minor}")
+    else:
+        logging.info("Using CPU for computation")
     
     return device
 
 
-def save_checkpoint(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    scheduler: Any,
-    epoch: int,
-    metrics: Dict[str, float],
-    save_path: str,
-    is_best: bool = False
-) -> None:
+def get_memory_usage() -> dict:
     """
-    Save a model checkpoint.
+    Get current memory usage.
     
-    Args:
-        model: PyTorch model
-        optimizer: Optimizer
-        scheduler: Learning rate scheduler
-        epoch: Current epoch
-        metrics: Evaluation metrics
-        save_path: Path to save the checkpoint
-        is_best: Whether this is the best model so far
+    Returns:
+        Dictionary with memory usage information
     """
-    # Create directory if it doesn't exist
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    
-    # Create checkpoint dict
-    checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'metrics': metrics,
+    memory_stats = {
+        "cpu": {}
     }
     
-    # Add scheduler state if it exists
-    if scheduler is not None:
-        checkpoint['scheduler_state_dict'] = scheduler.state_dict()
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        memory_stats["cpu"]["used"] = memory_info.rss / (1024**2)  # MB
+        memory_stats["cpu"]["percent"] = process.memory_percent()
+    except ImportError:
+        memory_stats["cpu"]["used"] = None
+        memory_stats["cpu"]["percent"] = None
     
-    # Save checkpoint
-    torch.save(checkpoint, save_path)
+    if torch.cuda.is_available():
+        memory_stats["cuda"] = {}
+        memory_stats["cuda"]["used"] = torch.cuda.memory_allocated() / (1024**2)  # MB
+        memory_stats["cuda"]["reserved"] = torch.cuda.memory_reserved() / (1024**2)  # MB
+        memory_stats["cuda"]["max_used"] = torch.cuda.max_memory_allocated() / (1024**2)  # MB
+        
+        # Get per-device information
+        memory_stats["cuda"]["devices"] = {}
+        for i in range(torch.cuda.device_count()):
+            device_stats = {}
+            device_stats["used"] = torch.cuda.memory_allocated(i) / (1024**2)  # MB
+            device_stats["reserved"] = torch.cuda.memory_reserved(i) / (1024**2)  # MB
+            device_stats["total"] = torch.cuda.get_device_properties(i).total_memory / (1024**2)  # MB
+            memory_stats["cuda"]["devices"][i] = device_stats
     
-    # If this is the best model, save a copy
-    if is_best:
-        best_path = os.path.join(os.path.dirname(save_path), 'best_model.pt')
-        torch.save(checkpoint, best_path)
+    return memory_stats
 
 
-def load_checkpoint(
-    model: torch.nn.Module,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[Any] = None,
-    device: Optional[torch.device] = None,
-    checkpoint_path: str = None
-) -> Tuple[torch.nn.Module, Dict[str, Any]]:
+def format_time(seconds: float) -> str:
     """
-    Load a model checkpoint.
+    Format time in seconds to a human-readable string.
     
     Args:
-        model: PyTorch model
-        optimizer: Optimizer (optional)
-        scheduler: Learning rate scheduler (optional)
-        device: Device to load the model to
-        checkpoint_path: Path to the checkpoint
+        seconds: Time in seconds
         
     Returns:
-        Tuple of (model, checkpoint_dict)
+        Formatted time string
     """
-    if device is None:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    
-    # Load model state
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.to(device)
-    
-    # Load optimizer state if provided
-    if optimizer is not None and 'optimizer_state_dict' in checkpoint:
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    
-    # Load scheduler state if provided
-    if scheduler is not None and 'scheduler_state_dict' in checkpoint:
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-    
-    return model, checkpoint
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    elif seconds < 3600:
+        minutes = int(seconds / 60)
+        seconds = seconds % 60
+        return f"{minutes}m {seconds:.2f}s"
+    else:
+        hours = int(seconds / 3600)
+        seconds = seconds % 3600
+        minutes = int(seconds / 60)
+        seconds = seconds % 60
+        return f"{hours}h {minutes}m {seconds:.2f}s"
 
 
-def get_latest_checkpoint(checkpoint_dir: str, pattern: str = "model_epoch_*.pt") -> Optional[str]:
+def format_number(number: Union[int, float]) -> str:
     """
-    Get the path to the latest checkpoint in a directory.
+    Format a number with commas for easier reading.
     
     Args:
-        checkpoint_dir: Directory containing checkpoints
-        pattern: Glob pattern for checkpoint files
+        number: Number to format
         
     Returns:
-        Path to the latest checkpoint or None if no checkpoints found
+        Formatted number string
     """
-    checkpoint_dir = Path(checkpoint_dir)
-    if not checkpoint_dir.exists():
-        return None
-    
-    checkpoints = list(checkpoint_dir.glob(pattern))
-    if not checkpoints:
-        return None
-    
-    # Sort by modification time
-    latest_checkpoint = max(checkpoints, key=lambda p: p.stat().st_mtime)
-    return str(latest_checkpoint)
-
-
-def create_output_dir(base_dir: str, experiment_name: str) -> str:
-    """
-    Create an output directory for an experiment.
-    
-    Args:
-        base_dir: Base directory
-        experiment_name: Name of the experiment
-        
-    Returns:
-        Path to the created directory
-    """
-    # Create a timestamped directory
-    timestamp = torch.tensor(0).get_device()  # Get current timestamp
-    output_dir = os.path.join(base_dir, f"{experiment_name}_{timestamp}")
-    os.makedirs(output_dir, exist_ok=True)
-    
-    return output_dir
-
-
-def save_args(args: Dict[str, Any], save_path: str) -> None:
-    """
-    Save arguments to a JSON file.
-    
-    Args:
-        args: Dictionary of arguments
-        save_path: Path to save the JSON file
-    """
-    # Convert any non-serializable types to strings
-    serializable_args = {}
-    for k, v in args.items():
-        if isinstance(v, (int, float, str, bool, list, dict, tuple, type(None))):
-            serializable_args[k] = v
-        else:
-            serializable_args[k] = str(v)
-    
-    # Save to file
-    with open(save_path, 'w') as f:
-        json.dump(serializable_args, f, indent=2) 
+    if isinstance(number, int):
+        return f"{number:,}"
+    elif isinstance(number, float):
+        return f"{number:,.2f}"
+    else:
+        return str(number) 

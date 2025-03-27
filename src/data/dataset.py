@@ -4,8 +4,10 @@ Dataset implementations for character-level models.
 import torch
 from torch.utils.data import Dataset
 
+from .base import TextDataset
 
-class CharDataset(Dataset):
+
+class CharDataset(TextDataset):
     """Character-level dataset for transformer models."""
     
     def __init__(self, text, block_size):
@@ -16,6 +18,7 @@ class CharDataset(Dataset):
             text (str): The training text
             block_size (int): Maximum sequence length
         """
+        super().__init__()
         self.text = text
         self.block_size = block_size
         
@@ -61,6 +64,21 @@ class CharDataset(Dataset):
         if isinstance(indices, torch.Tensor):
             indices = indices.tolist()
         return ''.join([self.idx_to_char[i] for i in indices])
+    
+    def get_config(self) -> dict:
+        """
+        Get the dataset configuration.
+        
+        Returns:
+            Dictionary with the dataset configuration
+        """
+        config = super().get_config()
+        config.update({
+            "format": "character",
+            "block_size": self.block_size,
+            "vocab_size": self.vocab_size,
+        })
+        return config
 
 
 def load_data(text_path, block_size=1024):

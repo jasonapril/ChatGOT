@@ -23,7 +23,7 @@ from pipeline.core.pipeline_core import Pipeline
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='ChatGoT: Text Generation Pipeline',
+        description='Text Generation Pipeline',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     

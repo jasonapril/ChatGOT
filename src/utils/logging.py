@@ -1,5 +1,7 @@
 """
-Logging utilities for the project.
+Logging utilities for Craft.
+
+This module provides utilities for setting up and using loggers throughout the project.
 """
 import os
 import sys
@@ -7,6 +9,37 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Optional
+
+
+def setup_logging(
+    level: str = "INFO",
+    log_file: Optional[str] = None,
+    console: bool = True
+) -> None:
+    """
+    Configure the root logger with consistent formatting.
+    
+    Args:
+        level: Logging level (e.g., "INFO", "DEBUG")
+        log_file: Path to log file (None for no file output)
+        console: Whether to log to console
+    """
+    # Convert string level to logging constant
+    numeric_level = getattr(logging, level.upper(), logging.INFO)
+    
+    # Configure root logger
+    setup_logger(
+        name=None,  # Root logger
+        level=numeric_level,
+        log_file=log_file,
+        console=console
+    )
+    
+    # Adjust third-party loggers to reduce noise
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("matplotlib").setLevel(logging.WARNING)
+    
+    logging.info(f"Logging configured with level {level}")
 
 
 def setup_logger(
@@ -46,7 +79,7 @@ def setup_logger(
     
     # Add file handler if log_file provided
     if log_file:
-        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)

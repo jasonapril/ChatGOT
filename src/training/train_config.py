@@ -16,10 +16,13 @@ Usage:
     Typically used by train_runner.py to parse command-line arguments.
 """
 
+import os
+import sys
 import argparse
 import logging
-import os
 from typing import Dict, Any, Tuple, Optional, List
+
+from src.utils import create_output_dir
 
 def parse_args() -> argparse.Namespace:
     """
@@ -164,7 +167,6 @@ def parse_args() -> argparse.Namespace:
     
     # Create output directory if needed
     if args.output_dir is None:
-        from src.utils.io import create_output_dir
         args.output_dir = create_output_dir("runs")
     else:
         os.makedirs(args.output_dir, exist_ok=True)

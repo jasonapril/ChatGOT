@@ -17,8 +17,8 @@ import json
 
 from src.model import Model
 from src.data_handler import DataHandler
-from src.monitoring.throughput_core import ThroughputMonitor
-from src.monitoring.instrumentation import create_instrumented_model, create_instrumented_dataloader
+from src.performance.throughput_core import ThroughputMonitor
+from src.performance.instrumentation import create_instrumented_model, create_instrumented_dataloader
 from src.training.training_loop import train_epoch
 
 def run_benchmark(args: argparse.Namespace) -> Dict[str, Any]:
