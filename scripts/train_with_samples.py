@@ -50,7 +50,7 @@ sys.path.append(str(project_root))
 
 from src.data.dataset import CharDataset
 from src.models.transformer import TransformerModel, create_transformer_model
-from src.models.gpt_decoder import GPTDecoder, create_gpt_decoder
+from src.models.gpt_decoder import GPTDecoder, create_gpt_model
 from src.utils.generation import generate_sample_text, sample_text
 from src.utils.memory import get_memory_optimized_settings, preallocate_gpu_memory
 from src.utils.metrics import calculate_tokens_per_second
@@ -59,7 +59,7 @@ from src.utils.metrics import calculate_tokens_per_second
 def setup_logging(config_name=None):
     """Set up logging with both console (colored) and file (clean) output."""
     # Create logs directory if it doesn't exist
-    os.makedirs("logs", exist_ok=True)
+    os.makedirs("outputs/logs", exist_ok=True)
     
     # Create a formatter without color codes for file logging
     file_formatter = logging.Formatter(
@@ -69,7 +69,7 @@ def setup_logging(config_name=None):
     
     # Create a detailed file name with timestamp
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_filename = f"logs/train_{config_name}_{timestamp}.log" if config_name else f"logs/train_{timestamp}.log"
+    log_filename = f"outputs/logs/train_{config_name}_{timestamp}.log" if config_name else f"outputs/logs/train_{timestamp}.log"
     
     # Set up file handler with rotation (10 MB max size, keep 5 backups)
     file_handler = logging.handlers.RotatingFileHandler(
@@ -272,10 +272,10 @@ def setup_tensorboard(config, config_name=None, log_file=None):
     experiment_name = config.get('experiment_name', config_name or 'default')
     
     # Ensure the logs directory exists
-    os.makedirs("logs/tensorboard", exist_ok=True)
+    os.makedirs("outputs/logs/tensorboard", exist_ok=True)
     
     # Always use logs/tensorboard, ignoring any config setting
-    log_dir = os.path.join('logs/tensorboard', f"{experiment_name}_{timestamp}")
+    log_dir = os.path.join('outputs/logs/tensorboard', f"{experiment_name}_{timestamp}")
     writer = SummaryWriter(log_dir=log_dir)
     
     # Log the tensorboard directory
@@ -508,7 +508,7 @@ def train_with_samples(
     logger.info(f"Creating model with type: {model_type}")
     if model_type == "gpt_decoder":
         # Import the GPT decoder model if needed
-        from src.models.gpt_decoder import create_gpt_decoder
+        from src.models.gpt_decoder import create_gpt_model
         
         # Adjust initialization to start closer to random prediction
         # Use smaller init range for more conservative initial predictions
@@ -516,7 +516,7 @@ def train_with_samples(
         init_range_adjusted = min(init_range, 0.01)  # Cap to avoid too large initial weights
         arch_config['init_range'] = init_range_adjusted
         
-        model = create_gpt_decoder(
+        model = create_gpt_model(
             vocab_size=vocab_size,
             d_model=d_model,
             n_head=n_head,
@@ -702,7 +702,7 @@ def train_with_samples(
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     
     # Create models directory if it doesn't exist
-    os.makedirs("models", exist_ok=True)
+    os.makedirs("outputs/models", exist_ok=True)
     
     # Checkpoint settings - only time-based, not step-based
     last_checkpoint_time = time.time()
@@ -711,7 +711,7 @@ def train_with_samples(
     logger.info(f"Starting training for {epochs} epochs")
     logger.info(f"Model configuration: {arch_config}")
     logger.info(f"Training with batch size: {batch_size}, learning rate: {learning_rate}")
-    logger.info(f"Checkpoints will be saved every {checkpoint_interval_minutes} minutes to: models/{config_name}_{timestamp}_step_X.pt")
+    logger.info(f"Checkpoints will be saved every {checkpoint_interval_minutes} minutes to: outputs/models/{config_name}_{timestamp}_step_X.pt")
     
     # Ensure all parameters have requires_grad=True
     for param in model.parameters():
@@ -1096,7 +1096,7 @@ def train_with_samples(
                 if elapsed_since_last_checkpoint >= (checkpoint_interval_minutes * 60):
                     last_checkpoint_time = current_time
                     # Save time-based checkpoint
-                    checkpoint_path = os.path.join("models", f"{config_name}_{timestamp}_step_{global_step}.pt")
+                    checkpoint_path = os.path.join("outputs/models", f"{config_name}_{timestamp}_step_{global_step}.pt")
                     torch.save({
                         'epoch': epoch,
                         'global_step': global_step,
@@ -1109,7 +1109,7 @@ def train_with_samples(
                     
                     # Cleanup old checkpoints, keeping only the 5 most recent ones
                     max_checkpoints = config.get('training', {}).get('max_checkpoints_to_keep', 5)
-                    cleanup_old_checkpoints("models", config_name, timestamp, max_to_keep=max_checkpoints)
+                    cleanup_old_checkpoints("outputs/models", config_name, timestamp, max_to_keep=max_checkpoints)
                 
                 # Generate sample text periodically (based ONLY on time interval, not step count)
                 elapsed_since_last_sample = current_time - last_sample_time
@@ -1295,7 +1295,7 @@ def train_with_samples(
             model.train()
             
             # Save model checkpoint with new naming convention
-            checkpoint_path = os.path.join("models", f"{config_name}_{timestamp}_epoch_{epoch+1}.pt")
+            checkpoint_path = os.path.join("outputs/models", f"{config_name}_{timestamp}_epoch_{epoch+1}.pt")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -1307,7 +1307,7 @@ def train_with_samples(
             logger.info(f"Model checkpoint saved to {checkpoint_path}")
         
         # Save the final model with new naming convention
-        final_model_path = os.path.join("models", f"{config_name}_{timestamp}_final.pt")
+        final_model_path = os.path.join("outputs/models", f"{config_name}_{timestamp}_final.pt")
         torch.save({
             'epoch': epochs,
             'model_state_dict': model.state_dict(),

@@ -18,7 +18,9 @@ class CharDataset(TextDataset):
             text (str): The training text
             block_size (int): Maximum sequence length
         """
-        super().__init__()
+        # Create a minimal config to pass to the parent class
+        config = {'paths': {'data': None}, 'data': {'format': 'character'}}
+        super().__init__(config)
         self.text = text
         self.block_size = block_size
         

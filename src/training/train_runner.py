@@ -40,7 +40,10 @@ from src.utils import (
     get_latest_checkpoint,
     create_output_dir,
     save_args,
-    setup_logging
+    setup_logging,
+    ensure_directory,
+    load_json,
+    save_json
 )
 from src.training.train_config import parse_args, prepare_training_config
 from src.training.optimizations import (
@@ -51,6 +54,9 @@ from src.training.optimizations import (
     setup_torch_compile,
     configure_activation_checkpointing
 )
+from src.data.language_dataset import LanguageDataset
+from src.models.gpt_decoder import GPTDecoderModel
+from src.training.language_trainer import LanguageTrainer
 
 def main():
     """Main training function."""
@@ -271,6 +277,171 @@ def main():
             temperature=args.temperature,
             device=device
         )
+
+class TrainRunner:
+    """Runner class for training language models."""
+    
+    def __init__(self, config_path: str):
+        """
+        Initialize the training runner.
+        
+        Args:
+            config_path: Path to the configuration file
+        """
+        self.config = load_json(config_path)
+        self.config_path = config_path
+        
+        # Set up output directory
+        self.output_dir = self.config.get('output_dir', 'runs')
+        ensure_directory(self.output_dir)
+        
+        # Set up device
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logging.info(f"Using device: {self.device}")
+    
+    def run(self) -> None:
+        """Run the training process."""
+        # Initialize model
+        model = self._initialize_model()
+        model.to(self.device)
+        logging.info(f"Initialized model: {type(model).__name__}")
+        
+        # Load dataset
+        train_dataset, val_dataset = self._load_datasets()
+        
+        # Initialize trainer
+        trainer = self._initialize_trainer(model)
+        
+        # Create data loaders
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=self.config.get('batch_size', 32),
+            shuffle=True,
+            num_workers=self.config.get('num_workers', 4)
+        )
+        
+        val_loader = None
+        if val_dataset is not None:
+            val_loader = torch.utils.data.DataLoader(
+                val_dataset,
+                batch_size=self.config.get('batch_size', 32),
+                shuffle=False,
+                num_workers=self.config.get('num_workers', 4)
+            )
+        
+        # Train the model
+        logging.info("Starting training")
+        results = trainer.train(
+            train_loader=train_loader,
+            val_loader=val_loader,
+            epochs=self.config.get('epochs', 10)
+        )
+        
+        # Save the final model
+        final_model_path = os.path.join(self.output_dir, 'final_model.pt')
+        trainer.save_checkpoint(final_model_path)
+        logging.info(f"Final model saved to {final_model_path}")
+        
+        # Save training results
+        results_path = os.path.join(self.output_dir, 'training_results.json')
+        save_json(results, results_path)
+        logging.info(f"Training results saved to {results_path}")
+        
+        logging.info("Training completed")
+    
+    def _initialize_model(self) -> torch.nn.Module:
+        """
+        Initialize the model based on configuration.
+        
+        Returns:
+            Initialized model
+        """
+        model_config = self.config.get('model', {})
+        model_type = model_config.get('type', 'transformer')
+        
+        if model_type == 'transformer':
+            return TransformerModel(model_config)
+        elif model_type == 'gpt_decoder':
+            return GPTDecoderModel(model_config)
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+    
+    def _load_datasets(self) -> tuple:
+        """
+        Load datasets for training and validation.
+        
+        Returns:
+            Tuple of (train_dataset, val_dataset)
+        """
+        data_config = self.config.get('data', {})
+        
+        train_dataset = LanguageDataset(
+            data_path=data_config.get('train_path'),
+            vocab_size=data_config.get('vocab_size', 256),
+            sequence_length=data_config.get('sequence_length', 128),
+            is_character_level=data_config.get('is_character_level', True)
+        )
+        
+        val_dataset = None
+        if 'val_path' in data_config:
+            val_dataset = LanguageDataset(
+                data_path=data_config.get('val_path'),
+                vocab_size=data_config.get('vocab_size', 256),
+                sequence_length=data_config.get('sequence_length', 128),
+                is_character_level=data_config.get('is_character_level', True),
+                vocab=train_dataset.vocab  # Share vocabulary with training dataset
+            )
+        
+        return train_dataset, val_dataset
+    
+    def _initialize_trainer(self, model: torch.nn.Module) -> LanguageTrainer:
+        """
+        Initialize the trainer.
+        
+        Args:
+            model: Model to train
+            
+        Returns:
+            Initialized trainer
+        """
+        # Get optimizer configuration
+        optim_config = self.config.get('optimizer', {})
+        optim_type = optim_config.get('type', 'adam')
+        lr = optim_config.get('learning_rate', 0.001)
+        
+        # Initialize optimizer
+        if optim_type == 'adam':
+            optimizer = torch.optim.Adam(
+                model.parameters(),
+                lr=lr,
+                weight_decay=optim_config.get('weight_decay', 0.0)
+            )
+        elif optim_type == 'sgd':
+            optimizer = torch.optim.SGD(
+                model.parameters(),
+                lr=lr,
+                momentum=optim_config.get('momentum', 0.9),
+                weight_decay=optim_config.get('weight_decay', 0.0)
+            )
+        else:
+            raise ValueError(f"Unsupported optimizer: {optim_type}")
+        
+        # Initialize trainer
+        trainer = LanguageTrainer(
+            model=model,
+            optimizer=optimizer,
+            device=self.device,
+            config=self.config
+        )
+        
+        # Load checkpoint if specified
+        if 'resume_from' in self.config:
+            checkpoint_path = self.config['resume_from']
+            if os.path.exists(checkpoint_path):
+                logging.info(f"Resuming from checkpoint: {checkpoint_path}")
+                trainer.load_checkpoint(checkpoint_path)
+        
+        return trainer
 
 if __name__ == "__main__":
     main() 

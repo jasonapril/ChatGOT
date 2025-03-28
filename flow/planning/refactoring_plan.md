@@ -1,143 +1,124 @@
 # Refactoring Plan
 
-*Part of the Flow System. See also: [Tasks](../active/tasks.md), [Priorities](priorities.md).*
-
 ## Overview
 
-This document outlines the comprehensive refactoring plan for the Craft project. The refactoring aims to improve code organization, reduce technical debt, and create a more maintainable architecture.
+This document outlines our comprehensive plan for refactoring the project structure and documentation. It aims to create a maintainable, organized, and effective system that aligns with our workflow principles.
 
-## Current Status
+## Objectives
 
-We've made significant progress on several aspects of the refactoring:
+- Establish a clear and organized project structure.
+- Reorganize scattered documentation under a unified hierarchy.
+- Improve project tracking and version control.
+- Address performance challenges (such as low GPU utilization).
 
-- ✅ Implemented basic folder structure
-- ✅ Consolidated CLI implementation using Typer
-- ✅ Added missing utility modules
-- ✅ Created basic unit tests
+## Phased Approach
 
-However, there are still important refactoring tasks that need to be completed before we can focus on new features or optimizations.
+### Phase 1: Planning and Preparation
+- Inventory existing documentation and code structure.
+- Define key milestones, deliverables, and responsibilities.
+- Identify critical dependencies and topics for in-depth review.
 
-## Priority Refactoring Tasks
+### Phase 2: Execution
+- Implement folder structure cleanup and documentation migration.
+- Set up the state tracking system and integrate it with our workflow.
+- Establish testing and validation procedures for the refactoring process.
 
-### 1. Complete Model Architecture Refactoring 🔴
-
-The model architecture still contains legacy code patterns and needs to be updated to match the new project structure.
-
-**Tasks:**
-- Create a proper abstraction hierarchy for model types
-- Implement clean interfaces between model components
-- Separate model definition from training logic
-- Ensure consistent naming conventions across model files
-
-**Success Criteria:**
-- All model code follows the same architectural patterns
-- Models can be swapped without changing training code
-- Code duplication in model definitions is eliminated
-
-### 2. Standardize Data Pipeline 🟠
-
-The data processing pipeline has inconsistencies and redundancies that need to be resolved.
-
-**Tasks:**
-- Create a unified data loading interface
-- Standardize preprocessing steps
-- Implement dataset versioning
-- Add data validation hooks
-
-**Success Criteria:**
-- Data loading is consistent across all model types
-- Preprocessing steps are clearly documented and reusable
-- Datasets can be versioned and reproduced reliably
-
-### 3. Update Configuration System 🟠
-
-The configuration system needs to be updated to support the new project structure.
-
-**Tasks:**
-- Replace hardcoded values with configuration options
-- Implement validation for configuration values
-- Create a configuration management system
-- Add support for environment-specific configurations
-
-**Success Criteria:**
-- All configurable values are defined in configuration files
-- Configuration is validated at runtime
-- Different environments (dev, test, prod) can be easily configured
-
-### 4. Refactor Training Loop 🟡
-
-The training loop contains duplicated code and lacks proper abstractions.
-
-**Tasks:**
-- Extract common training functionality into a base trainer
-- Implement hooks for custom training behavior
-- Add support for different optimization strategies
-- Create proper abstractions for evaluation metrics
-
-**Success Criteria:**
-- Training code is modular and reusable
-- Custom training behavior can be implemented without modifying core code
-- Evaluation metrics are consistently tracked and reported
-
-## Implementation Plan
-
-### Phase 1: Model Architecture Refactoring (1 week)
-
-1. **Day 1-2:** Analyze current model implementations and identify common patterns
-2. **Day 3-4:** Design and implement base model interfaces and abstract classes
-3. **Day 5-7:** Refactor existing models to use the new architecture
-
-### Phase 2: Data Pipeline Standardization (5 days)
-
-1. **Day 1-2:** Create unified data loading interface
-2. **Day 3-4:** Implement standardized preprocessing steps
-3. **Day 5:** Add dataset versioning and validation
-
-### Phase 3: Configuration System Update (3 days)
-
-1. **Day 1:** Replace hardcoded values with configuration options
-2. **Day 2:** Implement configuration validation
-3. **Day 3:** Add support for environment-specific configurations
-
-### Phase 4: Training Loop Refactoring (4 days)
-
-1. **Day 1-2:** Extract common training functionality
-2. **Day 3:** Implement hooks for custom behavior
-3. **Day 4:** Add support for different optimization strategies
-
-## Risk Assessment
-
-**Potential Risks:**
-- Refactoring may temporarily break existing functionality
-- Integration testing may reveal unforeseen dependencies
-- Documentation may become outdated during rapid changes
-
-**Mitigation Strategies:**
-- Implement comprehensive unit tests before major changes
-- Regular integration testing throughout the refactoring process
-- Update documentation immediately after code changes
-- Create a rollback plan for each major change
-
-## Success Metrics
-
-The refactoring will be considered successful if:
-
-1. All tests pass after each phase
-2. Code duplication is reduced by at least 30%
-3. All configuration options are properly documented
-4. New model types can be added with minimal code changes
-5. Training customization requires no modification to core code
-
-## Dependencies
-
-- Complete unit test suite to validate changes
-- Documentation updates to reflect new architecture
-- CI/CD pipeline for automated testing
+### Phase 3: Refinement and Retrospection
+- Conduct a retrospective review to capture lessons learned and define success metrics.
+- Archive completed tasks and reconcile the active task queue in our workflow system.
+- Update long-term documentation (e.g., roadmap.md, backlog.md) with finalized insights.
 
 ## Next Steps
 
-After completing this refactoring, we will be well-positioned to:
-1. Implement performance optimizations
-2. Add new model architectures
-3. Expand dataset support
-4. Improve the overall user experience 
+- Finalize detailed task breakdowns for each phase.
+- Integrate this plan with our Workflow System (see [Workflow System Guidelines](../workflow/workflow_system.md)) and the [Working Memory](../../working_memory.md) file.
+- Schedule a review session to iterate and refine the plan based on ongoing progress.
+
+## Detailed Task Breakdown
+
+### Phase 1: Planning and Preparation
+
+#### Code Organization Analysis
+- [ ] Conduct static analysis of project imports and dependencies
+- [ ] Identify circular dependencies and code coupling issues
+- [ ] Map current module relationships with dependency graphs
+- [ ] Determine which components can be extracted into standalone libraries
+
+#### Performance Assessment
+- [ ] Profile model training and inference to identify bottlenecks
+- [ ] Analyze GPU memory usage patterns and optimization opportunities
+- [ ] Benchmark data loading pipeline to identify potential improvements
+- [ ] Evaluate framework-specific optimizations (PyTorch, CUDA)
+
+#### Testing Framework Requirements
+- [ ] Document coverage gaps in current test suite
+- [ ] Define requirements for integration and unit test improvements
+- [ ] Establish benchmarking metrics and performance regression tests
+- [ ] Design test data management for consistent evaluation
+
+### Phase 2: Execution
+
+#### Code Restructuring
+- [ ] Implement proper package structure with clear API boundaries
+- [ ] Extract data processing pipelines into dedicated modules
+- [ ] Refactor model code to improve composition and inheritance patterns
+- [ ] Update import structure across the codebase
+
+#### Performance Optimizations
+- [ ] Implement batch size auto-tuning based on available GPU memory
+- [ ] Add gradient checkpointing configuration for larger models
+- [ ] Optimize data loading with prefetching and caching
+- [ ] Implement optional mixed precision training
+
+#### Testing Infrastructure
+- [ ] Create CI pipeline for automated testing
+- [ ] Develop parameterized tests for model configurations
+- [ ] Implement performance regression tests with history tracking
+- [ ] Add test data versioning for reproducibility
+
+### Phase 3: Refinement and Retrospection
+
+#### Integration and System Testing
+- [ ] Verify end-to-end functionality with complete pipelines
+- [ ] Benchmark performance improvements against baseline metrics
+- [ ] Document any regressions or issues discovered
+- [ ] Address edge cases and potential failure modes
+
+#### Documentation Updates
+- [ ] Update API documentation to reflect new structure
+- [ ] Create architecture diagrams for major subsystems
+- [ ] Document performance tuning guidelines for users
+- [ ] Update README with new project structure
+
+#### Knowledge Transfer
+- [ ] Create example notebooks demonstrating refactored API usage
+- [ ] Document lessons learned and architectural decisions
+- [ ] Update contribution guidelines to reflect new organization
+- [ ] Create onboarding guide for new developers
+
+## Timeline and Milestones
+
+### Milestone 1: Analysis Complete (Target: +2 weeks)
+- Complete code organization analysis
+- Finish performance assessment
+- Define testing framework requirements
+
+### Milestone 2: Core Refactoring (Target: +4 weeks)
+- Complete code restructuring tasks
+- Implement initial performance optimizations
+- Set up basic testing infrastructure
+
+### Milestone 3: Final Integration (Target: +6 weeks)
+- Finish all system testing
+- Complete documentation updates
+- Address all discovered issues
+
+## Success Criteria
+
+The refactoring effort will be considered successful when:
+
+1. All tests pass in the new structure with equivalent or better coverage
+2. Performance benchmarks show at least 20% improvement in training throughput
+3. GPU utilization reaches at least 80% during training
+4. Documentation is complete and accurately reflects the new architecture
+5. No regressions in model quality or functionality are introduced 

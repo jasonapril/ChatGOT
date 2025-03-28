@@ -6,11 +6,13 @@ removing ~28M parameters by eliminating the unused cross-attention mechanism.
 """
 import math
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, List, Any, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from .base import LanguageModel, ModelConfig
 
 
 class CausalSelfAttention(nn.Module):
@@ -224,7 +226,7 @@ class DecoderLayer(nn.Module):
         return x
 
 
-class GPTDecoder(nn.Module):
+class GPTDecoder(LanguageModel):
     """
     Optimized decoder-only transformer model (GPT style) without cross-attention.
     
@@ -232,7 +234,8 @@ class GPTDecoder(nn.Module):
     """
     def __init__(
         self,
-        vocab_size: int,
+        config: Optional[ModelConfig] = None,
+        vocab_size: Optional[int] = None,
         d_model: int = 768,
         n_head: int = 12,
         d_hid: int = 3072,
@@ -243,43 +246,84 @@ class GPTDecoder(nn.Module):
         activation: str = 'gelu',
         bias: bool = True
     ):
-        super().__init__()
+        """
+        Initialize GPT decoder model.
         
-        # Store important configuration parameters
-        self.vocab_size = vocab_size
-        self.d_model = d_model
-        self.n_head = n_head
-        self.n_layers = n_layers
-        self.d_hid = d_hid
-        self.max_seq_length = max_seq_length
-        self.activation = activation  # Store the activation function name
+        Args:
+            config: Model configuration object (takes precedence over other args)
+            vocab_size: Size of the vocabulary
+            d_model: Dimension of the model (embedding dimension)
+            n_head: Number of attention heads
+            d_hid: Dimension of the feedforward layer
+            n_layers: Number of transformer layers
+            dropout: Dropout probability
+            max_seq_length: Maximum sequence length
+            layer_norm_eps: Layer normalization epsilon
+            activation: Activation function ('gelu' or 'relu')
+            bias: Whether to use bias in linear layers
+        """
+        # Process configuration
+        if config is None:
+            # If vocab_size is not provided, raise an error
+            if vocab_size is None:
+                raise ValueError("Either config or vocab_size must be provided")
+                
+            config = ModelConfig(
+                vocab_size=vocab_size,
+                d_model=d_model,
+                n_head=n_head,
+                d_hid=d_hid,
+                n_layers=n_layers,
+                dropout=dropout,
+                max_seq_length=max_seq_length,
+                layer_norm_eps=layer_norm_eps,
+                activation=activation,
+                bias=bias,
+                architecture="gpt"
+            )
+        elif vocab_size is not None:
+            # If both config and vocab_size are provided, use vocab_size
+            config.vocab_size = vocab_size
+            
+        super().__init__(config)
         
-        # Token embedding
-        self.token_embedding = nn.Embedding(vocab_size, d_model)
+        # Extract parameters from config for easy access
+        self.vocab_size = self.config.vocab_size
+        self.d_model = self.config.d_model
+        self.n_head = self.config.n_head
+        self.d_hid = self.config.d_hid
+        self.n_layers = self.config.n_layers
+        self.max_seq_length = self.config.max_seq_length
+        self.layer_norm_eps = self.config.layer_norm_eps
+        self.activation = self.config.activation
+        self.bias = self.config.bias
+        self.dropout_rate = self.config.dropout
         
-        # Position embedding
-        self.position_embedding = nn.Embedding(max_seq_length, d_model)
+        # Embeddings
+        self.token_embedding = nn.Embedding(self.vocab_size, self.d_model)
+        self.position_embedding = nn.Embedding(self.max_seq_length, self.d_model)
+        self.dropout = nn.Dropout(self.dropout_rate)
         
         # Create decoder layers
         self.layers = nn.ModuleList([
             DecoderLayer(
-                d_model=d_model,
-                n_head=n_head,
-                d_hid=d_hid,
-                dropout=dropout,
-                activation=activation,
+                d_model=self.d_model,
+                n_head=self.n_head,
+                d_hid=self.d_hid,
+                dropout=self.dropout_rate,
+                activation=self.activation,
                 norm_first=True,
-                layer_norm_eps=layer_norm_eps,
-                bias=bias,
+                layer_norm_eps=self.layer_norm_eps,
+                bias=self.bias,
             )
-            for _ in range(n_layers)
+            for _ in range(self.n_layers)
         ])
         
-        # Final normalization
-        self.norm = nn.LayerNorm(d_model, eps=layer_norm_eps)
+        # Final layer normalization
+        self.ln_f = nn.LayerNorm(self.d_model, eps=self.layer_norm_eps)
         
-        # Output layer
-        self.output_layer = nn.Linear(d_model, vocab_size, bias=bias)
+        # Output projection
+        self.out_proj = nn.Linear(self.d_model, self.vocab_size, bias=self.bias)
         
         # Initialize weights
         self.apply(self._init_weights)
@@ -288,30 +332,26 @@ class GPTDecoder(nn.Module):
         self._log_model_size()
     
     def _init_weights(self, module):
-        """Initialize the weights of the model."""
-        if isinstance(module, nn.Embedding):
-            # Embeddings benefit from normal initialization with slightly higher std dev
-            module.weight.data.normal_(mean=0.0, std=0.05)
-        elif isinstance(module, nn.Linear):
-            # Linear layers use Kaiming initialization for ReLU-like activations
-            if hasattr(self, 'activation') and (self.activation == 'gelu' or self.activation == 'relu'):
-                nn.init.kaiming_normal_(module.weight, mode='fan_in', nonlinearity='relu')
-            else:
-                # Fall back to standard initialization
-                module.weight.data.normal_(mean=0.0, std=0.02)
-                
+        """
+        Initialize the weights of the model.
+        
+        Args:
+            module: Model module to initialize
+        """
+        if isinstance(module, nn.Linear):
+            # Standard initialization for linear layers
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if module.bias is not None:
-                module.bias.data.zero_()
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            # Standard initialization for embedding layers
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
         elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+            # Standard initialization for layer normalization
+            torch.nn.init.ones_(module.weight)
+            torch.nn.init.zeros_(module.bias)
     
-    def _log_model_size(self):
-        """Log the number of parameters in the model."""
-        n_params = sum(p.numel() for p in self.parameters())
-        logging.info(f"Model initialized with {n_params:,} parameters")
-    
-    def forward(self, x: torch.Tensor, targets: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def forward(self, x: torch.Tensor, targets: Optional[torch.Tensor] = None) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass of the model.
         
@@ -324,52 +364,36 @@ class GPTDecoder(nn.Module):
         """
         batch_size, seq_len = x.size()
         
-        # Get token embeddings
-        token_embeddings = self.token_embedding(x)
-        
-        # Apply embedding dropout for regularization
-        token_embeddings = F.dropout(token_embeddings, p=0.05, training=self.training)
-        
-        # Get position embeddings
+        # Create position indices
         positions = torch.arange(0, seq_len, dtype=torch.long, device=x.device)
-        # Clamp positions to max_seq_length-1 to prevent out-of-bounds issues
-        positions = torch.clamp(positions, max=self.max_seq_length-1)
-        positions = positions.unsqueeze(0).expand(batch_size, -1)
-        position_embeddings = self.position_embedding(positions)
+        positions = torch.clamp(positions, max=self.max_seq_length-1)  # Clamp to prevent out-of-bounds
+        positions = positions.unsqueeze(0).expand(batch_size, -1)  # [batch_size, seq_len]
+        
+        # Get token and position embeddings
+        token_embeds = self.token_embedding(x)  # [batch_size, seq_len, d_model]
+        pos_embeds = self.position_embedding(positions)  # [batch_size, seq_len, d_model]
         
         # Combine embeddings
-        x = token_embeddings + position_embeddings
+        hidden_states = token_embeds + pos_embeds  # [batch_size, seq_len, d_model]
+        hidden_states = self.dropout(hidden_states)
         
         # Pass through decoder layers
         for layer in self.layers:
-            x = layer(x)
+            hidden_states = layer(hidden_states)
         
-        # Final normalization
-        x = self.norm(x)
+        # Apply final layer normalization
+        hidden_states = self.ln_f(hidden_states)
         
-        # Generate logits
-        logits = self.output_layer(x)
+        # Project to vocabulary space
+        logits = self.out_proj(hidden_states)  # [batch_size, seq_len, vocab_size]
         
         # Calculate loss if targets provided
         if targets is not None:
             # Reshape for cross-entropy
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-            # Log loss statistics periodically for debugging
-            if torch.rand(1).item() < 0.01:  # Log ~1% of the time
-                with torch.no_grad():
-                    # Check if NaN
-                    if torch.isnan(loss).any():
-                        logging.warning(f"NaN loss detected")
-                    
-                    # Log additional loss diagnostics
-                    vocab_size = logits.size(-1)
-                    theoretical_min = math.log(vocab_size)
-                    ratio_to_theoretical = loss.item() / theoretical_min
-                    logging.debug(f"Loss: {loss.item():.4f}, Ratio to theoretical min: {ratio_to_theoretical:.2f}x")
-            
             return logits, loss
         
-        return logits, None
+        return logits
     
     def generate(
         self,
@@ -399,57 +423,116 @@ class GPTDecoder(nn.Module):
         self.eval()
         batch_size = input_ids.shape[0]
         
-        for i in range(max_new_tokens):
-            # If input_ids exceeds max length, truncate it
-            if input_ids.size(1) > self.max_seq_length:
-                input_ids = input_ids[:, -self.max_seq_length:]
-            
-            # Forward pass to get logits
-            with torch.no_grad():
-                logits, _ = self(input_ids)
-                logits = logits[:, -1, :] / temperature  # Only need the last token's logits
-            
-            # Apply repetition penalty
-            if repetition_penalty != 1.0:
-                for b in range(batch_size):
-                    for token_id in set(input_ids[b].tolist()):
-                        logits[b, token_id] /= repetition_penalty
-            
-            # Apply top-k sampling
-            if top_k > 0:
-                indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-                logits[indices_to_remove] = float('-inf')
-            
-            # Apply top-p (nucleus) sampling
-            if top_p < 1.0:
-                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                
-                # Remove tokens with cumulative probability above the threshold
-                sorted_indices_to_remove = cumulative_probs > top_p
-                # Shift the indices to the right to keep also the first token above the threshold
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                sorted_indices_to_remove[..., 0] = 0
-                
-                for b in range(batch_size):
-                    indices_to_remove = sorted_indices[b][sorted_indices_to_remove[b]]
-                    logits[b, indices_to_remove] = float('-inf')
-            
-            # Sample next token
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-            
-            # Append to input_ids
-            input_ids = torch.cat([input_ids, next_token], dim=1)
-            
-            if verbose and (i+1) % 10 == 0:
-                logging.info(f"Generated {i+1}/{max_new_tokens} tokens")
+        # Create list to store generated tokens
+        generated_tokens = input_ids.clone()
         
-        return input_ids
+        # Generate tokens one by one
+        for i in range(max_new_tokens):
+            # Forward pass
+            with torch.no_grad():
+                # If sequence is too long, truncate from the beginning
+                curr_input = generated_tokens
+                if curr_input.size(1) > self.max_seq_length:
+                    curr_input = curr_input[:, -self.max_seq_length:]
+                
+                logits = self(curr_input)
+                
+                # Get logits for the next token (last token in the sequence)
+                next_token_logits = logits[:, -1, :]  # [batch_size, vocab_size]
+                
+                # Apply temperature
+                next_token_logits = next_token_logits / temperature
+                
+                # Apply repetition penalty
+                if repetition_penalty != 1.0:
+                    for b in range(batch_size):
+                        for token_id in generated_tokens[b]:
+                            next_token_logits[b, token_id] /= repetition_penalty
+                
+                # Apply top-k filtering
+                if top_k > 0:
+                    # Get top-k values and indices
+                    topk_values, topk_indices = torch.topk(next_token_logits, top_k)
+                    
+                    # Create filter mask
+                    filter_mask = torch.zeros_like(next_token_logits, dtype=torch.bool)
+                    
+                    # Set top-k indices to True
+                    for b in range(batch_size):
+                        filter_mask[b, topk_indices[b]] = True
+                    
+                    # Set non-top-k values to -inf
+                    next_token_logits = torch.where(filter_mask, next_token_logits, 
+                                                  torch.tensor(-float("inf"), device=next_token_logits.device))
+                
+                # Apply top-p (nucleus) filtering
+                if top_p < 1.0:
+                    # Convert logits to probabilities
+                    probs = F.softmax(next_token_logits, dim=-1)
+                    
+                    # Sort probabilities in descending order
+                    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+                    
+                    # Compute cumulative probabilities
+                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+                    
+                    # Create mask for probabilities to keep
+                    keep_mask = cumulative_probs < top_p
+                    
+                    # Always keep at least one token
+                    keep_mask[:, 0] = True
+                    
+                    # Create filter mask
+                    filter_mask = torch.zeros_like(next_token_logits, dtype=torch.bool)
+                    
+                    # Populate filter mask
+                    for b in range(batch_size):
+                        filter_mask[b, sorted_indices[b, keep_mask[b]]] = True
+                    
+                    # Apply filter
+                    next_token_logits = torch.where(filter_mask, next_token_logits, 
+                                                  torch.tensor(-float("inf"), device=next_token_logits.device))
+                
+                # Convert logits to probabilities for sampling
+                probs = F.softmax(next_token_logits, dim=-1)
+                
+                # Sample next token
+                next_token = torch.multinomial(probs, num_samples=1)  # [batch_size, 1]
+                
+                # Add token to generated tokens
+                generated_tokens = torch.cat([generated_tokens, next_token], dim=1)
+                
+                if verbose and (i + 1) % 10 == 0:
+                    logging.info(f"Generated {i + 1}/{max_new_tokens} tokens")
+        
+        return generated_tokens
+    
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Get model configuration.
+        
+        Returns:
+            Dictionary with model configuration
+        """
+        return {
+            "model_type": self.model_type,
+            "architecture": "gpt",
+            "vocab_size": self.vocab_size,
+            "d_model": self.d_model,
+            "n_head": self.n_head,
+            "d_hid": self.d_hid,
+            "n_layers": self.n_layers,
+            "dropout": self.dropout_rate,
+            "max_seq_length": self.max_seq_length,
+            "layer_norm_eps": self.layer_norm_eps,
+            "activation": self.activation,
+            "bias": self.bias
+        }
 
 
-def create_gpt_decoder(
-    vocab_size: int,
+def create_gpt_model(
+    config: Optional[ModelConfig] = None,
+    vocab_size: Optional[int] = None,
     d_model: int = 768,
     n_head: int = 12,
     d_hid: int = 3072,
@@ -461,9 +544,10 @@ def create_gpt_decoder(
     bias: bool = True
 ) -> GPTDecoder:
     """
-    Create an optimized GPT decoder model with the specified parameters.
+    Create a GPT model.
     
     Args:
+        config: Model configuration object (takes precedence over other args)
         vocab_size: Size of the vocabulary
         d_model: Dimension of the model (embedding dimension)
         n_head: Number of attention heads
@@ -474,25 +558,12 @@ def create_gpt_decoder(
         layer_norm_eps: Layer normalization epsilon
         activation: Activation function ('gelu' or 'relu')
         bias: Whether to use bias in linear layers
-    
+        
     Returns:
-        A GPTDecoder instance
+        GPTDecoder instance
     """
-    # Log the model configuration
-    logging.info(f"Creating optimized GPT decoder model with configuration:")
-    logging.info(f"  vocab_size: {vocab_size}")
-    logging.info(f"  d_model: {d_model}")
-    logging.info(f"  n_head: {n_head}")
-    logging.info(f"  d_hid: {d_hid}")
-    logging.info(f"  n_layers: {n_layers}")
-    logging.info(f"  dropout: {dropout}")
-    logging.info(f"  max_seq_length: {max_seq_length}")
-    logging.info(f"  layer_norm_eps: {layer_norm_eps}")
-    logging.info(f"  activation: {activation}")
-    logging.info(f"  bias: {bias}")
-    
-    # Create and return the model
-    model = GPTDecoder(
+    return GPTDecoder(
+        config=config,
         vocab_size=vocab_size,
         d_model=d_model,
         n_head=n_head,
@@ -503,6 +574,4 @@ def create_gpt_decoder(
         layer_norm_eps=layer_norm_eps,
         activation=activation,
         bias=bias
-    )
-    
-    return model 
+    ) 

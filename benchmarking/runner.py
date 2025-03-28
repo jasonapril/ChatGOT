@@ -214,7 +214,7 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
-    parser.add_argument('--output-dir', type=str, default='./benchmark_results/{date}',
+    parser.add_argument('--output-dir', type=str, default='./outputs/benchmarks/{date}',
                         help='Directory to store benchmark results')
     parser.add_argument('--benchmarks', type=str, nargs='+',
                         help='Specific benchmarks to run (default: all)')

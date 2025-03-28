@@ -92,7 +92,7 @@ def generate_text(model, char2idx, idx2char, start_text="The", max_length=100, t
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Generate text from trained model")
-    parser.add_argument("--model", type=str, default="models/test_model.pt", help="Path to model file")
+    parser.add_argument("--model", type=str, default="outputs/models/test_model.pt", help="Path to model file")
     parser.add_argument("--start-text", type=str, default="The", help="Starting text for generation")
     parser.add_argument("--max-length", type=int, default=100, help="Maximum length of generated text")
     parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature")

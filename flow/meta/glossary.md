@@ -17,7 +17,7 @@ A desired outcome that may span multiple projects. Goals are higher-level than p
 A structured approach to achieving a goal or completing a project. Plans include specific tasks arranged in a logical sequence.
 
 ### Priority
-The relative importance of a task, project, or goal. In Flow, priorities are visually indicated using colored circles (🔴 High, 🟡 Medium, 🟢 Low).
+The relative importance of a task, project, or goal.
 
 ### Status
 The current state of a task, indicating whether it is not started, in progress, blocked, or completed.

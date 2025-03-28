@@ -1,178 +1,139 @@
 """
-Checkpoint utilities for Craft.
+Checkpoint utility functions for saving and loading model states.
 
-This module provides functions for saving, loading, and managing model checkpoints.
+This module provides functions for handling model checkpoints.
 """
-import os
-import glob
 import logging
-from typing import Dict, Any, Optional, Union, Tuple
+import os
+from typing import Any, Dict, Optional
 
 import torch
-import torch.nn as nn
-import torch.optim as optim
 
 
-def save_checkpoint(
-    path: str,
-    model: nn.Module,
-    optimizer: Optional[optim.Optimizer] = None,
-    scheduler: Optional[Any] = None,
-    epoch: int = 0,
-    loss: float = 0.0,
-    additional_data: Optional[Dict[str, Any]] = None
-) -> None:
+def save_checkpoint(checkpoint: Dict[str, Any], path: str) -> None:
     """
-    Save a model checkpoint.
+    Save a checkpoint to a file.
     
     Args:
+        checkpoint: Dictionary containing the checkpoint data
         path: Path to save the checkpoint
-        model: Model to save
-        optimizer: Optimizer to save (optional)
-        scheduler: Learning rate scheduler to save (optional)
-        epoch: Current epoch number
-        loss: Current loss value
-        additional_data: Additional data to save in the checkpoint
     """
     # Create directory if it doesn't exist
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    
-    # Prepare checkpoint data
-    checkpoint = {
-        'epoch': epoch,
-        'loss': loss,
-        'model_state_dict': model.state_dict(),
-    }
-    
-    if optimizer is not None:
-        checkpoint['optimizer_state_dict'] = optimizer.state_dict()
-    
-    if scheduler is not None:
-        checkpoint['scheduler_state_dict'] = scheduler.state_dict()
-    
-    if additional_data is not None:
-        checkpoint.update(additional_data)
+    os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
     
     # Save checkpoint
     torch.save(checkpoint, path)
     logging.info(f"Checkpoint saved to {path}")
 
 
-def load_checkpoint(
-    path: str,
-    model: nn.Module,
-    optimizer: Optional[optim.Optimizer] = None,
-    scheduler: Optional[Any] = None,
-    device: Optional[torch.device] = None
-) -> Dict[str, Any]:
+def load_checkpoint(path: str, device: Optional[torch.device] = None) -> Dict[str, Any]:
     """
-    Load a model checkpoint.
+    Load a checkpoint from a file.
     
     Args:
         path: Path to the checkpoint file
-        model: Model to load the state into
-        optimizer: Optimizer to load the state into (optional)
-        scheduler: Learning rate scheduler to load the state into (optional)
-        device: Device to load the model on (optional)
+        device: Device to load the tensors to
         
     Returns:
-        Checkpoint data dictionary
+        Dictionary containing the checkpoint data
     """
+    # Set device
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
+    # Check if file exists
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Checkpoint file not found: {path}")
+    
     # Load checkpoint
     checkpoint = torch.load(path, map_location=device)
-    
-    # Load model state
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.to(device)
-    
-    # Load optimizer state if provided
-    if optimizer is not None and 'optimizer_state_dict' in checkpoint:
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    
-    # Load scheduler state if provided
-    if scheduler is not None and 'scheduler_state_dict' in checkpoint:
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-    
     logging.info(f"Checkpoint loaded from {path}")
+    
     return checkpoint
 
 
-def get_latest_checkpoint(checkpoint_dir: str, pattern: str = "*.pt") -> Optional[str]:
+def get_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
     """
     Get the path to the latest checkpoint in a directory.
     
     Args:
-        checkpoint_dir: Directory containing checkpoints
-        pattern: File pattern to match checkpoint files
+        checkpoint_dir: Directory containing checkpoint files
         
     Returns:
-        Path to the latest checkpoint file or None if no checkpoints found
+        Path to the latest checkpoint or None if no checkpoint is found
     """
+    # Check if directory exists
     if not os.path.exists(checkpoint_dir):
-        logging.warning(f"Checkpoint directory does not exist: {checkpoint_dir}")
+        logging.warning(f"Checkpoint directory not found: {checkpoint_dir}")
         return None
     
-    # Get all checkpoint files matching the pattern
-    checkpoints = glob.glob(os.path.join(checkpoint_dir, pattern))
+    # Get list of checkpoint files
+    checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt') or f.endswith('.pth')]
     
-    if not checkpoints:
-        logging.warning(f"No checkpoints found in {checkpoint_dir}")
+    # Return None if no checkpoint files found
+    if not checkpoint_files:
+        logging.warning(f"No checkpoint files found in {checkpoint_dir}")
         return None
     
-    # Sort by modification time (most recent first)
-    latest_checkpoint = max(checkpoints, key=os.path.getmtime)
+    # Sort checkpoint files by modification time
+    checkpoint_files.sort(key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)), reverse=True)
+    
+    # Return path to latest checkpoint
+    latest_checkpoint = os.path.join(checkpoint_dir, checkpoint_files[0])
     logging.info(f"Latest checkpoint: {latest_checkpoint}")
     
     return latest_checkpoint
 
 
-def count_checkpoints(checkpoint_dir: str, pattern: str = "*.pt") -> int:
+def count_checkpoints(checkpoint_dir: str) -> int:
     """
     Count the number of checkpoint files in a directory.
     
     Args:
-        checkpoint_dir: Directory containing checkpoints
-        pattern: File pattern to match checkpoint files
+        checkpoint_dir: Directory containing checkpoint files
         
     Returns:
         Number of checkpoint files
     """
+    # Check if directory exists
     if not os.path.exists(checkpoint_dir):
+        logging.warning(f"Checkpoint directory not found: {checkpoint_dir}")
         return 0
     
-    checkpoints = glob.glob(os.path.join(checkpoint_dir, pattern))
-    return len(checkpoints)
+    # Count checkpoint files
+    checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt') or f.endswith('.pth')]
+    
+    return len(checkpoint_files)
 
 
-def clean_old_checkpoints(
-    checkpoint_dir: str,
-    keep: int = 5,
-    pattern: str = "model_epoch_*.pt"
-) -> None:
+def clean_old_checkpoints(checkpoint_dir: str, keep: int = 5) -> None:
     """
-    Remove old checkpoints, keeping only the specified number of most recent ones.
+    Remove old checkpoint files, keeping only the most recent ones.
     
     Args:
-        checkpoint_dir: Directory containing checkpoints
-        keep: Number of recent checkpoints to keep
-        pattern: File pattern to match checkpoint files
+        checkpoint_dir: Directory containing checkpoint files
+        keep: Number of most recent checkpoints to keep
     """
+    # Check if directory exists
     if not os.path.exists(checkpoint_dir):
+        logging.warning(f"Checkpoint directory not found: {checkpoint_dir}")
         return
     
-    # Get all regular checkpoints (not including 'best_model.pt')
-    checkpoints = glob.glob(os.path.join(checkpoint_dir, pattern))
+    # Get list of checkpoint files
+    checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pt') or f.endswith('.pth')]
     
-    if len(checkpoints) <= keep:
+    # Return if not enough files to clean
+    if len(checkpoint_files) <= keep:
         return
     
-    # Sort by modification time (oldest first)
-    checkpoints.sort(key=os.path.getmtime)
+    # Sort checkpoint files by modification time
+    checkpoint_files.sort(key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)), reverse=True)
     
-    # Remove oldest checkpoints
-    for checkpoint in checkpoints[:-keep]:
-        os.remove(checkpoint)
-        logging.info(f"Removed old checkpoint: {checkpoint}") 
+    # Remove old checkpoint files
+    for checkpoint_file in checkpoint_files[keep:]:
+        checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
+        try:
+            os.remove(checkpoint_path)
+            logging.info(f"Removed old checkpoint: {checkpoint_path}")
+        except Exception as e:
+            logging.error(f"Failed to remove checkpoint {checkpoint_path}: {str(e)}") 

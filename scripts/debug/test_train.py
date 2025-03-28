@@ -170,7 +170,7 @@ def main():
     
     # Save the model
     logger.info("Saving model")
-    save_path = os.path.join("models", "test_model.pt")
+    save_path = os.path.join("outputs/models", "test_model.pt")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save({
         'model_state_dict': model.state_dict(),

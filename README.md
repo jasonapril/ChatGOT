@@ -41,7 +41,7 @@ Craft provides a unified command-line interface for all operations:
 python scripts/craft train language --config configs/experiments/char_transformer.yaml
 
 # Generating text with a trained model
-python scripts/craft generate text --model models/char_transformer/best_model.pt --prompt "The king"
+python scripts/generate_samples.py --model_path outputs/models/best_model.pt --prompt "The king"
 
 # Preparing data for training
 python scripts/craft dataset prepare --input data/raw/got.txt --output-dir data/processed
@@ -103,8 +103,21 @@ craft/
 │   ├── architecture.md     # Architecture overview
 │   └── extending.md        # Extending the framework
 ├── flow/                   # Task management system
-│   └── logs/               # Task logs
-├── models/                 # Saved models
+│   ├── active/             # Current work and tasks
+│   ├── logs/               # Project logs and records
+│   ├── meta/               # Meta-documentation
+│   ├── performance/        # Performance analysis
+│   ├── planning/           # Project planning
+│   ├── reference/          # Reference materials
+│   └── system/             # System-related configurations
+├── models/                 # Legacy saved models (use outputs/models for new models)
+├── outputs/                # All generated files and artifacts
+│   ├── benchmarks/         # Performance benchmark results
+│   ├── evaluation/         # Model evaluation results
+│   ├── logs/               # Training and evaluation logs
+│   ├── models/             # Trained model checkpoints
+│   ├── samples/            # Generated text samples
+│   └── visualizations/     # Plots and charts
 ├── scripts/                # Scripts and entry points
 ├── src/                    # Source code
 │   ├── cli/                # Command-line interface
@@ -115,6 +128,8 @@ craft/
 │   └── utils/              # Utilities
 └── tests/                  # Unit tests
 ```
+
+For a more detailed explanation of the directory structure, see [Architecture Documentation](docs/architecture.md#directory-structure).
 
 ## Documentation
 

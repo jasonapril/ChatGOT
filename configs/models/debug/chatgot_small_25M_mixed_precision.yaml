@@ -22,7 +22,7 @@ architecture:
   prevent_dimension_adjustment: true  # Add flag to prevent automatic dimension adjustments
 
 data:
-  path: data/got/game_of_thrones.txt
+  path: data/raw/got/game_of_thrones.txt
   format: text
   block_size: 256
 

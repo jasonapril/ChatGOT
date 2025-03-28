@@ -1,85 +1,28 @@
 """
-I/O utilities for Craft.
+I/O utility functions for file operations.
 
-This module provides utilities for input/output operations, such as file handling,
-directory creation, and saving/loading of configuration files.
+This module provides functions for reading and writing files,
+particularly JSON configuration files.
 """
-import os
 import json
 import logging
-import datetime
-from typing import Any, Dict, Optional, Union
-from pathlib import Path
+import os
+from typing import Any, Dict
 
 
-def create_output_dir(base_dir: str, experiment_name: Optional[str] = None) -> str:
+def ensure_directory(directory: str) -> None:
     """
-    Create an output directory with an optional experiment name and timestamp.
+    Ensure that a directory exists, creating it if necessary.
     
     Args:
-        base_dir: Base directory for outputs
-        experiment_name: Optional experiment name to include in the path
-        
-    Returns:
-        Path to the created output directory
+        directory: Path to the directory
     """
-    # Create base directory if it doesn't exist
-    os.makedirs(base_dir, exist_ok=True)
-    
-    # Create a timestamped directory name
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    if experiment_name:
-        dir_name = f"{experiment_name}_{timestamp}"
-    else:
-        dir_name = timestamp
-    
-    # Create the full output path
-    output_dir = os.path.join(base_dir, dir_name)
-    os.makedirs(output_dir, exist_ok=True)
-    
-    logging.info(f"Created output directory: {output_dir}")
-    return output_dir
+    if not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+        logging.info(f"Created directory: {directory}")
 
 
-def save_args(args: Any, output_path: str) -> None:
-    """
-    Save command-line arguments or configuration to a JSON file.
-    
-    Args:
-        args: Arguments to save (can be argparse.Namespace or dict)
-        output_path: Path to save the arguments
-    """
-    # Create directory if it doesn't exist
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    
-    # Convert args to dictionary if it's not already
-    if not isinstance(args, dict):
-        # Handle argparse.Namespace
-        if hasattr(args, '__dict__'):
-            args_dict = vars(args)
-        else:
-            args_dict = {k: v for k, v in args.__dict__.items() 
-                        if not k.startswith('_')}
-    else:
-        args_dict = args
-    
-    # Convert any non-serializable objects to strings
-    serializable_dict = {}
-    for k, v in args_dict.items():
-        if isinstance(v, (str, int, float, bool, list, dict, tuple, type(None))):
-            serializable_dict[k] = v
-        else:
-            serializable_dict[k] = str(v)
-    
-    # Save to file
-    with open(output_path, 'w') as f:
-        json.dump(serializable_dict, f, indent=2)
-    
-    logging.info(f"Arguments saved to {output_path}")
-
-
-def load_json(file_path: str) -> Dict:
+def load_json(file_path: str) -> Dict[str, Any]:
     """
     Load a JSON file.
     
@@ -87,27 +30,37 @@ def load_json(file_path: str) -> Dict:
         file_path: Path to the JSON file
         
     Returns:
-        Loaded JSON as a dictionary
+        Dictionary containing the JSON data
     """
-    with open(file_path, 'r') as f:
-        data = json.load(f)
-    return data
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        logging.info(f"Loaded JSON from {file_path}")
+        return data
+    except Exception as e:
+        logging.error(f"Failed to load JSON from {file_path}: {str(e)}")
+        raise
 
 
-def save_json(data: Dict, file_path: str, indent: int = 2) -> None:
+def save_json(data: Dict[str, Any], file_path: str, indent: int = 4) -> None:
     """
     Save data to a JSON file.
     
     Args:
-        data: Data to save
+        data: Dictionary containing the data to save
         file_path: Path to save the JSON file
-        indent: Indentation level for the JSON file
+        indent: Number of spaces for indentation
     """
     # Create directory if it doesn't exist
-    os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+    ensure_directory(os.path.dirname(file_path) if os.path.dirname(file_path) else ".")
     
-    with open(file_path, 'w') as f:
-        json.dump(data, f, indent=indent)
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=indent)
+        logging.info(f"Saved JSON to {file_path}")
+    except Exception as e:
+        logging.error(f"Failed to save JSON to {file_path}: {str(e)}")
+        raise
 
 
 def get_file_size(file_path: str) -> int:
@@ -120,22 +73,32 @@ def get_file_size(file_path: str) -> int:
     Returns:
         Size of the file in bytes
     """
-    return os.path.getsize(file_path)
+    try:
+        return os.path.getsize(file_path)
+    except Exception as e:
+        logging.error(f"Failed to get size of {file_path}: {str(e)}")
+        return 0
 
 
-def format_file_size(size_in_bytes: int) -> str:
+def format_file_size(size_bytes: int) -> str:
     """
-    Format file size in a human-readable format.
+    Format a file size in bytes to a human-readable string.
     
     Args:
-        size_in_bytes: Size in bytes
+        size_bytes: Size in bytes
         
     Returns:
-        Formatted string (e.g., "1.23 MB")
+        Formatted size string (e.g., "1.23 MB")
     """
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size_in_bytes < 1024 or unit == 'TB':
-            break
-        size_in_bytes /= 1024.0
+    if size_bytes == 0:
+        return "0B"
     
-    return f"{size_in_bytes:.2f} {unit}" 
+    # Define size units and their thresholds
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    unit_index = 0
+    
+    while size_bytes >= 1024 and unit_index < len(units) - 1:
+        size_bytes /= 1024
+        unit_index += 1
+    
+    return f"{size_bytes:.2f} {units[unit_index]}" 

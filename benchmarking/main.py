@@ -30,7 +30,7 @@ def parse_args():
     
     # Run benchmarks command
     run_parser = subparsers.add_parser('run', help='Run benchmarks')
-    run_parser.add_argument('--output-dir', type=str, default='./benchmark_results/{date}',
+    run_parser.add_argument('--output-dir', type=str, default='./outputs/benchmarks/{date}',
                         help='Directory to store benchmark results')
     run_parser.add_argument('--benchmarks', type=str, nargs='+',
                         help='Specific benchmarks to run (default: all)')
@@ -50,7 +50,7 @@ def parse_args():
     report_parser = subparsers.add_parser('report', help='Generate benchmark report')
     report_parser.add_argument('--results-file', type=str, required=True,
                           help='Path to benchmark results JSON file')
-    report_parser.add_argument('--output-dir', type=str, default='./benchmark_reports/{date}',
+    report_parser.add_argument('--output-dir', type=str, default='./outputs/benchmarks/reports/{date}',
                           help='Directory to save the report files')
     report_parser.add_argument('--comparison-file', type=str,
                           help='Path to baseline results for comparison')

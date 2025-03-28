@@ -14,8 +14,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from ..models.base import Model
+from src.utils import save_checkpoint, load_checkpoint, ensure_directory
 
 
 class Trainer(ABC):
@@ -77,7 +79,7 @@ class Trainer(ABC):
         
         # Set up checkpointing
         self.checkpoint_dir = self.config.get('checkpoint_dir', 'checkpoints')
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        ensure_directory(self.checkpoint_dir)
         
         # Set up mixed precision training
         self.use_amp = self.config.get('use_amp', False)
@@ -246,25 +248,18 @@ class Trainer(ABC):
         Args:
             path: Path to save the checkpoint
         """
-        from ..utils.checkpoint import save_checkpoint as save_checkpoint_util
-        
-        additional_data = {
-            'train_metrics': self.train_metrics,
-            'val_metrics': self.val_metrics,
-            'best_val_loss': self.best_val_loss,
-            'steps': self.steps,
-            'config': self.config
+        checkpoint = {
+            'epoch': self.current_epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'global_step': self.global_step,
+            'best_loss': self.best_val_loss
         }
         
-        save_checkpoint_util(
-            path=path,
-            model=self.model,
-            optimizer=self.optimizer,
-            scheduler=self.scheduler,
-            epoch=self.current_epoch,
-            loss=self.best_val_loss,
-            additional_data=additional_data
-        )
+        if self.scheduler is not None:
+            checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+        
+        save_checkpoint(checkpoint, path)
     
     def load_checkpoint(self, path: str) -> None:
         """
@@ -273,26 +268,16 @@ class Trainer(ABC):
         Args:
             path: Path to the checkpoint
         """
-        from ..utils.checkpoint import load_checkpoint as load_checkpoint_util
+        checkpoint = load_checkpoint(path, self.device)
         
-        checkpoint = load_checkpoint_util(
-            path=path,
-            model=self.model,
-            optimizer=self.optimizer,
-            scheduler=self.scheduler,
-            device=self.device
-        )
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.current_epoch = checkpoint['epoch']
+        self.global_step = checkpoint.get('global_step', 0)
+        self.best_val_loss = checkpoint.get('best_loss', float('inf'))
         
-        # Restore training state
-        self.current_epoch = checkpoint.get('epoch', 0)
-        self.best_val_loss = checkpoint.get('loss', float('inf'))
-        self.train_metrics = checkpoint.get('train_metrics', {'loss': []})
-        self.val_metrics = checkpoint.get('val_metrics', {'loss': []})
-        self.steps = checkpoint.get('steps', 0)
-        
-        # Restore configuration if available
-        if 'config' in checkpoint:
-            self.config.update(checkpoint['config'])
+        if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
+            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
 
 class LanguageModelTrainer(Trainer):

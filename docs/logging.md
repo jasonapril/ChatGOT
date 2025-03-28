@@ -1,6 +1,6 @@
 # Logging and Experiment Tracking
 
-This document describes the logging and experiment tracking conventions for the ChatGoT project.
+This document describes the logging and experiment tracking conventions for the Craft project.
 
 ## Directory Structure
 

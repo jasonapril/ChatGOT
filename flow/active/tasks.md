@@ -20,13 +20,16 @@ This file serves as the working memory for all active tasks in the project. It's
   - Add data validation hooks
   - 🔍 Planned (See [Refactoring Plan](../planning/refactoring_plan.md))
 
-- ### 🟡 Implement basic unit tests
+- ### 🟡 Implement Basic Unit Tests
   - Create unit tests for the CLI functionality
   - Add tests for the utility modules (especially `checkpoint.py` and `io.py`)
   - Configure GitHub Actions for running tests automatically
   - ✅ Completed 2025-03-26 (See log entry)
 
 ## Upcoming Tasks
+
+- ### Review Dependencies
+  - Which libraries does Craft depend on? Are they all justified?
 
 - ### 🟠 Update Configuration System
   - Replace hardcoded values with configuration options
@@ -113,4 +116,36 @@ _Note: Older logs have been archived to the logs directory_
 1. Complete model architecture refactoring
 2. Standardize data pipeline interfaces
 3. Update configuration system
-4. Refactor training loop 
+4. Refactor training loop
+
+## Task List
+
+## Current Tasks
+
+### High Priority
+- [ ] **Investigate text generation issues** (In Progress)
+  - [x] Create initial sample generation script
+  - [x] Document text generation investigation process in Flow
+  - [x] Test different generation parameters
+  - [ ] **Analyze train_with_samples.py generation process** (Current focus)
+    - [ ] Extract character dataset initialization code
+    - [ ] Extract model configuration and loading process
+    - [ ] Analyze generation function implementation
+    - [ ] Identify any warm-up or conditioning steps
+    - [ ] Create a direct port of the working generation approach
+  - [ ] Compare tokenization between training and standalone scripts
+  - [ ] Test with various prompts and model checkpoints
+
+### Medium Priority
+
+### Low Priority
+
+## Completed Tasks
+- [x] Create a simple script that can generate text samples (sample_generator.py)
+- [x] Document text generation investigation in Flow
+- [x] Set up better error handling and verbose logging in generation script
+
+## Resources
+- `train_with_samples.py`: Script that successfully generates coherent text samples during training
+- `sample_generator.py`: Standalone script for text generation (currently producing incoherent output)
+- `text_generation_investigation.md`: Documentation of our investigation process 
