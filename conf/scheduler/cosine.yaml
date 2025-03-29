@@ -1,0 +1,4 @@
+# conf/scheduler/cosine.yaml
+type: cosine
+warmup_steps: 100
+# total_steps: ??? # Calculated in train_runner based on epochs/dataset size 

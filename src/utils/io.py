@@ -101,4 +101,25 @@ def format_file_size(size_bytes: int) -> str:
         size_bytes /= 1024
         unit_index += 1
     
-    return f"{size_bytes:.2f} {units[unit_index]}" 
+    return f"{size_bytes:.2f} {units[unit_index]}"
+
+
+def create_output_dir(base_dir: str, experiment_name: str) -> str:
+    """
+    Create an output directory based on a base directory and experiment name.
+    
+    Constructs the path as base_dir/experiment_name, ensures it exists,
+    and returns the absolute path.
+    
+    Args:
+        base_dir: The base directory for outputs.
+        experiment_name: The name specific to this experiment/run.
+        
+    Returns:
+        The absolute path to the created or ensured directory.
+    """
+    output_dir = os.path.join(base_dir, experiment_name)
+    ensure_directory(output_dir) # Use the existing function to create if needed
+    absolute_output_dir = os.path.abspath(output_dir)
+    logging.info(f"Ensured output directory exists: {absolute_output_dir}")
+    return absolute_output_dir 

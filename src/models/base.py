@@ -7,77 +7,99 @@ enabling a consistent interface regardless of modality.
 from abc import ABC, abstractmethod
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Type
 
 import torch
 import torch.nn as nn
+from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
+import torch.nn.functional as F
 
 from src.utils.checkpoint import save_checkpoint, load_checkpoint
 
 
-class ModelConfig:
+# Pydantic ModelConfig Base
+class BaseModelConfig(BaseModel):
     """
-    Configuration class for models.
-    
-    This class stores and validates model configuration parameters.
+    Base Pydantic configuration class for all models.
+    Provides automatic validation and type hints.
+    Uses model_config for Pydantic V2 settings.
     """
-    
-    def __init__(self, **kwargs):
-        """
-        Initialize model configuration with provided parameters.
-        
-        Args:
-            **kwargs: Configuration parameters
-        """
-        self.__dict__.update(kwargs)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert configuration to dictionary.
-        
-        Returns:
-            Dictionary representation of the configuration
-        """
-        return self.__dict__.copy()
-    
+    model_config = ConfigDict(extra='allow') # Keep allow for flexibility
+    model_type: str = Field("base", description="The type of the model (e.g., language, vision).")
+
+    # Common config fields can be added here if needed
+    # e.g., vocab_size: Optional[int] = None
+    # e.g., embedding_dim: Optional[int] = None
+
+class GenerativeModelConfig(BaseModelConfig):
+    """Config for Generative Models"""
+    model_type: str = Field("generative", description="Model type set to generative.")
+    max_seq_length: int = Field(1024, description="Maximum sequence length the model can handle")
+
+class LanguageModelConfig(GenerativeModelConfig):
+    """Config for Language Models"""
+    model_type: str = Field("language", description="Model type set to language.")
+    vocab_size: int = Field(..., description="Size of the vocabulary (required).")
+    d_model: int = Field(768, description="Model dimension.")
+    n_head: int = Field(12, description="Number of attention heads.")
+    d_hid: Optional[int] = Field(None, description="Hidden dimension in feed-forward layers.")
+    n_layers: int = Field(12, description="Number of transformer layers.")
+    dropout: float = Field(0.1, description="Dropout probability.")
+    bias: bool = Field(True, description="Whether to use bias in linear layers.")
+    layer_norm_eps: float = Field(1e-5, description="Epsilon for layer normalization.")
+    activation: str = Field('gelu', description="Activation function.")
+    norm_first: bool = Field(True, description="Apply layer norm before attention/FFN.")
+
+    # Pydantic V2 validator for d_hid
+    @field_validator('d_hid', mode='before')
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> 'ModelConfig':
-        """
-        Create configuration from dictionary.
-        
-        Args:
-            config_dict: Dictionary with configuration parameters
+    def set_d_hid_default(cls, v, info):
+        """Set default d_hid = d_model * 4 if not provided."""
+        # info.data should contain the raw input data being validated
+        if v is None and 'd_model' in info.data:
+            d_model = info.data.get('d_model')
+            # Use default d_model if not in data but defined in class
+            if d_model is None and 'd_model' in cls.model_fields:
+                 d_model = cls.model_fields['d_model'].default
             
-        Returns:
-            ModelConfig instance
-        """
-        return cls(**config_dict)
-    
-    def __repr__(self) -> str:
-        """String representation of the configuration."""
-        items = [f"{k}={v}" for k, v in self.__dict__.items()]
-        return f"ModelConfig({', '.join(items)})"
+            if isinstance(d_model, int):
+                return d_model * 4
+        return v # Return original value if not calculated
+
+class VisionModelConfig(BaseModelConfig):
+    # ... (Additional fields specific to VisionModelConfig)
+    pass
+
+class MultiModalModelConfig(BaseModelConfig):
+    # ... (Additional fields specific to MultiModalModelConfig)
+    pass
 
 
+# --- Base Model Class --- #
+# *IMPORTANT*: Remove inheritance from Pydantic models. 
+# Model IS an nn.Module, it HAS a config object.
 class Model(nn.Module, ABC):
     """
-    Abstract base class for all models in Craft.
-    
-    This class defines the common interface for all models, regardless
-    of the specific model type (language, vision, etc.).
+    Abstract base class for all models.
+    Inherits ONLY from nn.Module and ABC.
+    Handles config assignment and basic save/load.
     """
-    
-    def __init__(self, config: Optional[ModelConfig] = None):
-        """
-        Initialize the base model.
+    # Remove config related class attributes if any were added previously
+    # No model_config = ConfigDict(...) here!
+
+    def __init__(self, config: BaseModelConfig):
+        """Initialize the base model with a validated Pydantic config object."""
+        super().__init__() # Initialize nn.Module
+
+        if not isinstance(config, BaseModelConfig):
+             logging.error("Model received an invalid config object that is not a BaseModelConfig subclass.")
+             # Raise error or use a default? Raising is safer.
+             raise TypeError(f"Expected config to be a BaseModelConfig instance, got {type(config)}")
         
-        Args:
-            config: Model configuration
-        """
-        super().__init__()
-        self.config = config or ModelConfig()
-        self.model_type = "base"
-    
+        self.config = config # Store the validated config object
+        # Get model_type from the stored config object
+        self.model_type = self.config.model_type 
+
     @abstractmethod
     def forward(self, *args, **kwargs):
         """
@@ -104,38 +126,26 @@ class Model(nn.Module, ABC):
              epoch: Optional[int] = None, step: Optional[int] = None, **kwargs):
         """
         Save the model to a file.
-        
-        Args:
-            path: Path to save the model
-            optimizer: Optional optimizer state to save
-            epoch: Optional current epoch
-            step: Optional current step
-            **kwargs: Additional information to save
+        Uses the Pydantic config's model_dump method.
         """
         os.makedirs(os.path.dirname(path), exist_ok=True)
         
-        # Create checkpoint dictionary
         checkpoint = {
             "model_state_dict": self.state_dict(),
-            "model_config": self.get_config(),
-            "model_type": self.model_type,
+            "model_config": self.config.model_dump(),
         }
         
-        # Add optimizer state if provided
         if optimizer is not None:
             checkpoint["optimizer_state_dict"] = optimizer.state_dict()
         
-        # Add training metadata if provided
         if epoch is not None:
             checkpoint["epoch"] = epoch
         if step is not None:
             checkpoint["step"] = step
             
-        # Add any additional information
         for key, value in kwargs.items():
             checkpoint[key] = value
         
-        # Save checkpoint
         save_checkpoint(checkpoint, path)
         logging.info(f"Model saved to {path}")
     
@@ -143,104 +153,207 @@ class Model(nn.Module, ABC):
              optimizer: Optional[torch.optim.Optimizer] = None, strict: bool = True) -> Dict[str, Any]:
         """
         Load the model from a file.
-        
-        Args:
-            path: Path to the saved model
-            device: Device to load the model to
-            optimizer: Optional optimizer to load state into
-            strict: Whether to strictly enforce that the keys in state_dict match
-            
-        Returns:
-            Dictionary with additional checkpoint information
+        We expect the factory function to handle config instantiation before calling load.
         """
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        # Load checkpoint
         checkpoint = load_checkpoint(path, device)
+
+        if "model_config" in checkpoint:
+            loaded_config_type = checkpoint["model_config"].get("model_type")
+            if loaded_config_type and loaded_config_type != self.config.model_type:
+                logging.warning(
+                    f"Loading checkpoint with model_type '{loaded_config_type}' "
+                    f"into model with type '{self.config.model_type}'"
+                )
         
-        # Load model state
         missing_keys, unexpected_keys = self.load_state_dict(checkpoint["model_state_dict"], strict=strict)
         if missing_keys:
             logging.warning(f"Missing keys when loading model state: {missing_keys}")
         if unexpected_keys:
             logging.warning(f"Unexpected keys when loading model state: {unexpected_keys}")
         
-        # Load optimizer state if provided
         if optimizer is not None and "optimizer_state_dict" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         
-        # Move model to device
         self.to(device)
         logging.info(f"Model loaded from {path} to {device}")
         
-        # Return the full checkpoint for additional information
         return checkpoint
     
     def get_config(self) -> Dict[str, Any]:
         """
-        Get the model configuration.
+        Get the model configuration using Pydantic's model_dump.
         
         Returns:
             Dictionary with the model configuration
         """
-        if self.config is not None:
-            return {
-                "model_type": self.model_type,
-                **self.config.to_dict()
-            }
-        return {"model_type": self.model_type}
+        return self.config.model_dump()
 
 
+# GenerativeModel inherits from the updated Model
 class GenerativeModel(Model):
     """
-    Abstract base class for generative models in Craft.
-    
-    This class extends the base Model with generation capabilities.
+    Base class for generative models.
+    Checks config type and provides generate method.
     """
-    
-    def __init__(self, config: Optional[ModelConfig] = None):
-        """
-        Initialize the generative model.
-        
-        Args:
-            config: Model configuration
-        """
+    def __init__(self, config: BaseModelConfig): # Accept BaseModelConfig initially
         super().__init__(config)
-        self.model_type = "generative"
-    
-    @abstractmethod
-    def generate(self, *args, **kwargs):
+        
+        # Check if the stored config is the correct type *after* base init
+        if not isinstance(self.config, GenerativeModelConfig):
+            logging.warning(f"GenerativeModel initialized with config type {type(self.config)}, expected GenerativeModelConfig or subclass. Re-check factory logic.")
+            # Raise error? Or try to proceed? Raising might be better.
+            raise TypeError(f"Configuration error: Expected GenerativeModelConfig, got {type(self.config)}")
+        
+        self.max_seq_length = getattr(self.config, 'max_seq_length', 1024)
+
+    # Remove @abstractmethod decorator and provide implementation
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 100,
+        temperature: float = 1.0,
+        top_k: Optional[int] = None, # Changed default to None
+        top_p: Optional[float] = None, # Changed default to None
+        repetition_penalty: float = 1.0,
+        eos_token_id: Optional[int] = None, # Added EOS token handling
+        verbose: bool = False
+    ) -> torch.Tensor:
         """
-        Generate outputs from the model.
+        Generate sequences auto-regressively from the model.
+
+        Handles common sampling techniques like temperature, top-k, top-p, 
+        and repetition penalty.
         
         Args:
-            *args: Arguments for generation
-            **kwargs: Keyword arguments for generation
+            input_ids: Input token ids tensor of shape [batch_size, seq_len].
+            max_new_tokens: Maximum number of new tokens to generate per sequence.
+            temperature: Sampling temperature. Higher values (e.g., > 1) make 
+                         output more random, lower values (e.g., < 1) make it more 
+                         deterministic. Set to 0 for greedy decoding.
+            top_k: If set, only the top_k highest probability tokens are considered 
+                   for sampling at each step.
+            top_p: If set, only the smallest set of tokens whose cumulative probability 
+                   exceeds top_p are considered (nucleus sampling).
+            repetition_penalty: Penalty applied to logits of previously generated 
+                                tokens (excluding padding). 1.0 means no penalty.
+            eos_token_id: If specified, generation stops when this token is generated.
+            verbose: Whether to log generation progress.
             
         Returns:
-            Generated outputs
+            Generated token ids tensor of shape [batch_size, seq_len + generated_len].
         """
-        pass
+        self.eval() # Set model to evaluation mode
+        batch_size = input_ids.shape[0]
+        device = input_ids.device
+        
+        generated_tokens = input_ids.clone()
+        stop_generation = torch.zeros(batch_size, dtype=torch.bool, device=device)
+
+        with torch.no_grad():
+            for i in range(max_new_tokens):
+                # 1. Prepare inputs: Truncate if necessary
+                current_seq_len = generated_tokens.size(1)
+                if current_seq_len > self.max_seq_length:
+                    # Keep only the last max_seq_length tokens
+                    model_input = generated_tokens[:, -self.max_seq_length:]
+                else:
+                    model_input = generated_tokens
+
+                # 2. Forward pass to get logits for the next token
+                # Assumes the model's forward pass returns logits of shape 
+                # [batch_size, sequence_length, vocab_size]
+                logits = self.forward(model_input) 
+                next_token_logits = logits[:, -1, :] # Get logits for the last position
+
+                # 3. Apply repetition penalty (skip padding if applicable)
+                if repetition_penalty != 1.0:
+                    # Iterate through batch items that haven't stopped
+                    for b in range(batch_size):
+                        if not stop_generation[b]:
+                            # Penalize tokens present in the current generated sequence for this item
+                            # Avoid penalizing special tokens like padding if necessary (requires knowing padding_id)
+                            for token_id in generated_tokens[b]:
+                                # Check bounds before penalizing
+                                if 0 <= token_id < next_token_logits.size(-1):
+                                     if next_token_logits[b, token_id] > 0: # Penalize positive logits more
+                                         next_token_logits[b, token_id] /= repetition_penalty
+                                     else: # Penalize negative logits less (bring towards zero)
+                                         next_token_logits[b, token_id] *= repetition_penalty 
+
+                # 4. Apply temperature scaling
+                if temperature == 0: # Greedy decoding
+                     next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+                else:
+                    if temperature != 1.0:
+                        next_token_logits = next_token_logits / temperature
+
+                    # 5. Apply Top-K filtering
+                    if top_k is not None and top_k > 0:
+                        # Remove tokens with probability less than the top_k token
+                        indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k, dim=-1)[0][..., -1, None]
+                        next_token_logits = next_token_logits.masked_fill(indices_to_remove, -float("inf"))
+
+                    # 6. Apply Top-p (nucleus) filtering
+                    if top_p is not None and 0.0 < top_p < 1.0:
+                        sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True, dim=-1)
+                        cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                        
+                        # Remove tokens with cumulative probability above the threshold
+                        sorted_indices_to_remove = cumulative_probs > top_p
+                        # Always keep at least one token
+                        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                        sorted_indices_to_remove[..., 0] = False
+                        
+                        indices_to_remove = torch.zeros_like(next_token_logits, dtype=torch.bool).scatter_(dim=-1, index=sorted_indices, src=sorted_indices_to_remove)
+                        next_token_logits = next_token_logits.masked_fill(indices_to_remove, -float("inf"))
+
+                    # 7. Sample the next token
+                    probs = F.softmax(next_token_logits, dim=-1)
+                    next_token = torch.multinomial(probs, num_samples=1)
+                
+                # 8. Append generated token and check stopping criteria
+                # Only append and check EOS for sequences that haven't stopped yet
+                not_stopped_mask = ~stop_generation.unsqueeze(-1)
+                
+                # Use a placeholder (like padding) for stopped sequences to keep tensor shape consistent
+                # Assuming padding_id is 0, otherwise use a known safe value. Let's use 0 for now.
+                placeholder_token = torch.zeros_like(next_token) 
+                token_to_append = torch.where(not_stopped_mask, next_token, placeholder_token)
+                generated_tokens = torch.cat([generated_tokens, token_to_append], dim=1)
+
+                # Update stop generation flags
+                if eos_token_id is not None:
+                    just_stopped = (next_token.squeeze(-1) == eos_token_id) & (~stop_generation)
+                    stop_generation |= just_stopped
+
+                # If all sequences have stopped, break early
+                if stop_generation.all():
+                    break
+                
+                if verbose and (i + 1) % 10 == 0:
+                    logging.info(f"Generated {i + 1}/{max_new_tokens} tokens...")
+        
+        # Return only the generated part for sequences that stopped, or full if not stopped?
+        # Current implementation returns the full sequence including prompt + generated.
+        return generated_tokens
 
 
+# LanguageModel inherits from the updated GenerativeModel
 class LanguageModel(GenerativeModel):
     """
-    Abstract base class for language models in Craft.
-    
-    This class extends GenerativeModel with language-specific functionality.
+    Base class for language models.
+    Checks config type.
     """
-    
-    def __init__(self, config: Optional[ModelConfig] = None):
-        """
-        Initialize the language model.
-        
-        Args:
-            config: Model configuration
-        """
+    def __init__(self, config: LanguageModelConfig): # Expects LanguageModelConfig specifically
         super().__init__(config)
-        self.model_type = "language"
-    
+        
+        if not isinstance(self.config, LanguageModelConfig):
+            logging.error("LanguageModel received incorrect config type despite type hint.")
+            raise TypeError(f"Configuration error: Expected LanguageModelConfig, got {type(self.config)}")
+
     def calculate_perplexity(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
         Calculate perplexity from logits and targets.
@@ -262,63 +375,26 @@ class LanguageModel(GenerativeModel):
 class VisionModel(Model):
     """
     Abstract base class for vision models in Craft.
-    
-    This class extends the base Model with vision-specific functionality.
     """
     
-    def __init__(self, config: Optional[ModelConfig] = None):
-        """
-        Initialize the vision model.
-        
-        Args:
-            config: Model configuration
-        """
+    def __init__(self, config: VisionModelConfig):
+        if not isinstance(config, VisionModelConfig):
+            raise ValueError("VisionModel requires a VisionModelConfig instance.")
         super().__init__(config)
-        self.model_type = "vision"
 
 
 class MultiModalModel(Model):
     """
     Abstract base class for multi-modal models in Craft.
-    
-    This class extends the base Model with multi-modal capabilities.
     """
     
-    def __init__(self, config: Optional[ModelConfig] = None):
-        """
-        Initialize the multi-modal model.
-        
-        Args:
-            config: Model configuration
-        """
+    def __init__(self, config: MultiModalModelConfig):
+        if not isinstance(config, MultiModalModelConfig):
+            raise ValueError("MultiModalModel requires a MultiModalModelConfig instance.")
         super().__init__(config)
-        self.model_type = "multi-modal"
 
 
-def create_model_from_config(config: Dict[str, Any]) -> Model:
-    """
-    Create a model from a configuration dictionary.
-    
-    Args:
-        config: Model configuration dictionary
-        
-    Returns:
-        Instantiated model
-    """
-    model_config = ModelConfig.from_dict(config)
-    model_type = config.get("model_type", "language")
-    
-    # Import the appropriate module based on model type
-    if model_type == "language":
-        if config.get("architecture") == "gpt":
-            from .gpt_decoder import create_gpt_model
-            return create_gpt_model(config=model_config)
-        else:
-            from .transformer import create_transformer_model
-            return create_transformer_model(config=model_config)
-    elif model_type == "vision":
-        raise NotImplementedError("Vision models not yet implemented")
-    elif model_type == "multi-modal":
-        raise NotImplementedError("Multi-modal models not yet implemented")
-    else:
-        raise ValueError(f"Unknown model type: {model_type}") 
+# --- Remove Factory Function --- 
+# The create_model_from_config function has been moved to src/models/factory.py
+# def create_model_from_config(config_dict: Dict[str, Any]) -> Model:
+#    ... 

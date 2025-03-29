@@ -1,0 +1,12 @@
+# conf/callbacks/default.yaml
+# Default configuration for callbacks.
+# Add specific callback configurations here later.
+
+# Example (commented out):
+# early_stopping:
+#   _target_: src.callbacks.EarlyStopping
+#   monitor: val_loss
+#   patience: 5
+
+# For now, keep it empty or add basic settings if needed
+callbacks_list: [] 

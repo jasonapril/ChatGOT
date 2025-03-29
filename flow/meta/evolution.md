@@ -73,8 +73,6 @@ Key decision points that shaped Flow's trajectory:
 
 ### Long-term Vision
 - Seamless integration with external tools and workflows
-- Self-adapting structure based on usage patterns
-- Minimal maintenance overhead with maximum cognitive benefit
 
 ---
 
@@ -151,23 +149,33 @@ The current organization introduces a clear directory structure:
 
 ### Near-Term
 
-1. **Priority Continuity Implementation** - Developing concrete mechanisms to maintain priority awareness across planning cycles
-2. **Memory Model Enhancements** - Implementing specific features based on the memory system analogy
-3. **Glossary Development** - Creating clear definitions of terms used throughout the Flow system
+1.  **Priority Continuity Implementation** - Developing concrete mechanisms to maintain priority awareness across planning cycles
+2.  **Memory Model Enhancements** - Implementing specific features based on the memory system analogy
+3.  **Glossary Development** - Creating clear definitions of terms used throughout the Flow system
 
 ### Medium-Term
 
-1. **Automated Assists** - Developing tools to automate repetitive aspects of Flow maintenance
-2. **Visualization Improvements** - Creating better visual indicators of status, priority, and relationships
-3. **Integration Capabilities** - Allowing Flow to connect with external systems while maintaining its document-based nature
+1.  **Automated Assists** - Developing tools to automate repetitive aspects of Flow maintenance
+2.  **Visualization Improvements** - Creating better visual indicators of status, priority, and relationships
+3.  **Integration Capabilities** - Allowing Flow to connect with external systems while maintaining its document-based nature
+
+#### Potential `project/active/` Expansion
+   - *Context:* While currently `project/active/` primarily holds `tasks.md`, the folder structure allows for future expansion to keep the "working memory" focused.
+   - *Potential Files:*
+     - `current_sprint.md` / `cycle_goals.md`: Goals/scope for the active sprint or work cycle.
+     - `active_blockers.md`: Focused tracking of immediate obstacles.
+     - `session_notes.md` / `daily_log.md`: Transient notes/logs for the current session/day.
+     - `current_experiment_context.md`: Temporary context/setup for specific experiments or branches.
+     - `debugging_state.md`: Notes specific to an ongoing debugging session.
+   - *Rationale:* Provides dedicated space for information highly relevant *now* but potentially too granular or temporary for other locations.
 
 ### Long-Term Vision
 
-1. **Adaptive Evolution** - Flow becomes more self-adapting based on usage patterns
-2. **Collaborative Extensions** - Flow expands to better support team collaboration
-3. **Knowledge Management Integration** - Flow connects more deeply with knowledge bases and reference systems
+1.  **Adaptive Evolution** - Flow becomes more self-adapting based on usage patterns
+2.  **Collaborative Extensions** - Flow expands to better support team collaboration
+3.  **Knowledge Management Integration** - Flow connects more deeply with knowledge bases and reference systems
 
-## Lessons Learned
+## Lessons Learned 
 
 1. **Explicit is Better than Implicit** - Flow works best when its rules and structures are explicitly documented
 2. **Continuity Requires Attention** - Maintaining awareness across planning cycles doesn't happen automatically

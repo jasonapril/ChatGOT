@@ -1,6 +1,30 @@
 # Flow System Guidelines
 
-*Part of the Flow System. See also: [Tasks](../active/tasks.md), [Consistency](consistency.md).*
+*Part of the Flow System. See also: [README](../README.md), [Tasks](../project/tasks.md), [Improvements](../planning/improvements.md).*
+
+This document outlines the core principles and best practices for utilizing the Flow system effectively, ensuring consistency, clarity, and efficient collaboration, especially when working with AI agents.
+
+## Core Principles
+
+1.  **Single Source of Truth**: Each piece of information (task status, configuration, guideline) should reside in a single, designated location.
+2.  **Cross-References**: Use markdown links (`[link text](path/to/file.md)`) to connect related information instead of duplicating content.
+3.  **Working Memory**: The `flow/` directory, particularly `flow/project/tasks.md`, and the ongoing conversation history serve as the primary working memory. **AI agents MUST actively consult and update this context to maintain awareness of the current state, goals, and history.**
+4.  **Clear Communication**: Use concise and unambiguous language in task descriptions, comments, and commit messages.
+5.  **Incremental Progress**: Break down large tasks into smaller, manageable steps tracked in `tasks.md`.
+
+## Usage
+
+*   **Tasks (`flow/project/tasks.md`)**: Regularly update task statuses, add new tasks, link related issues/commits, and archive completed items. Use status emojis (e.g., ⏳, ✅, ⏸️, 🔴) for quick visual reference.
+*   **Guidelines (`flow/system/guidelines.md`)**: Consult this file for development standards, coding practices, and Flow system usage conventions.
+*   **Agent Capabilities (`flow/system/agent_capabilities.md`)**: Refer to this document for the known capabilities and limitations of the assisting AI agent.
+*   **Project Planning (`flow/planning/`)**: Use files in this directory for longer-term goals, potential improvements, and strategic decisions.
+
+## AI Agent Interaction
+
+*   **Context is Key**: Provide clear context when requesting actions. Reference specific files, tasks, or previous messages.
+*   **Verify Actions**: Review proposed changes (code edits, commands) before approval.
+*   **Iterative Refinement**: Expect to iterate. If the agent's first attempt isn't perfect, provide specific feedback for correction.
+*   **Update Flow**: Ensure the agent updates relevant Flow documents (especially `tasks.md`) after completing actions or changing the project state.
 
 ## Overview
 
@@ -22,7 +46,7 @@ The guidelines outlined here ensure that all active tasks in [tasks.md](../activ
 - **Timestamps & Breadcrumbs:** When initiating a task, record the start time and contextual breadcrumbs to link the task with the appropriate project or subproject.
 - **Archival Process:** Once a task is completed, remove it from the active task list and log its completion in the log section with a timestamp.
 - **Log Rotation:** Maintain only the most recent logs (5-10 entries) in tasks.md for quick reference. Older logs should be archived to the logs directory with date-based filenames (e.g., logs_2025-03-26.md).
-- **Scheduled Reviews:** Implement regular (e.g., nightly) reviews to reconcile the active task list, ensuring consistency and identifying any tasks that may require further attention.
+- **Scheduled Reviews & Retrospectives:** Implement regular (e.g., daily/weekly) reviews to reconcile the active task list, ensure consistency, identify blockers, and capture key decisions or outcomes. Consider brief retrospectives after major milestones or debugging sessions to consolidate lessons learned into relevant documentation (e.g., principles, evolution, troubleshooting guides).
 
 ## Integration with Other Documents
 
@@ -81,8 +105,50 @@ For common task types, use consistent templates to ensure completeness and clari
 - **Log Rotation Automation:** Develop scripts to automatically archive logs older than a defined threshold to the logs directory.
 - **Minimize Manual Work:** The primary goal is to reduce the manual overhead of task management by streamlining updates and archival processes.
 
+## Minimizing Cruft and Managing Temporary Files
+
+To prevent the accumulation of unused or temporary files ("cruft"), especially when using automated tools or AI agents for code generation or experimentation, follow these practices:
+
+1.  **Dedicated Scratch/Experiment Directories:**
+    *   Utilize a top-level directory named `scratch/` (or similar, e.g., `debug/`) for temporary scripts, outputs, data samples, and exploratory work. Files in these directories are considered ephemeral.
+
+2.  **Permanent Output Location:**
+    *   Ensure that *permanent* generated artifacts (model checkpoints, logs, evaluation results, etc.) are placed in the designated project output directory (e.g., `artifacts/` or `outputs/`, check project conventions). Do not leave permanent outputs in `scratch/` or `debug/`.
+
+3.  **Agent Output Containment:**
+    *   When collaborating with an AI agent, explicitly instruct it to place all newly generated files within a designated subdirectory (preferably within `scratch/`) unless the files are clearly intended as permanent additions to `src/`, `tests/`, `docs/`, or other core directories.
+
+4.  **Regular Cleanup:**
+    *   Periodically review the contents of temporary directories (`scratch/`, `debug/`) and task-specific subdirectories.
+    *   Remove files and directories that are no longer needed once an experiment, debugging session, or task is complete. Consider adding a cleanup step to task checklists in `project/active/tasks.md` (or the project-specific task file).
+    *   Consult the project's [Troubleshooting and Debugging Guide](../meta/troubleshooting_and_debugging.md#25-cleanup-protocol) for detailed cleanup steps after debugging.
+
+5.  **Explicit Instructions:**
+    *   Clearly communicate expectations regarding file placement and lifespan when initiating tasks that involve file creation, especially when working with AI agents.
+
+By adhering to these guidelines, we can maintain a cleaner, more organized, and navigable codebase.
+
 ## Conclusion
 
 This document serves as the blueprint for managing task flows effectively. By following these guidelines, the system will remain both flexible and robust, capable of adapting to the complexities of projects while keeping the management process as frictionless as possible. 
 
-For strategies to prevent documentation inconsistencies and maintain the integrity of the Flow system, refer to the [Consistency](consistency.md). 
+For strategies to prevent documentation inconsistencies and maintain the integrity of the Flow system, refer to the [Consistency](consistency.md).
+
+## AI Agent Interaction with Flow
+
+To enable AI agents (like coding assistants) to effectively utilize the Flow system as a form of working memory and context provider with minimal explicit prompting, agents should adhere to the following information retrieval protocol:
+
+1.  **Parse Root README:** Always begin by processing `flow/README.md`. This provides the high-level structure, purpose of main directories, and pointers to other key files.
+
+2.  **Check Active Tasks:** Consult `flow/project/active/tasks.md` to understand the immediate priorities and current work context.
+
+3.  **Consult Subdirectory READMEs:** Based on the nature of the current task (e.g., adhering to standards, understanding project plans, needing meta-context), parse the relevant subdirectory `README.md` (`system/README.md`, `project/README.md`, `meta/README.md`) for more specific pointers within that section.
+
+4.  **Utilize Semantic Search:** If the required information isn't immediately located via READMEs or direct links, use semantic search queries targeted within the `flow/` directory. Keywords from the task description and relevant READMEs should inform the search query.
+
+5.  **Read Specific Files Contextually:** Only read the full contents of specific guideline files (like this one), principle documents, planning documents, or reference files if:
+    *   They are directly linked from a task or README.
+    *   They are identified as highly relevant by a semantic search.
+    *   The current task explicitly requires understanding or adhering to a standard defined within that specific file.
+
+This prioritized retrieval process aims to provide the necessary context efficiently, leveraging the structured information within Flow without requiring the agent to read every file unnecessarily. 

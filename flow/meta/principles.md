@@ -92,6 +92,20 @@ Flow's success is measured by:
 
 5. **User Satisfaction**: Those using the system find it intuitive, helpful, and worth the investment of time.
 
+## Additional Principles
+
+- **Adaptability:** The system should be flexible enough to adapt to changing project needs, team sizes, and development methodologies.
+
+- **AI Agent Resumption:** Design the project state (code, configuration, documentation, tasks, logs) to be sufficiently clear, structured, and self-contained so that an AI assistant can effectively understand the current status and resume work after interruptions, context switches, or system restarts.
+
+- **Proactive Organization:** Structure and organize work from the start to avoid later confusion and facilitate easier tracking and handoffs.
+
+- **Maintainability:** Document major changes thoroughly. Consider backward compatibility where feasible during refactoring or updates.
+
+- **Performance Awareness:** Keep performance implications (e.g., resource utilization, latency) in mind during development and refactoring.
+
+## Core Components
+
 ---
 
 *These principles guide both the current implementation of Flow and its future evolution. They should be referenced when making design decisions or resolving uncertainties about how the system should operate.* 

@@ -24,12 +24,12 @@ Documents in this directory are reference materials and user guides, organized a
 
 ## Development Documentation
 
-All development-related documentation is now stored in the `dev/` directory:
+All development-related documentation is now stored in the `flow/` directory:
 
-- [Workflow System](../dev/workflow/workflow_system.md) - Development workflow guidelines
-- [Refactoring Plan](../dev/planning/refactoring_plan.md) - Project structure refactoring
-- [Performance Optimizations](../dev/performance/optimizations.md) - Optimization techniques
-- [Project State](../dev/planning/state.md) - Current project state
+- [Workflow System](../flow/workflow/workflow_system.md) - Development workflow guidelines
+- [Refactoring Plan](../flow/planning/refactoring_plan.md) - Project structure refactoring
+- [Performance Optimizations](../flow/performance/optimizations.md) - Optimization techniques
+- [Project State](../flow/planning/state.md) - Current project state
 
 ## Debugging Guides
 
@@ -43,4 +43,4 @@ Detailed debugging guides are available in:
 
 1. Review the [Documentation Index](INDEX.md) for a complete list of available documentation
 2. Check the main [README](../README.md) for installation and usage instructions
-3. For development work, refer to [Working Memory](../working_memory.md) and [Dev Documentation](../dev/README.md) 
+3. For development work, refer to [Working Memory](../working_memory.md) and [Dev Documentation](../flow/README.md) 

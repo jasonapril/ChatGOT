@@ -39,7 +39,7 @@ data/
 !src/data/
 checkpoints/
 models/
-!configs/models/
+!conf/models/
 !src/models/
 logs/
 *.pth

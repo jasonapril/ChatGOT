@@ -4,10 +4,18 @@ This directory contains self-referential documentation about Flow itself - its d
 
 ## Contents
 
-- [model.md](model.md) - The conceptual model behind Flow, including memory and attention analogies
-- [evolution.md](evolution.md) - How Flow itself changes and grows over time
-- [principles.md](principles.md) - Core design philosophy and guiding principles behind Flow
-- [tasks.md](tasks.md) - Tasks related to Flow's own development and improvement
+This directory contains the following files and subdirectories related to Flow's design, operation, and evolution:
+
+- `README.md`: This file - provides an overview of the meta directory.
+- `model.md`: The conceptual model behind Flow (e.g., memory analogies).
+- `principles.md`: Core design philosophy and guiding principles.
+- `evolution.md`: Tracks the development history and future directions of Flow.
+- `tasks.md`: Tasks specifically for improving the Flow system itself.
+- `glossary.md`: Definitions of key terms used within the Flow system.
+- `improvements.md`: Suggestions for enhancing the Flow system (potentially related to `tasks.md`).
+- `documentation_guidelines.md`: Specific guidelines related to writing and maintaining documentation (likely related to `system/consistency.md`).
+- `troubleshooting_and_debugging.md`: Consolidated guide covering general troubleshooting frameworks, code debugging strategies, and the post-mortem process.
+- `troubleshooting_guides/`: (Directory) Contains more specific guides for troubleshooting particular problems (often generated via post-mortems).
 
 ## Purpose
 

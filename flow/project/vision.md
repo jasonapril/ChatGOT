@@ -1,0 +1,2 @@
+- Develop AI models for low-spec devices (performance critical)
+- Experiment with cutting edge architectures and methods (research)

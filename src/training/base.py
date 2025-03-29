@@ -15,6 +15,17 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import torch.distributed as dist
+from torch.utils.tensorboard import SummaryWriter
+import gc # Import garbage collector
+import contextlib
+
+# Import SafeGradScaler
+from .amp import SafeGradScaler
+# Import gradient checkpointing utility
+from .utils import enable_gradient_checkpointing
+# Import callback base
+from .callbacks import TrainerCallback
 
 from ..models.base import Model
 from src.utils import save_checkpoint, load_checkpoint, ensure_directory
@@ -37,6 +48,7 @@ class Trainer(ABC):
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         device: Optional[torch.device] = None,
         config: Optional[Dict[str, Any]] = None,
+        callbacks: Optional[List[TrainerCallback]] = None
     ):
         """
         Initialize the trainer.
@@ -49,6 +61,7 @@ class Trainer(ABC):
             scheduler: Learning rate scheduler
             device: Device to train on
             config: Configuration dictionary
+            callbacks: List of TrainerCallback instances
         """
         self.model = model
         self.train_dataloader = train_dataloader
@@ -58,13 +71,38 @@ class Trainer(ABC):
         self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.config = config if config is not None else {}
         
+        # Set up logger for this instance
+        self.logger = logging.getLogger(self.__class__.__name__)
+        # Example: Set level from config or default to INFO
+        log_level_name = self.config.get('log_level', 'INFO').upper()
+        log_level = getattr(logging, log_level_name, logging.INFO)
+        self.logger.setLevel(log_level)
+        # Ensure handlers are set up (could be done globally or here)
+        # If no handlers are configured, messages might not appear.
+        if not logging.getLogger().hasHandlers():
+             # Basic handler if none exist (consider a more robust setup)
+             handler = logging.StreamHandler()
+             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+             handler.setFormatter(formatter)
+             logging.getLogger().addHandler(handler)
+             logging.getLogger().setLevel(log_level) # Set root logger level too, maybe
+        
         # Move model to device
         self.model.to(self.device)
+        
+        # Enable gradient checkpointing if configured
+        self.use_gradient_checkpointing = self.config.get('use_gradient_checkpointing', False)
+        if self.use_gradient_checkpointing:
+            enable_gradient_checkpointing(self.model)
         
         # Default training parameters
         self.epochs = self.config.get('epochs', 10)
         self.max_grad_norm = self.config.get('max_grad_norm', 1.0)
         self.gradient_accumulation_steps = self.config.get('gradient_accumulation_steps', 1)
+        
+        # Initialize step and epoch counters
+        self.global_step = 0
+        self.current_epoch = 0
         
         # Set up optimizer if not provided
         if self.optimizer is None:
@@ -81,15 +119,22 @@ class Trainer(ABC):
         self.checkpoint_dir = self.config.get('checkpoint_dir', 'checkpoints')
         ensure_directory(self.checkpoint_dir)
         
-        # Set up mixed precision training
+        # Set up mixed precision training using SafeGradScaler
         self.use_amp = self.config.get('use_amp', False)
-        self.scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
+        # Pass max_nan_before_fallback from config, default to 3
+        max_nan = self.config.get('amp_max_nan_fallback', 3)
+        self.scaler = SafeGradScaler(enabled=self.use_amp, max_nan_before_fallback=max_nan) if self.use_amp else None
         
         # Metrics tracking
         self.metrics = {'train_loss': [], 'val_loss': []}
         
         # Initialize best model tracking
         self.best_val_loss = float('inf')
+
+        # Initialize callbacks
+        self.callbacks = callbacks if callbacks is not None else []
+        for callback in self.callbacks:
+            callback.set_trainer(self)
     
     def _create_optimizer(self) -> torch.optim.Optimizer:
         """
@@ -199,13 +244,15 @@ class Trainer(ABC):
         Returns:
             Dictionary of metrics for each epoch
         """
-        logging.info(f"Starting training for {self.epochs} epochs")
-        
+        self.logger.info(f"Starting training for {self.epochs} epochs on device {self.device}")
+        self._callback_on_train_begin() # Call hook
+
         start_time = time.time()
         
         for epoch in range(self.epochs):
             epoch_start_time = time.time()
-            
+            self._callback_on_epoch_begin(epoch) # Call hook
+
             # Train for one epoch
             train_metrics = self.train_epoch()
             self.metrics['train_loss'].append(train_metrics['loss'])
@@ -218,14 +265,18 @@ class Trainer(ABC):
                 # Save best model
                 if val_metrics['loss'] < self.best_val_loss:
                     self.best_val_loss = val_metrics['loss']
-                    self.save_checkpoint(os.path.join(self.checkpoint_dir, 'best_model.pt'))
-                    logging.info(f"New best model saved with validation loss: {self.best_val_loss:.4f}")
+                    best_model_path = os.path.join(self.checkpoint_dir, 'best_model.pt')
+                    self.save_checkpoint(best_model_path)
+                    self.logger.info(f"New best validation loss: {self.best_val_loss:.4f}. Saved model to {best_model_path}")
             
-            # Save checkpoint
-            if (epoch + 1) % self.config.get('save_interval', 1) == 0:
-                self.save_checkpoint(os.path.join(self.checkpoint_dir, f'model_epoch_{epoch + 1}.pt'))
+            # Save checkpoint periodically
+            save_interval = self.config.get('save_interval', 1)
+            if save_interval > 0 and (epoch + 1) % save_interval == 0:
+                checkpoint_path = os.path.join(self.checkpoint_dir, f'model_epoch_{epoch + 1}.pt')
+                self.save_checkpoint(checkpoint_path)
+                self.logger.info(f"Saved checkpoint to {checkpoint_path}")
             
-            # Log progress
+            # Log epoch progress
             epoch_time = time.time() - epoch_start_time
             epoch_info = f"Epoch {epoch + 1}/{self.epochs} - "
             epoch_info += f"train_loss: {train_metrics['loss']:.4f} - "
@@ -234,11 +285,15 @@ class Trainer(ABC):
                 epoch_info += f"val_loss: {val_metrics['loss']:.4f} - "
             
             epoch_info += f"time: {epoch_time:.2f}s"
-            logging.info(epoch_info)
+            self.logger.info(epoch_info)
+            # Add metrics to logs for callback
+            epoch_logs = {**train_metrics, **val_metrics} if self.val_dataloader else train_metrics
+            self._callback_on_epoch_end(epoch, logs=epoch_logs) # Call hook
         
         total_time = time.time() - start_time
-        logging.info(f"Training completed in {total_time:.2f}s")
-        
+        self.logger.info(f"Training completed in {total_time // 60:.0f}m {total_time % 60:.0f}s")
+        self._callback_on_train_end() # Call hook
+
         return self.metrics
     
     def save_checkpoint(self, path: str) -> None:
@@ -258,6 +313,10 @@ class Trainer(ABC):
         
         if self.scheduler is not None:
             checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+            
+        # Save scaler state if using AMP
+        if self.use_amp and self.scaler is not None:
+            checkpoint['scaler_state_dict'] = self.scaler.state_dict()
         
         save_checkpoint(checkpoint, path)
     
@@ -276,8 +335,50 @@ class Trainer(ABC):
         self.global_step = checkpoint.get('global_step', 0)
         self.best_val_loss = checkpoint.get('best_loss', float('inf'))
         
+        # Note: Gradient checkpointing hooks should ideally persist after loading state_dict.
+        # If issues arise, consider re-applying here:
+        # if self.use_gradient_checkpointing:
+        #     enable_gradient_checkpointing(self.model) # Re-apply after loading state
+        
         if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
             self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            
+        # Load scaler state if using AMP and saved in checkpoint
+        if self.use_amp and self.scaler is not None and 'scaler_state_dict' in checkpoint:
+            self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
+
+    # --- Callback Hook Methods --- #
+    def _callback_on_train_begin(self, logs=None):
+        logs = logs or {}
+        for callback in self.callbacks:
+            callback.on_train_begin(logs=logs)
+
+    def _callback_on_train_end(self, logs=None):
+        logs = logs or {}
+        for callback in self.callbacks:
+            callback.on_train_end(logs=logs)
+
+    def _callback_on_epoch_begin(self, epoch, logs=None):
+        logs = logs or {}
+        for callback in self.callbacks:
+            callback.on_epoch_begin(epoch, logs=logs)
+
+    def _callback_on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        for callback in self.callbacks:
+            callback.on_epoch_end(epoch, logs=logs)
+
+    def _callback_on_step_begin(self, step, logs=None):
+        logs = logs or {}
+        for callback in self.callbacks:
+            callback.on_step_begin(step, logs=logs)
+
+    def _callback_on_step_end(self, step, logs=None):
+        logs = logs or {}
+        for callback in self.callbacks:
+            callback.on_step_end(step, logs=logs)
+
+    # --- End Callback Hook Methods --- #
 
 
 class LanguageModelTrainer(Trainer):
@@ -296,116 +397,173 @@ class LanguageModelTrainer(Trainer):
             Dictionary of metrics
         """
         self.model.train()
-        total_loss = 0
+        epoch_loss = 0.0
+        num_valid_steps_in_epoch = 0 # Track steps that didn't have NaN/Inf loss
         total_tokens = 0
+        steps_in_epoch = len(self.train_dataloader)
         
-        for i, batch in enumerate(self.train_dataloader):
+        # Use tqdm for progress bar
+        progress_bar = tqdm(enumerate(self.train_dataloader), total=steps_in_epoch, desc=f"Epoch {self.current_epoch + 1}")
+        
+        # Reset optimizer gradients at the start
+        self.optimizer.zero_grad(set_to_none=True)
+        
+        for i, batch in progress_bar:
             # Get batch
             inputs, targets = batch
+            # Pass step number (global_step) to callback
+            step_logs = {}
+            self._callback_on_step_begin(self.global_step, logs=step_logs)
+
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
             
-            # Forward pass with mixed precision
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                outputs = self.model(inputs)
-                
-                # Handle different output formats
-                if isinstance(outputs, tuple) and len(outputs) == 2:
-                    logits, loss = outputs
-                else:
-                    logits = outputs
-                    loss = nn.functional.cross_entropy(
-                        logits.view(-1, logits.size(-1)), 
-                        targets.view(-1)
-                    )
-                
-                # Scale by accumulation factor
-                if self.gradient_accumulation_steps > 1:
-                    loss = loss / self.gradient_accumulation_steps
+            # Determine if this is an accumulation step
+            is_accumulation_step = (i + 1) % self.gradient_accumulation_steps != 0
+            is_last_batch_step = (i + 1) == steps_in_epoch
+            should_step = not is_accumulation_step or is_last_batch_step
             
-            # Backward pass with mixed precision
-            if self.use_amp and self.scaler is not None:
-                self.scaler.scale(loss).backward()
-            else:
-                loss.backward()
-            
-            # Update weights if gradient accumulation step is reached
-            if (i + 1) % self.gradient_accumulation_steps == 0 or (i + 1) == len(self.train_dataloader):
-                # Clip gradients
-                if self.use_amp and self.scaler is not None:
-                    self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            # <<< OOM Handling Block Start >>>
+            try:
+                # --- Core Training Step ---
+                with torch.cuda.amp.autocast(enabled=self.use_amp):
+                    outputs = self.model(inputs)
                     
-                    # Apply optimizer step with scaler
+                    # Handle different output formats (model might return loss directly)
+                    if isinstance(outputs, tuple) and len(outputs) == 2:
+                        logits, loss_unscaled = outputs
+                    else:
+                        logits = outputs # Assume model returns logits
+                        loss_unscaled = nn.functional.cross_entropy(
+                            logits.view(-1, logits.size(-1)),
+                            targets.view(-1)
+                        )
+                    
+                    # Check for NaN/Inf in unscaled loss *before* scaling/accumulation division
+                    loss_val = loss_unscaled.item()
+                    is_loss_invalid = torch.isnan(loss_unscaled).any() or torch.isinf(loss_unscaled).any()
+                    
+                    if is_loss_invalid:
+                        self.logger.warning(f"Step {self.global_step}, Batch {i+1}/{steps_in_epoch}: NaN/Inf loss detected: {loss_val}. Skipping.")
+                        if should_step: self.optimizer.zero_grad(set_to_none=True) # Clear potentially bad grads accumulated in this cycle
+                        continue # Move to the next batch
+                    
+                    # Normalize loss for gradient accumulation
+                    loss = loss_unscaled / self.gradient_accumulation_steps
+                
+                # --- Backward Pass --- (Scaled)
+                # Context manager delays DDP sync until the final grad accumulation step
+                ddp_sync_context = self.model.no_sync() if is_accumulation_step and isinstance(self.model, torch.nn.parallel.DistributedDataParallel) else contextlib.nullcontext()
+
+                with ddp_sync_context:
+                    # self.scaler handles mixed precision scaling
+                    self.scaler.scale(loss).backward()
+                
+                # --- Metrics Accumulation (only if valid step) ---
+                epoch_loss += loss_val # Use the unscaled item for epoch average
+                num_valid_steps_in_epoch += 1
+                total_tokens += inputs.numel()
+
+                # --- Optimizer Step & Gradient Clipping ---
+                if should_step:
+                    # Unscale gradients before clipping
+                    self.scaler.unscale_(self.optimizer)
+
+                    # Clip gradients
+                    if self.max_grad_norm is not None:
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+
+                    # Optimizer step (self.scaler handles grad check and skipping step if required)
                     self.scaler.step(self.optimizer)
+
+                    # Update the scaler for next iteration
                     self.scaler.update()
+
+                    # Zero gradients *after* stepping for the next accumulation cycle/batch
+                    self.optimizer.zero_grad(set_to_none=True)
+
+                    # Step the scheduler (if one exists)
+                    if self.scheduler is not None:
+                        self.scheduler.step()
+
+                    self.global_step += 1
+
+                    # --- Logging --- (Optional: update progress bar)
+                    # Add step metrics to logs for callback
+                    step_logs['loss'] = loss_val
+                    step_logs['lr'] = lr = self.optimizer.param_groups[0]['lr']
+
+                    if self.global_step % self.log_interval == 0:
+                        progress_bar.set_postfix({'loss': f'{loss_val:.4f}', 'lr': f'{lr:.2e}'})
+                        # Example detailed log message
+                        self.logger.debug(f"Step: {self.global_step}, Batch: {i+1}/{steps_in_epoch}, Loss: {loss_val:.4f}, LR: {lr:.2e}")
+
+                    # Call step end callback *after* optimizer/scheduler steps
+                    self._callback_on_step_end(self.global_step, logs=step_logs)
+
+            except RuntimeError as e:
+                if "CUDA out of memory" in str(e):
+                    self.logger.error(f"CUDA Out of Memory error encountered at step {self.global_step}, batch index {i}. Attempting graceful shutdown.")
+                    # Clean up memory
+                    del inputs, targets, outputs, loss, loss_unscaled, logits # Delete tensors from this iteration
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    self.logger.info("Cleared variables and GPU cache after OOM.")
+
+                    # Attempt to save OOM checkpoint
+                    try:
+                        oom_checkpoint_path = os.path.join(self.checkpoint_dir, "oom_checkpoint.pt")
+                        self.save_checkpoint(oom_checkpoint_path)
+                        self.logger.info(f"Successfully saved OOM checkpoint to {oom_checkpoint_path}")
+                    except Exception as save_e:
+                        self.logger.error(f"Failed to save OOM checkpoint: {save_e}", exc_info=True)
+
+                    # Re-raise the error to stop training
+                    raise e
                 else:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-                    self.optimizer.step()
-                
-                # Update learning rate
-                if self.scheduler is not None:
-                    self.scheduler.step()
-                
-                # Zero gradients
-                self.optimizer.zero_grad(set_to_none=True)
-            
-            # Update metrics
-            total_loss += loss.item() * self.gradient_accumulation_steps
-            total_tokens += inputs.numel()
-            
-            # Log progress
-            if (i + 1) % self.log_interval == 0:
-                logging.info(
-                    f"Batch {i + 1}/{len(self.train_dataloader)} - "
-                    f"loss: {loss.item() * self.gradient_accumulation_steps:.4f}"
-                )
-        
-        # Calculate average loss
-        avg_loss = total_loss / len(self.train_dataloader)
-        
+                    # Re-raise other runtime errors
+                    self.logger.error(f"Caught unexpected RuntimeError at step {self.global_step}, batch index {i}: {e}", exc_info=True)
+                    raise e
+            # <<< OOM Handling Block End >>>
+
+        # Calculate average loss for the epoch based on valid steps
+        avg_loss = epoch_loss / num_valid_steps_in_epoch if num_valid_steps_in_epoch > 0 else 0.0
+
         return {'loss': avg_loss, 'tokens': total_tokens}
     
     def evaluate(self) -> Dict[str, float]:
         """
-        Evaluate the model.
-        
-        Returns:
-            Dictionary of metrics
+        Evaluate the model on the validation set.
         """
         self.model.eval()
         total_loss = 0
         total_tokens = 0
-        
+        progress_bar = tqdm(self.val_dataloader, desc="Evaluating", leave=False)
+
         with torch.no_grad():
-            for batch in self.val_dataloader:
-                # Get batch
+            for batch in progress_bar:
                 inputs, targets = batch
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
-                
-                # Forward pass
-                outputs = self.model(inputs)
-                
-                # Handle different output formats
-                if isinstance(outputs, tuple) and len(outputs) == 2:
-                    logits, loss = outputs
-                else:
-                    logits = outputs
-                    loss = nn.functional.cross_entropy(
-                        logits.view(-1, logits.size(-1)), 
-                        targets.view(-1)
-                    )
-                
-                # Update metrics
-                total_loss += loss.item()
-                total_tokens += inputs.numel()
-        
-        # Calculate average loss and perplexity
-        avg_loss = total_loss / len(self.val_dataloader)
-        perplexity = torch.exp(torch.tensor(avg_loss)).item()
-        
-        return {'loss': avg_loss, 'perplexity': perplexity, 'tokens': total_tokens}
+
+                with torch.cuda.amp.autocast(enabled=self.use_amp):
+                    outputs = self.model(inputs)
+                    # Handle different output formats
+                    if isinstance(outputs, tuple) and len(outputs) == 2:
+                        logits, loss = outputs
+                    else:
+                        logits = outputs
+                        loss = nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+
+                if not (torch.isnan(loss).any() or torch.isinf(loss).any()):
+                    total_loss += loss.item()
+                    total_tokens += inputs.numel()
+
+        avg_loss = total_loss / len(self.val_dataloader) if len(self.val_dataloader) > 0 else 0.0
+        # Calculate perplexity if possible (you might need vocab size or specific loss calculation)
+        # perplexity = torch.exp(torch.tensor(avg_loss)).item() if avg_loss > 0 else float('inf')
+
+        return {'loss': avg_loss} #, 'perplexity': perplexity}
 
 
 def create_trainer_from_config(

@@ -1,0 +1,15 @@
+# conf/training/default.yaml
+epochs: 5 # Set to 5 epochs
+use_amp: True
+gradient_accumulation_steps: 1 # Match previous high-performance run
+max_grad_norm: 1.0
+log_interval: 10 # Log every N global steps
+save_interval: 1 # Save checkpoint every N epochs
+time_save_interval_minutes: 5 # Save checkpoint every N minutes (0 or null to disable)
+compile_model: False
+activation_checkpointing: False
+
+# Sampling configuration (used during timed saves)
+sample_max_new_tokens: 100
+sample_temperature: 0.8
+sample_start_text: "The meaning of life is" 

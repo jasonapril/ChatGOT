@@ -25,11 +25,12 @@ Craft is a framework for building, training, and evaluating language models and 
 The `src/models/` directory contains model definitions and related utilities:
 
 - `base.py`: Contains abstract base classes for different model types.
-  - `BaseModel`: The core base class for all models.
+  - `Model`: The core base class for all models (renamed from BaseModel).
   - `GenerativeModel`: For models that generate outputs.
   - `LanguageModel`: For language models specifically.
-- `char_lstm.py`: A character-level LSTM language model.
-- `transformer.py`: A transformer-based language model.
+- `gpt_decoder.py`: A custom GPT-like decoder implementation.
+- `transformer.py`: A transformer-based language model (potentially using `nn.TransformerDecoder`).
+- `__init__.py`: Makes the directory a Python package and potentially exposes key classes.
 
 Models follow an object-oriented design with clear inheritance hierarchies to ensure consistent interfaces.
 
@@ -37,28 +38,44 @@ Models follow an object-oriented design with clear inheritance hierarchies to en
 
 The `src/data/` directory handles data loading, processing, and dataset creation:
 
-- `base.py`: Contains abstract base classes for different dataset types.
-  - `BaseDataset`: The core base class for all datasets.
-  - `TextDataset`: For text-based datasets.
-- `char_dataset.py`: A character-level text dataset.
-- `loaders.py`: Functions for creating data loaders.
+- `base.py`: Contains abstract base classes and core data loading functions (e.g., `prepare_dataloaders_from_config`).
+  - `BaseDataset`: The core base class for all datasets (may reside here or in `dataset.py`).
+  - `TextDataset`: For text-based datasets (may reside here or in `dataset.py`).
+- `dataset.py`: Contains specific `torch.utils.data.Dataset` implementations (e.g., `CharDataset` might be here if still used).
 - `processors.py`: Functions for processing different types of data (text, image, etc.).
-- `tokenization.py`: Character-level tokenization utilities.
+- `__init__.py`: Makes the directory a Python package.
+
+*(Note: `loaders.py` and `tokenization.py` are no longer present in this directory.)*
 
 ### Training
 
-The `src/training/` directory contains training loops and evaluation code:
+The `src/training/` directory contains training loops, callbacks, and related utilities:
 
-- `base.py`: Contains abstract base classes for different trainer types.
-  - `Trainer`: The core base class for all trainers.
-  - `LanguageModelTrainer`: For training language models.
-- `evaluation.py`: Evaluation metrics and utilities.
-- `optimization.py`: Optimization utilities.
-- `logging.py`: Training loggers for tracking experiments.
+- `base.py`: Contains the core `Trainer` base class (and potentially implementations like `LanguageModelTrainer`).
+- `callbacks.py`: Contains `TrainerCallback` base class and specific callback implementations (e.g., `ReduceLROnPlateauOrInstability`, `SampleGenerationCallback`, `TensorBoardLogger`).
+- `amp.py`: Utilities for Automatic Mixed Precision (AMP) training, including `SafeGradScaler`.
+- `utils.py`: Training-specific utility functions (e.g., `enable_gradient_checkpointing`).
+- `__init__.py`: Makes the directory a Python package.
+
+*(Note: The following files might represent older or redundant training logic and may be candidates for removal/refactoring: `evaluation.py`, `generation.py`, `optimizations.py`, `train_config.py`, `train_runner.py`, `training_loop.py`. The primary training flow should now be centered around `base.py` and `callbacks.py`.)*
+
+### Config Management (`src/config/`)
+
+The `src/config/` directory contains code related to loading, validating, and managing configurations (distinct from the configuration *files* in `conf/`):
+
+- `config_manager.py`: Handles loading, merging, and potentially validating configuration objects (e.g., using Hydra/OmegaConf).
+- `__init__.py`: Makes the directory a Python package.
+
+### Command-Line Interface (`src/cli/`)
+
+The `src/cli/` directory provides the command-line interface for interacting with the framework:
+
+- `run.py`: Defines the main CLI application entry point (e.g., using Typer or Click) and orchestrates workflows like training, evaluation, and generation based on commands and configurations.
+- `__init__.py`: Makes the directory a Python package.
 
 ### Configuration
 
-The `configs/` directory contains configuration files for models, datasets, training, and experiments:
+The `conf/` directory contains configuration files for models, datasets, training, and experiments:
 
 - `models/`: Model configuration files.
 - `data/`: Dataset configuration files.
@@ -69,44 +86,52 @@ Configuration files are YAML-based and can be composed to create complex experim
 
 ### Utils
 
-The `src/utils/` directory contains general utilities:
+The `src/utils/` directory contains general utilities shared across the project:
 
-- `common.py`: Common utilities for setup, seeding, and memory tracking.
-- `config.py`: Configuration loading and parsing utilities.
-- `logging.py`: Logging utilities.
-- `visualization.py`: Visualization utilities for model outputs.
+- `common.py`: Common utilities for setup (e.g., `set_seed`), device handling (`setup_device`).
+- `logging.py`: Logging setup utilities (`setup_logger`).
+- `io.py`: Input/output utilities.
+- `checkpoint.py`: Functions for saving and loading model checkpoints (`save_checkpoint`, `load_checkpoint`).
+- `performance.py`: Utilities for measuring performance (e.g., `get_resource_metrics`).
+- `metrics.py`: Standalone metric calculation functions.
+- `memory.py`: Memory usage tracking utilities.
+- `generation.py`: Potentially contains standalone text generation helper functions (separate from model's own generate method or training callbacks).
+- `__init__.py`: Makes the directory a Python package and may expose key utilities.
+
+*(Note: `config.py` and `visualization.py` are no longer present in this directory. Configuration handling is now in `src/config/`.)*
 
 ## Workflow
 
 A typical workflow in Craft looks like this:
 
-1. **Configuration**: Define or select configurations for your model, data, and training.
-2. **Dataset Creation**: Create a dataset from the data configuration.
-3. **Model Creation**: Create a model from the model configuration.
-4. **Trainer Creation**: Create a trainer from the training configuration.
-5. **Training**: Train the model using the trainer.
-6. **Evaluation**: Evaluate the model on test data.
-7. **Inference**: Use the trained model for inference.
+1. **Configuration**: Define or select configurations in the `conf/` directory (e.g., for model, data, training) or override via command line.
+2. **Data Preparation**: Use `src/data/` components (potentially via CLI) to process raw data.
+3. **Model Initialization**: The `src/models/` classes are instantiated based on configuration.
+4. **Trainer Setup**: The `src/training/base.py::Trainer` (or a subclass) is set up with the model, data loaders, optimizer, scheduler, and callbacks.
+5. **Training Execution**: Run training using the `Trainer`'s `train()` method, often triggered by a command in `src/cli/run.py`.
+6. **Evaluation**: Evaluate the model using the `Trainer`'s `evaluate()` method or standalone evaluation scripts.
+7. **Inference/Generation**: Use the trained model for inference, potentially via a generation command in `src/cli/run.py` or by loading the checkpoint and using the model's `generate()` method directly.
 
-This workflow is typically orchestrated through a command-line interface defined in `src/cli/`.
+This workflow is typically orchestrated through the command-line interface defined in `src/cli/run.py` using configuration files managed by `src/config/config_manager.py`.
 
 ## Directory Structure
 
 ```
 craft/
-├── configs/                # Configuration files
+├── conf/                 # Configuration files (YAML format)
+│   ├── callbacks/          # Callback configurations
 │   ├── data/               # Data configurations
-│   ├── experiments/        # Combined experiment configurations
-│   ├── models/             # Model configurations
+│   ├── experiment/         # Combined experiment configurations
+│   ├── model/              # Model configurations (Singular)
 │   └── training/           # Training configurations
-├── data/                   # Data storage
+├── data/                   # Data storage (managed outside source control)
 │   ├── raw/                # Raw data files
 │   └── processed/          # Processed data
 ├── docs/                   # Documentation
 │   ├── guides/             # User guides
 │   ├── architecture.md     # Architecture overview
 │   └── extending.md        # Extending the framework
-├── flow/                   # Task management system
+├── flow/                   # Task management & project context
 │   ├── active/             # Current work and tasks
 │   ├── logs/               # Project logs and records
 │   ├── meta/               # Meta-documentation
@@ -122,15 +147,15 @@ craft/
 │   ├── models/             # Trained model checkpoints
 │   ├── samples/            # Generated text samples
 │   └── visualizations/     # Plots and charts
-├── scripts/                # Scripts and entry points
+├── scripts/                # Standalone scripts (utility, testing, legacy)
 ├── src/                    # Source code
-│   ├── cli/                # Command-line interface
-│   ├── config/             # Configuration management
-│   ├── data/               # Data loading and processing
-│   ├── models/             # Model definitions
-│   ├── training/           # Training loops and evaluation
-│   └── utils/              # Utilities
-└── tests/                  # Unit tests
+│   ├── cli/                # Command-line interface (run.py)
+│   ├── config/             # Configuration management code (config_manager.py)
+│   ├── data/               # Data loading and processing (base.py, dataset.py, processors.py)
+│   ├── models/             # Model definitions (base.py, gpt_decoder.py, transformer.py)
+│   ├── training/           # Training loops and evaluation (base.py, callbacks.py, amp.py, utils.py, legacy?)
+│   └── utils/              # Shared utilities (common.py, io.py, checkpoint.py, logging.py, etc.)
+└── tests/                  # Unit and integration tests
 ```
 
 The structure is designed to separate concerns and make it easy to navigate and extend the codebase.
@@ -170,6 +195,6 @@ Contains project planning, documentation, and tracking information.
 
 1. **Code Development**: All source code should go in `src/`.
 2. **Generated Files**: All outputs from running code should go in `outputs/`.
-3. **Configuration**: Config files should go in `configs/`.
+3. **Configuration**: Config files should go in `conf/`.
 4. **Documentation**: Documentation files should go in `docs/`.
 5. **Planning**: Project management documents go in `flow/`. 

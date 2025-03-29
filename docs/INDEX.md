@@ -8,7 +8,7 @@ Our documentation is organized into the following categories:
 
 - **Guides** - Instructions and tutorials for using the system
 - **Logs** - Debugging and progress tracking
-- **Development** - Development process and workflow (in [dev/](../dev/) directory)
+- **Development** - Development process and workflow (in [flow/](../flow/) directory)
 
 ## Guides
 
@@ -24,13 +24,13 @@ Our documentation is organized into the following categories:
 
 | Document | Description |
 |----------|-------------|
-| [Refactoring Plan](../dev/planning/refactoring_plan.md) | Plan for project structure refactoring |
-| [Project State](../dev/planning/state.md) | Current state of the project |
-| [Project Roadmap](../dev/planning/roadmap.md) | Long-term project roadmap |
-| [Organization Guidelines](../dev/planning/organization.md) | Project organization guidelines |
-| [Project Status](../dev/planning/project_status.md) | Current project status |
-| [Performance](../dev/performance/performance.md) | Performance considerations and optimizations |
-| [Performance Optimizations](../dev/performance/optimizations.md) | Detailed performance optimizations |
+| [Refactoring Plan](../flow/planning/refactoring_plan.md) | Plan for project structure refactoring |
+| [Project State](../flow/planning/state.md) | Current state of the project |
+| [Project Roadmap](../flow/planning/roadmap.md) | Long-term project roadmap |
+| [Organization Guidelines](../flow/planning/organization.md) | Project organization guidelines |
+| [Project Status](../flow/planning/project_status.md) | Current project status |
+| [Performance](../flow/performance/performance.md) | Performance considerations and optimizations |
+| [Performance Optimizations](../flow/performance/optimizations.md) | Detailed performance optimizations |
 
 ## Logs and Tracking
 
@@ -44,10 +44,10 @@ Our documentation is organized into the following categories:
 | Document | Description |
 |----------|-------------|
 | [Working Memory](../working_memory.md) | Active task tracking and current focus |
-| [Workflow System](../dev/workflow/workflow_system.md) | Development workflow guidelines |
-| [Dev Documentation](../dev/README.md) | Development structure and organization |
-| [User Preferences](../dev/preferences.md) | Long-term preferences and instructions |
-| [Preferences Loading](../dev/workflow/preferences_loading.md) | Guide for loading preferences into context |
+| [Workflow System](../flow/workflow/workflow_system.md) | Development workflow guidelines |
+| [Dev Documentation](../flow/README.md) | Development structure and organization |
+| [User Preferences](../flow/preferences.md) | Long-term preferences and instructions |
+| [Preferences Loading](../flow/workflow/preferences_loading.md) | Guide for loading preferences into context |
 
 ## Documentation Standards
 

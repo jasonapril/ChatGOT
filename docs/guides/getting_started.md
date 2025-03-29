@@ -44,7 +44,7 @@ The Craft project is organized with a clean separation of concerns:
 
 ```
 craft/
-├── configs/                # Configuration files
+├── conf/                # Configuration files
 │   ├── data/               # Data configurations
 │   ├── experiments/        # Combined configurations
 │   ├── models/             # Model configurations
@@ -117,7 +117,7 @@ Use the train command to train a language model:
 
 ```bash
 python scripts/craft train language \
-    --config configs/experiments/char_transformer.yaml \
+    --config conf/experiments/char_transformer.yaml \
     --output-dir models/shakespeare
 ```
 
@@ -144,10 +144,10 @@ Craft uses YAML configuration files to define models, datasets, and training par
 
 ### Model Configuration
 
-Create a model configuration in `configs/models/`:
+Create a model configuration in `conf/models/`:
 
 ```yaml
-# configs/models/my_transformer.yaml
+# conf/models/my_transformer.yaml
 model_type: language
 architecture: transformer
 vocab_size: 128
@@ -160,10 +160,10 @@ dropout: 0.1
 
 ### Data Configuration
 
-Create a data configuration in `configs/data/`:
+Create a data configuration in `conf/data/`:
 
 ```yaml
-# configs/data/my_dataset.yaml
+# conf/data/my_dataset.yaml
 type: text
 format: character
 data_path: data/raw/my_text.txt
@@ -174,10 +174,10 @@ train_split: 0.9
 
 ### Training Configuration
 
-Create a training configuration in `configs/training/`:
+Create a training configuration in `conf/training/`:
 
 ```yaml
-# configs/training/my_training.yaml
+# conf/training/my_training.yaml
 epochs: 20
 learning_rate: 0.001
 optimizer:
@@ -194,14 +194,14 @@ mixed_precision: true
 
 ### Experiment Configuration
 
-Create an experiment configuration in `configs/experiments/`:
+Create an experiment configuration in `conf/experiments/`:
 
 ```yaml
-# configs/experiments/my_experiment.yaml
+# conf/experiments/my_experiment.yaml
 name: my_transformer_experiment
-model_config: configs/models/my_transformer.yaml
-data_config: configs/data/my_dataset.yaml
-training_config: configs/training/my_training.yaml
+model_config: conf/models/my_transformer.yaml
+data_config: conf/data/my_dataset.yaml
+training_config: conf/training/my_training.yaml
 paths:
   output_dir: models/my_experiment
   logs_dir: logs/my_experiment
@@ -213,7 +213,7 @@ system:
 Run your custom experiment:
 
 ```bash
-python scripts/craft train language --config configs/experiments/my_experiment.yaml
+python scripts/craft train language --config conf/experiments/my_experiment.yaml
 ```
 
 ## Next Steps

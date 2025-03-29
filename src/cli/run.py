@@ -11,6 +11,8 @@ import typer
 from typing import Optional, List, Tuple, Dict, Any
 
 import torch
+import hydra
+from omegaconf import DictConfig, OmegaConf
 from rich.console import Console
 from rich.logging import RichHandler
 
@@ -19,6 +21,7 @@ from ..models.base import create_model_from_config
 from ..data.base import prepare_dataloaders_from_config
 from ..training.base import create_trainer_from_config
 from ..utils.common import set_seed, setup_device
+from ..experiments import runner as experiment_runner
 
 # Create Typer app
 app = typer.Typer(
@@ -43,6 +46,52 @@ app.add_typer(dataset_app, name="dataset")
 
 # Global console for rich output
 console = Console()
+
+
+# Typer command using manual Hydra initialization
+@experiment_app.command("run")
+def run_experiment_command(
+    experiment_name: str = typer.Argument(..., help="Name of the experiment config to run (e.g., 'chatgot_25m').")
+):
+    """Run an experiment using manual Hydra initialization."""
+    console.print("Manually initializing Hydra and starting experiment run...")
+    
+    # Import necessary Hydra functions
+    from hydra import initialize, compose
+    
+    # Specify the relative path to the config directory from this file's location
+    # src/cli/run.py -> conf/ is ../../conf
+    config_path_rel = "../../conf"
+    
+    # Use the provided experiment name in overrides
+    overrides = [f"experiment={experiment_name}"]
+
+    try:
+        # Initialize Hydra
+        with initialize(config_path=config_path_rel, version_base=None):
+            # Compose the configuration
+            cfg = compose(config_name="config", overrides=overrides)
+            
+            console.print(f"Successfully composed configuration for experiment: {experiment_name}")
+            # Optionally print the resolved config (can be verbose)
+            # console.print(OmegaConf.to_yaml(cfg))
+
+            # Resolve and create the output directory based on the config
+            output_dir = cfg.paths.output_dir 
+            os.makedirs(output_dir, exist_ok=True)
+            console.print(f"Experiment output directory: {os.path.abspath(output_dir)}")
+            
+            # Run the actual experiment
+            results = experiment_runner.run_experiment(cfg, output_dir)
+            console.print("Experiment finished successfully.")
+            # Optionally print results summary
+            # console.print(results)
+
+    except Exception as e:
+        logging.exception("Experiment failed during manual Hydra setup or execution.")
+        console.print(f"[bold red]Experiment failed:[/bold red] {e}")
+        # Re-raise the exception so the process exits with an error
+        raise
 
 
 def setup_logging(log_level: str = "INFO"):
@@ -224,26 +273,6 @@ def generate_text(
     
     console.print(f"\nGenerated text:")
     console.print(generated_text)
-
-
-@experiment_app.command("run")
-def run_experiment(
-    config_path: str = typer.Option(..., "--config", "-c", help="Path to experiment configuration"),
-    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o", help="Output directory"),
-):
-    """Run an experiment from configuration."""
-    from ..experiments.runner import run_experiment
-    
-    # Load configuration
-    config = load_experiment_config(config_path)
-    
-    # Override output directory if provided
-    if output_dir:
-        config["paths"]["output_dir"] = output_dir
-    
-    # Run experiment
-    output_dir = config.get("paths", {}).get("output_dir", "runs/experiments")
-    run_experiment(config, output_dir)
 
 
 @dataset_app.command("prepare")

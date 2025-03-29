@@ -199,7 +199,7 @@ def check_dataset_vocab_size(data_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze model parameters")
-    parser.add_argument("--config", type=str, default="configs/models/chatgot_small_char.yaml",
+    parser.add_argument("--config", type=str, default="conf/models/chatgot_small_char.yaml",
                        help="Path to model configuration file")
     parser.add_argument("--data", type=str, default="data/got/game_of_thrones.txt",
                        help="Path to data file for checking vocabulary size")

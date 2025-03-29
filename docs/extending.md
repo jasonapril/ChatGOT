@@ -329,10 +329,10 @@ def create_trainer_from_config(
 
 ### Model Configuration
 
-To configure your custom model, create a YAML file in the `configs/models/` directory:
+To configure your custom model, create a YAML file in the `conf/models/` directory:
 
 ```yaml
-# configs/models/custom_lstm.yaml
+# conf/models/custom_lstm.yaml
 model_type: language
 architecture: custom_lstm
 vocab_size: 100
@@ -342,10 +342,10 @@ hidden_dim: 256
 
 ### Training Configuration
 
-To configure your custom training, create a YAML file in the `configs/training/` directory:
+To configure your custom training, create a YAML file in the `conf/training/` directory:
 
 ```yaml
-# configs/training/custom_training.yaml
+# conf/training/custom_training.yaml
 trainer_type: custom
 epochs: 10
 batch_size: 32
@@ -354,10 +354,10 @@ learning_rate: 0.001
 
 ### Data Configuration
 
-To configure your custom dataset, create a YAML file in the `configs/data/` directory:
+To configure your custom dataset, create a YAML file in the `conf/data/` directory:
 
 ```yaml
-# configs/data/custom_text.yaml
+# conf/data/custom_text.yaml
 data_type: text
 format: custom_text
 data_path: data/raw/custom_text.txt
@@ -606,20 +606,20 @@ def create_trainer_from_config(model, train_dataloader, val_dataloader=None, con
 5. Create configuration files:
 
 ```yaml
-# configs/models/custom_cnn.yaml
+# conf/models/custom_cnn.yaml
 model_type: vision
 architecture: cnn
 num_classes: 10
 in_channels: 3
 
-# configs/data/custom_image.yaml
+# conf/data/custom_image.yaml
 data_type: image
 format: custom_image
 data_path: data/raw/images
 batch_size: 32
 num_workers: 4
 
-# configs/training/vision_training.yaml
+# conf/training/vision_training.yaml
 epochs: 10
 batch_size: 32
 learning_rate: 0.001
@@ -636,7 +636,7 @@ scheduler:
 
 ```bash
 # Train a vision model
-craft train vision -c configs/experiments/custom_vision.yaml
+craft train vision -c conf/experiments/custom_vision.yaml
 ```
 
 This example demonstrates how to extend Craft with a custom vision model, dataset, and trainer. 

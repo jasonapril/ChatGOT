@@ -40,11 +40,11 @@ The [Implementation Guide](implementation_guide.md) contains:
 ### Running Training with Clean Configuration
 ```bash
 # Launch training with default parameters
-python scripts/train_with_samples.py configs/models/debug/chatgot_small_14M_clean.yaml
+python scripts/train_with_samples.py conf/models/debug/chatgot_small_14M_clean.yaml
 
 # Launch with specific arguments
 python scripts/train_with_samples.py \
-    configs/models/debug/chatgot_small_14M_clean.yaml \
+    conf/models/debug/chatgot_small_14M_clean.yaml \
     --batch_size 16 \
     --devices 1
 ```
@@ -53,7 +53,7 @@ python scripts/train_with_samples.py \
 ```bash
 # Resume training from a specific checkpoint
 python scripts/train_with_samples.py \
-    configs/models/debug/chatgot_small_14M_clean.yaml \
+    conf/models/debug/chatgot_small_14M_clean.yaml \
     --resume_from models/chatgot_small_14M_clean_[TIMESTAMP]_step_[STEP].pt
 ```
 

@@ -9,7 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .base import LanguageModel, ModelConfig
+# Import base class, new config type, and registration decorator
+from .base import LanguageModel, LanguageModelConfig 
+from .factory import register_model
 
 
 class PositionalEncoding(nn.Module):
@@ -56,114 +58,75 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
+# Register this model implementation
+@register_model("language", architecture_name="transformer")
 class TransformerModel(LanguageModel):
     """
     Transformer model for character-level language modeling.
-    
-    This implements a decoder-only transformer (similar to GPT).
+    Uses the standard nn.TransformerDecoderLayer and nn.TransformerDecoder.
+    Configured via Pydantic LanguageModelConfig.
     """
     
-    def __init__(
-        self, 
-        config: Optional[ModelConfig] = None,
-        vocab_size: Optional[int] = None,
-        d_model: int = 768,     # Standard GPT-2 Small
-        n_head: int = 12,       # Standard GPT-2 Small
-        d_hid: int = 3072,      # Standard GPT-2 Small
-        n_layers: int = 12,     # Standard GPT-2 Small
-        dropout: float = 0.1,   # Standard GPT-2 dropout
-        max_seq_length: int = 1024,  # Standard GPT-2 context window
-        layer_norm_eps: float = 1e-5,
-        activation: str = 'gelu',
-        bias: bool = True
-    ):
+    def __init__(self, config: LanguageModelConfig):
         """
-        Initialize the transformer model.
-        
-        Args:
-            config: Model configuration object (takes precedence over other args)
-            vocab_size: Size of the vocabulary
-            d_model: Dimension of the model (embedding dimension)
-            n_head: Number of attention heads
-            d_hid: Dimension of the feedforward layer
-            n_layers: Number of transformer layers
-            dropout: Dropout probability
-            max_seq_length: Maximum sequence length
-            layer_norm_eps: Layer normalization epsilon
-            activation: Activation function ('gelu' or 'relu')
-            bias: Whether to use bias in linear layers
+        Initialize the transformer model using a LanguageModelConfig.
         """
-        # Process configuration
-        if config is None:
-            # If vocab_size is not provided, raise an error
-            if vocab_size is None:
-                raise ValueError("Either config or vocab_size must be provided")
-                
-            config = ModelConfig(
-                vocab_size=vocab_size,
-                d_model=d_model,
-                n_head=n_head,
-                d_hid=d_hid,
-                n_layers=n_layers,
-                dropout=dropout,
-                max_seq_length=max_seq_length,
-                layer_norm_eps=layer_norm_eps,
-                activation=activation,
-                bias=bias,
-                architecture="transformer"
-            )
-        elif vocab_size is not None:
-            # If both config and vocab_size are provided, use vocab_size
-            config.vocab_size = vocab_size
-        
         super().__init__(config)
         
-        # Extract parameters from config for easy access
-        self.vocab_size = self.config.vocab_size
-        self.d_model = self.config.d_model
-        self.n_head = self.config.n_head
-        self.d_hid = self.config.d_hid
-        self.n_layers = self.config.n_layers
-        self.max_seq_length = self.config.max_seq_length
-        self.layer_norm_eps = self.config.layer_norm_eps
-        self.activation = self.config.activation
-        self.bias = self.config.bias
-        self.dropout_rate = self.config.dropout
+        # Extract parameters from the validated Pydantic config
+        self.vocab_size = config.vocab_size
+        self.d_model = getattr(config, 'd_model', 768)
+        self.n_head = getattr(config, 'n_head', 12)
+        # Get d_hid, applying default only if it's missing OR explicitly None
+        d_hid_from_config = getattr(config, 'd_hid', None)
+        self.d_hid = d_hid_from_config if d_hid_from_config is not None else self.d_model * 4
+        self.n_layers = getattr(config, 'n_layers', 12)
+        self.dropout_rate = getattr(config, 'dropout', 0.1)
+        self.max_seq_length = getattr(config, 'max_seq_length', 1024)
+        self.layer_norm_eps = getattr(config, 'layer_norm_eps', 1e-5)
+        self.activation = getattr(config, 'activation', 'gelu')
+        self.bias = getattr(config, 'bias', True)
+        self.norm_first = getattr(config, 'norm_first', True) # Ensure consistent param
         
+        # --- Model Layers --- #
         # Token embedding
         self.token_embedding = nn.Embedding(self.vocab_size, self.d_model)
         
-        # Position embedding
+        # Position embedding (learnable)
         self.position_embedding = nn.Embedding(self.max_seq_length, self.d_model)
+
+        # Dropout for embeddings
+        self.dropout = nn.Dropout(self.dropout_rate)
         
-        # Create transformer decoder layer
+        # Create standard transformer decoder layer
         decoder_layers = nn.TransformerDecoderLayer(
             d_model=self.d_model,
             nhead=self.n_head,
             dim_feedforward=self.d_hid,
             dropout=self.dropout_rate,
             activation=self.activation,
-            batch_first=True,
-            norm_first=True,
+            batch_first=True, # Important: ensure batch dimension is first
+            norm_first=self.norm_first, # Use pre-norm or post-norm based on config
             bias=self.bias,
             layer_norm_eps=self.layer_norm_eps
         )
         
-        # Create transformer decoder
+        # Create standard transformer decoder
         self.transformer_decoder = nn.TransformerDecoder(
             decoder_layers,
             num_layers=self.n_layers,
-            norm=nn.LayerNorm(self.d_model, eps=self.layer_norm_eps)
+            norm=nn.LayerNorm(self.d_model, eps=self.layer_norm_eps) # Final norm layer
         )
         
-        # Output layer
-        self.output_layer = nn.Linear(self.d_model, self.vocab_size, bias=self.bias)
+        # Output layer (ties weights with token embedding if configured)
+        self.output_layer = nn.Linear(self.d_model, self.vocab_size, bias=False)
+        # self.token_embedding.weight = self.output_layer.weight # Weight tying
         
         # Initialize weights
         self.apply(self._init_weights)
         
-        # Log model size
-        self._log_model_size()
+        # Log model size is handled by factory
+        # self._log_model_size()
     
     def _init_weights(self, module):
         """Initialize the weights of the model."""
@@ -172,253 +135,75 @@ class TransformerModel(LanguageModel):
             if isinstance(module, nn.Linear) and module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-    
-    def _log_model_size(self):
-        """Log the number of parameters in the model."""
-        n_params = sum(p.numel() for p in self.parameters())
-        logging.info(f"Model initialized with {n_params:,} parameters")
+            # Initialize bias only if it exists
+            if module.bias is not None:
+                module.bias.data.zero_()
+            # Initialize weight (LayerNorm usually has weight if affine)
+            if module.weight is not None: 
+                module.weight.data.fill_(1.0)
     
     def _generate_square_subsequent_mask(self, sz: int) -> torch.Tensor:
         """
-        Generate a square mask for the sequence.
-        
-        The mask ensures that the prediction for position i
-        can only depend on known elements in positions 0:i-1.
-        
-        Args:
-            sz: Sequence length
-            
-        Returns:
-            Mask tensor
+        Generate a square mask for the sequence (causal mask).
+        Ensures attention is only paid to previous tokens.
         """
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        # Use float('-inf') for positions to be masked
+        mask = torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
         return mask
     
     def forward(self, x: torch.Tensor, targets: Optional[torch.Tensor] = None) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
-        Forward pass of the model.
+        Forward pass of the TransformerModel.
         
         Args:
-            x: Input tensor of shape [batch_size, seq_len]
-            targets: Target tensor of shape [batch_size, seq_len] or None
+            x: Input token indices of shape [batch_size, seq_len]
+            targets: Optional target token indices for loss calculation [batch_size, seq_len]
             
         Returns:
-            Output logits and optionally loss
+            Logits [batch_size, seq_len, vocab_size], or (Logits, Loss) if targets are provided.
         """
         batch_size, seq_len = x.size()
+        if seq_len > self.max_seq_length:
+            raise ValueError(f"Input sequence length ({seq_len}) exceeds model's max sequence length ({self.max_seq_length})")
         
         # Get token embeddings
-        token_embeddings = self.token_embedding(x)
+        tok_emb = self.token_embedding(x) * math.sqrt(self.d_model) # Scale embedding
         
         # Get position embeddings
         positions = torch.arange(0, seq_len, dtype=torch.long, device=x.device)
-        # Clamp positions to max_seq_length-1 to prevent out-of-bounds issues
-        positions = torch.clamp(positions, max=self.max_seq_length-1)
-        positions = positions.unsqueeze(0).expand(batch_size, -1)
-        position_embeddings = self.position_embedding(positions)
+        # positions = torch.clamp(positions, max=self.max_seq_length-1) # Clamp if using fixed PE
+        pos_emb = self.position_embedding(positions) # [seq_len, d_model]
         
-        # Combine embeddings
-        x = token_embeddings + position_embeddings
+        # Combine embeddings and apply dropout
+        x = self.dropout(tok_emb + pos_emb) # [batch_size, seq_len, d_model]
         
-        # Create attention mask to prevent attending to future tokens
-        mask = self._generate_square_subsequent_mask(seq_len).to(x.device)
+        # Create attention mask for the decoder
+        # Shape should be [seq_len, seq_len]
+        tgt_mask = self._generate_square_subsequent_mask(seq_len).to(x.device)
         
-        # Pass through transformer
+        # The standard TransformerDecoder expects no memory for decoder-only setup
+        # It doesn't explicitly take a memory_mask or memory_key_padding_mask in this case.
+        # tgt_key_padding_mask could be added if needed based on input padding.
         output = self.transformer_decoder(
             tgt=x,
-            memory=torch.zeros((batch_size, 1, self.d_model), device=x.device),
-            tgt_mask=mask
+            memory=torch.zeros((batch_size, 0, self.d_model), device=x.device), # No memory needed
+            tgt_mask=tgt_mask,
+            # memory_mask=None, # Not used without memory
+            # tgt_key_padding_mask=None, # Optional: Add if input can be padded
+            # memory_key_padding_mask=None # Not used without memory
         )
         
         # Generate logits
-        logits = self.output_layer(output)
+        logits = self.output_layer(output) # [batch_size, seq_len, vocab_size]
         
         # Calculate loss if targets provided
         if targets is not None:
-            # Reshape for cross-entropy
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1) # Ignore padding
             return logits, loss
         
         return logits
     
-    def generate(
-        self,
-        input_ids: torch.Tensor,
-        max_new_tokens: int = 100,
-        temperature: float = 1.0,
-        top_k: int = 0,
-        top_p: float = 0.9,
-        repetition_penalty: float = 1.0,
-        verbose: bool = False
-    ) -> torch.Tensor:
-        """
-        Generate text from the model.
-        
-        Args:
-            input_ids: Input token ids of shape [batch_size, seq_len]
-            max_new_tokens: Maximum number of new tokens to generate
-            temperature: Sampling temperature
-            top_k: Number of highest probability tokens to keep for top-k sampling
-            top_p: Probability threshold for top-p sampling
-            repetition_penalty: Penalty for repeating tokens
-            verbose: Whether to log progress
-            
-        Returns:
-            Generated token ids
-        """
-        self.eval()
-        batch_size = input_ids.shape[0]
-        
-        # Create list to store generated tokens
-        generated_tokens = input_ids.clone()
-        
-        # Set past to None
-        past = None
-        
-        # Generate tokens one by one
-        for i in range(max_new_tokens):
-            # Forward pass
-            with torch.no_grad():
-                logits = self(generated_tokens)
-                
-                # Get logits for the next token (last token in the sequence)
-                next_token_logits = logits[:, -1, :]  # [batch_size, vocab_size]
-                
-                # Apply temperature
-                next_token_logits = next_token_logits / temperature
-                
-                # Apply repetition penalty
-                if repetition_penalty != 1.0:
-                    for b in range(batch_size):
-                        for token_id in generated_tokens[b]:
-                            next_token_logits[b, token_id] /= repetition_penalty
-                
-                # Apply top-k filtering
-                if top_k > 0:
-                    # Get top-k values and indices
-                    topk_values, topk_indices = torch.topk(next_token_logits, top_k)
-                    
-                    # Create filter mask
-                    filter_mask = torch.zeros_like(next_token_logits, dtype=torch.bool)
-                    
-                    # Set top-k indices to True
-                    for b in range(batch_size):
-                        filter_mask[b, topk_indices[b]] = True
-                    
-                    # Set non-top-k values to -inf
-                    next_token_logits = torch.where(filter_mask, next_token_logits, 
-                                                  torch.tensor(-float("inf"), device=next_token_logits.device))
-                
-                # Apply top-p (nucleus) filtering
-                if top_p < 1.0:
-                    # Convert logits to probabilities
-                    probs = F.softmax(next_token_logits, dim=-1)
-                    
-                    # Sort probabilities in descending order
-                    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
-                    
-                    # Compute cumulative probabilities
-                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
-                    
-                    # Create mask for probabilities to keep
-                    keep_mask = cumulative_probs < top_p
-                    
-                    # Always keep at least one token
-                    keep_mask[:, 0] = True
-                    
-                    # Create filter mask
-                    filter_mask = torch.zeros_like(next_token_logits, dtype=torch.bool)
-                    
-                    # Populate filter mask
-                    for b in range(batch_size):
-                        filter_mask[b, sorted_indices[b, keep_mask[b]]] = True
-                    
-                    # Apply filter
-                    next_token_logits = torch.where(filter_mask, next_token_logits, 
-                                                  torch.tensor(-float("inf"), device=next_token_logits.device))
-                
-                # Convert logits to probabilities for sampling
-                probs = F.softmax(next_token_logits, dim=-1)
-                
-                # Sample next token
-                next_token = torch.multinomial(probs, num_samples=1)  # [batch_size, 1]
-                
-                # Add token to generated tokens
-                generated_tokens = torch.cat([generated_tokens, next_token], dim=1)
-                
-                if verbose and (i + 1) % 10 == 0:
-                    logging.info(f"Generated {i + 1}/{max_new_tokens} tokens")
-        
-        return generated_tokens
-    
-    def get_config(self) -> Dict[str, Any]:
-        """
-        Get model configuration.
-        
-        Returns:
-            Dictionary with model configuration
-        """
-        return {
-            "model_type": self.model_type,
-            "architecture": "transformer",
-            "vocab_size": self.vocab_size,
-            "d_model": self.d_model,
-            "n_head": self.n_head,
-            "d_hid": self.d_hid,
-            "n_layers": self.n_layers,
-            "dropout": self.dropout_rate,
-            "max_seq_length": self.max_seq_length,
-            "layer_norm_eps": self.layer_norm_eps,
-            "activation": self.activation,
-            "bias": self.bias
-        }
-
-
-def create_transformer_model(
-    config: Optional[ModelConfig] = None,
-    vocab_size: Optional[int] = None, 
-    d_model: int = 768, 
-    n_head: int = 12, 
-    d_hid: int = 3072, 
-    n_layers: int = 12, 
-    dropout: float = 0.1, 
-    max_seq_length: int = 1024, 
-    layer_norm_eps: float = 1e-5, 
-    activation: str = 'gelu', 
-    bias: bool = True
-) -> TransformerModel:
-    """
-    Create a transformer model.
-    
-    Args:
-        config: Model configuration object (takes precedence over other args)
-        vocab_size: Size of the vocabulary
-        d_model: Dimension of the model (embedding dimension)
-        n_head: Number of attention heads
-        d_hid: Dimension of the feedforward layer
-        n_layers: Number of transformer layers
-        dropout: Dropout probability
-        max_seq_length: Maximum sequence length
-        layer_norm_eps: Layer normalization epsilon
-        activation: Activation function ('gelu' or 'relu')
-        bias: Whether to use bias in linear layers
-        
-    Returns:
-        TransformerModel instance
-    """
-    return TransformerModel(
-        config=config,
-        vocab_size=vocab_size,
-        d_model=d_model,
-        n_head=n_head,
-        d_hid=d_hid,
-        n_layers=n_layers,
-        dropout=dropout,
-        max_seq_length=max_seq_length,
-        layer_norm_eps=layer_norm_eps,
-        activation=activation,
-        bias=bias
-    ) 
+    # --- Remove generate method --- #
+    # The generate method is now inherited from the GenerativeModel base class
+    # def generate(...): 
+    #    ... 

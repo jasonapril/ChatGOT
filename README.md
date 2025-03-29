@@ -4,7 +4,7 @@ A modular framework for building, training, and evaluating AI models, with a cur
 
 ## Overview
 
-Craft provides a flexible architecture for experimenting with different model types, training methods, and data sources. While initially specialized in language models like the character-level transformer for Game of Thrones-style text generation (ChatGoT), the framework is designed to be extended to other model types.
+Craft provides a flexible architecture for experimenting with different model types, training methods, and data sources. It is particularly well-suited for research and rapid prototyping of new ideas. While initially specialized in language models like the character-level transformer for Game of Thrones-style text generation (ChatGoT), the framework is designed to be extended to other model types.
 
 ## Features
 
@@ -38,7 +38,7 @@ Craft provides a unified command-line interface for all operations:
 
 ```bash
 # Training a language model
-python scripts/craft train language --config configs/experiments/char_transformer.yaml
+python scripts/craft train language --config conf/experiments/char_transformer.yaml
 
 # Generating text with a trained model
 python scripts/generate_samples.py --model_path outputs/models/best_model.pt --prompt "The king"
@@ -47,7 +47,7 @@ python scripts/generate_samples.py --model_path outputs/models/best_model.pt --p
 python scripts/craft dataset prepare --input data/raw/got.txt --output-dir data/processed
 
 # Running a predefined experiment
-python scripts/craft experiment run --config configs/experiments/experiment1.yaml
+python scripts/craft experiment run --config conf/experiments/experiment1.yaml
 ```
 
 ### Python API
@@ -61,7 +61,7 @@ from src.training import create_trainer_from_config
 from src.utils import load_experiment_config
 
 # Load configuration
-config = load_experiment_config("configs/experiments/char_transformer.yaml")
+config = load_experiment_config("conf/experiments/char_transformer.yaml")
 
 # Create data manager and prepare data
 data_manager = create_data_manager(config["data"])
@@ -90,10 +90,10 @@ print(generated_text)
 
 ```
 craft/
-├── configs/                # Configuration files
+├── conf/                   # Configuration files (using Hydra/OmegaConf)
 │   ├── data/               # Data configurations
-│   ├── experiments/        # Combined experiment configurations
-│   ├── models/             # Model configurations
+│   ├── experiment/         # Combined experiment configurations
+│   ├── model/              # Model configurations
 │   └── training/           # Training configurations
 ├── data/                   # Data storage
 │   ├── raw/                # Raw data files

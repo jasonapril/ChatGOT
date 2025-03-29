@@ -1,0 +1,61 @@
+# conf/config.yaml - Main Hydra configuration file
+
+# @package _global_
+
+defaults:
+  # Specify configuration groups to compose.
+  # The order matters; later entries override earlier ones.
+  - experiment: null      # Expect override from command line or specific config
+  - model: transformer
+  - training: default
+  - data: char
+  - optimizer: adamw
+  - scheduler: cosine
+  - callbacks: default    # Default callbacks configuration
+  # Move overrides after standard defaults
+  # - override hydra/hydra_logging: disabled # Can customize later
+  - _self_              # Allows defining variables directly in this file
+
+# Example top-level configuration parameters (optional)
+# These could also live in their own group files (e.g., conf/paths/default.yaml)
+# paths:
+#   # Default output directory pattern
+#   output_dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}" # Hydra automatically sets this based on hydra.run.dir
+#   # Example: Absolute path (use with caution)
+#   # data_root: /path/to/datasets 
+
+# General settings
+project_name: "Craft"
+
+# Add other top-level or default settings as needed 
+
+# Configuration for data handling
+data:
+  batch_size: 64 # Match previous high-performance run
+  num_workers: 0
+
+# Tokenizer Configuration (NEW SECTION)
+tokenizer:
+  defaults:
+    - default_hf # Referencing conf/tokenizer/default_hf.yaml
+    - _self_ # Allows overriding defaults in this file or via command line
+
+# Configuration for the trainer 
+
+# General Run Settings
+seed: 42
+# Remove checkpoint_dir - will be constructed in script from hydra.run.dir
+log_level: "INFO"
+force_cpu: False
+resume_from: null # Can be set to "latest" or a specific path/to/checkpoint.pt via command line
+
+# Hydra settings (can be overridden)
+hydra:
+  output_subdir: .hydra 
+
+# Add a new group for generation parameters
+generation:
+  start_prompt: "The meaning of life is\n"
+  max_new_tokens: 200
+  temperature: 0.8
+  top_k: null # null corresponds to Python None, or you can set an integer like 50 
