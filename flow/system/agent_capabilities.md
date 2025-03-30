@@ -1,4 +1,4 @@
-# AI Agent Capabilities
+Yes# AI Agent Capabilities
 
 This document outlines key capabilities and limitations of the AI agent assisting with development.
 
@@ -18,7 +18,7 @@ This document outlines key capabilities and limitations of the AI agent assistin
 
 ## Other Capabilities
 
-*   Executing terminal commands (requires user approval) (`run_terminal_cmd`).
+*   Executing terminal commands (`run_terminal_cmd`).
 *   Performing web searches (`web_search`).
 *   Performing semantic code searches (`codebase_search`).
 

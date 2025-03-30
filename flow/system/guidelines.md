@@ -14,7 +14,7 @@ This document outlines the core principles and best practices for utilizing the 
 
 ## Usage
 
-*   **Tasks (`flow/project/tasks.md`)**: Regularly update task statuses, add new tasks, link related issues/commits, and archive completed items. Use status emojis (e.g., ⏳, ✅, ⏸️, 🔴) for quick visual reference.
+*   **Tasks (`flow/project/tasks.md`)**: Regularly update task statuses, add new tasks, link related issues/commits, and archive completed items. Use status emojis (e.g., ⏳, ✅, ⏸️, 🔴) for quick visual reference. Ensure task descriptions contain necessary context or links for ongoing work.
 *   **Guidelines (`flow/system/guidelines.md`)**: Consult this file for development standards, coding practices, and Flow system usage conventions.
 *   **Agent Capabilities (`flow/system/agent_capabilities.md`)**: Refer to this document for the known capabilities and limitations of the assisting AI agent.
 *   **Project Planning (`flow/planning/`)**: Use files in this directory for longer-term goals, potential improvements, and strategic decisions.

@@ -74,22 +74,17 @@ class CharDataset(BaseDataset):
                 if idx is not None:
                     self.data.append(idx)
                 else:
-                    # Option 1: Skip unknown characters (simple)
-                    # Option 2: Map to a special <UNK> token (requires <UNK> in vocab)
-                    # Option 3: Raise an error
                     unknown_chars.add(char)
             if unknown_chars:
                 logger.warning(f"Found {len(unknown_chars)} character(s) in {self.file_path} not present in vocabulary {self.vocab_path}. These characters were skipped: {unknown_chars}")
             logger.info(f"Loaded and indexed {len(self.data)} characters from {self.file_path} using vocabulary from {self.vocab_path}.")
     
-    # __len__ remains the same but needs to handle empty data
     def __len__(self):
         """Return the number of possible sequences."""
         if not self.data or len(self.data) <= self.block_size:
             return 0
         return len(self.data) - self.block_size
     
-    # Modified __getitem__ to return a dictionary
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """
         Get a training sample as a dictionary.
@@ -109,7 +104,7 @@ class CharDataset(BaseDataset):
         y = torch.tensor(chunk[1:], dtype=torch.long)
         return {'input_ids': x, 'labels': y}
     
-    # decode method remains useful for this specific dataset type
+    # Restore decode method
     def decode(self, indices):
         """
         Convert indices back to characters.
@@ -120,19 +115,12 @@ class CharDataset(BaseDataset):
         Returns:
             str: Decoded text.
         """
-        if not self.idx_to_char: # Handle empty dataset case
+        if not hasattr(self, 'idx_to_char') or not self.idx_to_char:
             return ""
-            
         if isinstance(indices, torch.Tensor):
-            # Ensure tensor is on CPU and convert to list
             indices = indices.cpu().tolist()
-            
-        # Handle potential nested lists if batch dimension wasn't squeezed
         if indices and isinstance(indices[0], list):
-             indices = indices[0] # Assume first item if nested
-
-        return ''.join([self.idx_to_char.get(i, '?') for i in indices]) # Use .get for safety
-    
-    # Removed get_config method, base class handles config storage.
+             indices = indices[0]
+        return ''.join([self.idx_to_char.get(i, '?') for i in indices])
 
 # Removed load_data function. Use factory functions like create_dataset_from_config. 

@@ -23,6 +23,7 @@ import contextlib # For potential future DDP no_sync context
 from src.utils.io import ensure_directory # Revert to absolute import
 from src.data.dataset import CharDataset # Import CharDataset
 from src.training.generation import generate_text # Correct import for generate_text
+import sys
 
 # TODO: Import necessary components like callbacks, specific loss functions, etc.
 # from .callbacks import TrainerCallback # Example
@@ -46,13 +47,13 @@ class Trainer:
         device: torch.device = torch.device("cpu"),
         epochs: int = 10,
         config: Optional[Dict[str, Any]] = None,
-        callbacks: Optional[List[Any]] = None, # TODO: Use specific Callback type hint
+        callbacks: Optional[List[Any]] = None,
         use_amp: bool = False,
         gradient_accumulation_steps: int = 1,
         max_grad_norm: Optional[float] = None,
         checkpoint_dir: str = "checkpoints",
-        log_interval: int = 50, # Log every N steps
-        vocab_path: Optional[str] = None # Add vocab_path
+        log_interval: int = 50,
+        vocab_path: Optional[str] = None
     ):
         """
         Initializes the Trainer.
@@ -65,7 +66,7 @@ class Trainer:
             scheduler: Learning rate scheduler (optional).
             device: The device to run training on (CPU or CUDA).
             epochs: Total number of epochs to train for.
-            config: Dictionary containing training configuration (optional).
+            config: Dictionary containing training configuration (optional, used for nested params).
             callbacks: List of callbacks to use during training (optional).
             use_amp: Whether to use Automatic Mixed Precision (AMP).
             gradient_accumulation_steps: Number of steps to accumulate gradients over.
@@ -88,31 +89,25 @@ class Trainer:
         self.max_grad_norm = max_grad_norm
         self.checkpoint_dir = checkpoint_dir
         self.log_interval = log_interval
-        self.vocab_path = vocab_path # Store vocab_path
+        self.vocab_path = vocab_path
 
-        # Time-based checkpointing
-        # Correctly access nested config if necessary, default to 0 if key not found
-        training_config = self.config # self.config IS the training config dict
+        # Time-based checkpointing (use self.config if available)
+        training_config = self.config 
         self.time_save_interval_minutes = training_config.get('time_save_interval_minutes', 0)
         self.time_save_interval_seconds = self.time_save_interval_minutes * 60 if self.time_save_interval_minutes else 0
         self.last_time_save = time.time() # Initialize last save time
-        # Add logger initialization EARLIER to use it here
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = logging.getLogger(self.__class__.__name__) # Initialize logger
         if self.time_save_interval_seconds > 0:
             self.logger.info(f"Time-based checkpointing enabled every {self.time_save_interval_minutes} minutes.")
 
         self.scaler = GradScaler(enabled=self.use_amp)
         self.current_epoch = 0
         self.global_step = 0
-        self.loaded_global_step = -1 # To track the step loaded from checkpoint (-1 means not resumed)
-        self.best_val_metric = float('inf') # Assuming lower is better for now
-        self.metrics: Dict[str, List[float]] = {'train_loss': [], 'val_loss': []} # Example metrics tracking
+        self.loaded_global_step = -1
+        self.best_val_metric = float('inf')
+        self.metrics: Dict[str, List[float]] = {'train_loss': [], 'val_loss': []}
 
-        # Ensure checkpoint directory exists using utility function
-        # os.makedirs(self.checkpoint_dir, exist_ok=True)
         ensure_directory(self.checkpoint_dir)
-
-        # Setup callbacks
         self._setup_callbacks()
 
     def _setup_callbacks(self):
@@ -204,19 +199,11 @@ class Trainer:
     def _train_epoch(self) -> Dict[str, float]:
         """Trains the model for one epoch."""
         self.logger.info(f"Starting Epoch {self.current_epoch + 1}/{self.epochs}")
-        # TODO: Implement the training logic for a single epoch
-        #       - Set model to train mode
-        #       - Iterate over train_dataloader
-        #       - Handle forward pass, loss calculation, backward pass, optimizer step
-        #       - Incorporate AMP, gradient accumulation, gradient clipping
-        #       - Call relevant callback hooks (on_step_begin/end)
-        #       - Log progress
-        # --- Start Implementation ---
         self.model.train()
         epoch_loss = 0.0
         total_batches = len(self.train_dataloader)
         epoch_start_time = time.time()
-        num_valid_steps_in_epoch = 0 # Track steps without NaN/Inf
+        num_valid_steps_in_epoch = 0
         total_tokens = 0
         step_time_accumulator = 0.0
         step_token_accumulator = 0
@@ -228,29 +215,25 @@ class Trainer:
         is_resuming_this_epoch = False
         if self.loaded_global_step >= 0 and self.current_epoch == (self.loaded_global_step // steps_per_epoch):
             resume_batch_offset = self.loaded_global_step % steps_per_epoch
-            self.logger.info(f"Resuming epoch {self.current_epoch} from batch offset {resume_batch_offset + 1}/{steps_per_epoch} (global step {self.loaded_global_step + 1})")
+            self.logger.info(f"Resuming epoch {self.current_epoch+1} from batch offset {resume_batch_offset + 1}/{steps_per_epoch} (global step {self.loaded_global_step + 1})")
             is_resuming_this_epoch = True
             # Reset so we don't skip in subsequent epochs
             self.loaded_global_step = -1 
         # --- End Batch Skipping Logic ---
 
-        # Reset optimizer gradients at the start of the epoch
-        # (Already zeroed after each step, but good practice)
         self.optimizer.zero_grad(set_to_none=True)
 
-        progress_bar = tqdm(enumerate(self.train_dataloader), 
-                            total=total_batches, 
-                            desc=f"Epoch {self.current_epoch + 1}/{self.epochs} Training", # Display 1-based epoch
-                            unit="batch") # Set unit to 'batch'
-
+        # Re-enable tqdm progress bar
+        progress_bar = tqdm(
+            enumerate(self.train_dataloader), 
+            total=total_batches, 
+            desc=f"Epoch {self.current_epoch + 1}",
+            leave=False
+        )
         for i, batch in progress_bar:
             # Skip batches if resuming mid-epoch
             if is_resuming_this_epoch and i <= resume_batch_offset:
-                # Need to update global step even for skipped batches if we want logs/checkpoints to use correct step number
-                # However, Trainer increments global_step *after* the step. 
-                # Let's rely on the fact that the loaded self.global_step is correct and will be incremented.
-                # progress_bar.update(1) # Optionally update progress bar visually
-                continue # Skip this batch
+                continue
 
             step_logs = {}
             self._callback_on_step_begin(self.global_step, logs=step_logs)
@@ -333,17 +316,22 @@ class Trainer:
 
                     step_time_accumulator += (current_time - last_log_time)
 
-                    if self.global_step % self.log_interval == 0:
+                    if (self.global_step % self.log_interval == 0) or is_last_batch_step:
                         # Calculate T/s over the log interval
                         interval_tokens_sec = step_token_accumulator / step_time_accumulator if step_time_accumulator > 0 else 0
                         step_logs['T/s'] = f"{interval_tokens_sec:.0f}"
 
-                         # Simple log message
+                         # Simple log message construction
                         log_msg = f"Step: {self.global_step}, Batch: {i+1}/{total_batches}, Loss: {loss_val:.4f}"
                         if 'lr' in step_logs: log_msg += f", LR: {step_logs['lr']:.2e}"
                         log_msg += f", ~T/s: {step_logs['T/s']}"
-                        self.logger.info(log_msg)
-                        progress_bar.set_postfix(step_logs)
+                        
+                        # Use tqdm.write for console AND logger.info for file log
+                        progress_bar.write(log_msg) 
+                        self.logger.info(log_msg) # Log to file handler as well
+                        
+                        # Re-add progress bar update
+                        progress_bar.set_postfix(step_logs) 
 
                         # Perform timed save/sample *if interval exceeded* and it's a log step
                         if time_interval_exceeded:
@@ -470,53 +458,84 @@ class Trainer:
         #pass
 
     def load_checkpoint(self, path: str):
-        """Loads a checkpoint to resume training."""
-        # TODO: Implement checkpoint loading logic
-        #       - Load states into model, optimizer, scheduler
-        #       - Restore epoch, step, best metric, etc.
-        # --- Start Implementation ---
+        """Loads the trainer state from a checkpoint file."""
+        # print(f"--- DEBUG: Trainer.load_checkpoint called with path: {path} (stderr)", file=sys.stderr, flush=True)
         if not os.path.exists(path):
-            self.logger.warning(f"Checkpoint path {path} does not exist. Starting from scratch.")
+            self.logger.error(f"Checkpoint file not found: {path}")
+            # print(f"--- DEBUG: Checkpoint file not found: {path} (stderr)", file=sys.stderr, flush=True)
             return
 
         try:
-            # Load checkpoint onto the correct device
-            checkpoint = torch.load(path, map_location=self.device)
-            self.logger.info(f"Loading checkpoint from {path}")
+            # print("--- DEBUG: Attempting torch.load... (stderr)", file=sys.stderr, flush=True)
+            # Load checkpoint onto the correct device directly
+            checkpoint = torch.load(path, map_location=self.device) 
+            # print("--- DEBUG: torch.load successful. (stderr)", file=sys.stderr, flush=True)
 
-            # Load states
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-            if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
-                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            # Load model state
+            if 'model_state_dict' in checkpoint:
+                # print("--- DEBUG: Loading model_state_dict... (stderr)", file=sys.stderr, flush=True)
+                # Handle potential DataParallel/DDP wrapping
+                state_dict = checkpoint['model_state_dict']
+                # Simple check for keys starting with 'module.'
+                if any(key.startswith('module.') for key in state_dict.keys()):
+                    self.logger.info("Detected 'module.' prefix in checkpoint state_dict, attempting to load into unwrapped model.")
+                    # Create a new state_dict without the prefix
+                    new_state_dict = {k.replace('module.', '', 1): v for k, v in state_dict.items()}
+                    self.model.load_state_dict(new_state_dict)
+                else:
+                    self.model.load_state_dict(state_dict)
+                # print("--- DEBUG: Model state loaded. (stderr)", file=sys.stderr, flush=True)
             else:
-                 self.logger.warning("Scheduler state not found or scheduler not provided.")
+                self.logger.warning("Checkpoint does not contain 'model_state_dict'.")
+                # print("--- DEBUG: No model_state_dict found in checkpoint. (stderr)", file=sys.stderr, flush=True)
 
-            if self.use_amp and self.scaler is not None and 'scaler_state_dict' in checkpoint:
+            # Load optimizer state
+            if 'optimizer_state_dict' in checkpoint:
+                 # print("--- DEBUG: Loading optimizer_state_dict... (stderr)", file=sys.stderr, flush=True)
+                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                 # print("--- DEBUG: Optimizer state loaded. (stderr)", file=sys.stderr, flush=True)
+            else:
+                self.logger.warning("Checkpoint does not contain 'optimizer_state_dict'. Optimizer state not loaded.")
+                # print("--- DEBUG: No optimizer_state_dict found. (stderr)", file=sys.stderr, flush=True)
+
+            # Load scheduler state
+            if self.scheduler and 'scheduler_state_dict' in checkpoint:
+                # print("--- DEBUG: Loading scheduler_state_dict... (stderr)", file=sys.stderr, flush=True)
+                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                # print("--- DEBUG: Scheduler state loaded. (stderr)", file=sys.stderr, flush=True)
+            elif self.scheduler:
+                self.logger.warning("Checkpoint does not contain 'scheduler_state_dict'. Scheduler state not loaded.")
+                # print("--- DEBUG: No scheduler_state_dict found. (stderr)", file=sys.stderr, flush=True)
+
+            # Load scaler state for AMP
+            if self.use_amp and 'scaler_state_dict' in checkpoint:
+                # print("--- DEBUG: Loading scaler_state_dict... (stderr)", file=sys.stderr, flush=True)
                 self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
+                # print("--- DEBUG: Scaler state loaded. (stderr)", file=sys.stderr, flush=True)
             elif self.use_amp:
-                self.logger.warning("Scaler state not found in checkpoint, though AMP is enabled.")
+                self.logger.warning("Checkpoint does not contain 'scaler_state_dict'. AMP scaler state not loaded.")
+                # print("--- DEBUG: No scaler_state_dict found. (stderr)", file=sys.stderr, flush=True)
 
-            # Restore training progress
-            # DON'T add 1 to epoch, load the exact epoch index
-            self.current_epoch = checkpoint.get('epoch', 0) # Load epoch index directly
-            self.global_step = checkpoint.get('global_step', 0)
-            self.loaded_global_step = self.global_step # Store the loaded step for skipping batches
+            # Load training state (epoch, step, etc.)
+            self.current_epoch = checkpoint.get('epoch', 0) # Default to 0 if not found
+            self.global_step = checkpoint.get('global_step', 0) 
+            self.loaded_global_step = self.global_step # Store the step we are resuming *from*
             self.best_val_metric = checkpoint.get('best_val_metric', float('inf'))
-            # self.config = checkpoint.get('config', self.config) # Optionally restore config
+            self.metrics = checkpoint.get('metrics', {'train_loss': [], 'val_loss': []})
+            # print(f"--- DEBUG: Loaded epoch={self.current_epoch}, global_step={self.global_step} (stderr)", file=sys.stderr, flush=True)
 
-            self.logger.info(f"Resumed training. Starting from Epoch Index {self.current_epoch}, Global Step {self.global_step}. Best metric: {self.best_val_metric:.4f}")
+            self.logger.info(f"Successfully loaded checkpoint from {path} at epoch {self.current_epoch}, step {self.global_step}")
+            # print("--- DEBUG: Trainer.load_checkpoint finished successfully. (stderr)", file=sys.stderr, flush=True)
 
+        except FileNotFoundError:
+            self.logger.error(f"Checkpoint file not found during load attempt: {path}")
+            # print(f"--- DEBUG: FileNotFoundError during torch.load: {path} (stderr)", file=sys.stderr, flush=True)
+            # Optionally re-raise or handle differently
         except Exception as e:
             self.logger.error(f"Failed to load checkpoint from {path}: {e}", exc_info=True)
-            self.logger.warning("Starting training from scratch due to checkpoint load failure.")
-            # Reset state if loading failed
-            self.current_epoch = 0
-            self.global_step = 0
-            self.best_val_metric = float('inf')
-        # --- End Implementation ---
-        #pass
+            # print(f"--- DEBUG: Exception during checkpoint loading: {e} (stderr)", file=sys.stderr, flush=True)
+            # Optionally re-raise or exit, depending on desired behavior
+            # raise e 
 
     # --- Callback Hook Methods --- (Similar to base.py)
     # TODO: Implement calls to these hooks within train, _train_epoch, _evaluate
@@ -555,72 +574,65 @@ class Trainer:
 
     def _generate_sample_and_log(self):
         """Generates a text sample using the current model state and logs it."""
-        # Use root logger directly for reliable file logging
-        logging.info("Attempting to generate sample...") # Add debug log
+        self.logger.info("Attempting to generate sample...")
+        # Revert checks to use vocab_path
         if not self.vocab_path:
-            logging.warning("Cannot generate sample: vocab_path not provided to Trainer.")
+            self.logger.warning("Cannot generate sample: vocab_path not provided to Trainer.")
             return
         if not os.path.exists(self.vocab_path):
-             logging.warning(f"Cannot generate sample: vocab_path '{self.vocab_path}' not found.")
+             self.logger.warning(f"Cannot generate sample: vocab_path '{self.vocab_path}' not found.")
              return
 
-        logging.info("Generating text sample...")
-        self.model.eval() # Set model to evaluation mode
-
+        # Revert generation logic to use CharDataset for vocab/decode
         try:
             # Instantiate CharDataset temporarily to access vocab and decode method
-            # Provide a VALID dummy file_path (e.g., vocab_path itself)
-            temp_dataset = CharDataset(file_path=self.vocab_path, block_size=1, vocab_path=self.vocab_path)
+            # Provide a VALID dummy file_path (e.g., vocab_path itself if text file)
+            # If vocab_path points to a JSON, need a placeholder text file.
+            # Let's assume vocab_path IS the text file for simplicity here, adjust if needed.
+            try:
+                 with open(self.vocab_path, 'r') as f:
+                     _ = f.read(1) # Check if readable as text
+                 dummy_file_path = self.vocab_path
+            except:
+                 # If vocab_path is likely JSON, create a dummy text file path reference
+                 dummy_file_path = os.path.splitext(self.vocab_path)[0] + ".dummy.txt"
+                 if not os.path.exists(dummy_file_path):
+                      with open(dummy_file_path, 'w') as f: f.write("dummy")
+                      self.logger.debug(f"Created dummy file {dummy_file_path} for CharDataset init.")
+            
+            temp_dataset = CharDataset(file_path=dummy_file_path, block_size=1, vocab_path=self.vocab_path)
             char_to_idx = temp_dataset.char_to_idx
             idx_to_char = temp_dataset.idx_to_char # Get idx_to_char map
-            # decode_method = temp_dataset.decode # No longer needed
+            decode_method = temp_dataset.decode # Get the decode method
 
-            # Get sampling parameters from config (Corrected Access)
-            # self.config is the dictionary from conf/training/default.yaml
-            max_new_tokens = self.config.get('sample_max_new_tokens', 100)
-            temperature = self.config.get('sample_temperature', 0.8)
-            start_text = self.config.get('sample_start_text', "")
+            # Get sampling parameters from config (Corrected Access if using self.config)
+            gen_config = self.config.get('generation', {})
+            start_prompt = gen_config.get('start_prompt', "The ")
+            max_new_tokens = gen_config.get('max_new_tokens', 100)
+            temperature = gen_config.get('temperature', 0.8)
+            top_k = gen_config.get('top_k', None) # Use None for generate_text
+            top_p = gen_config.get('top_p', None) # Use None for generate_text
 
-            # DEBUG: Log details before encoding
-            # logging.info(f"DEBUG: Sampling start_text: '{start_text}'")
-            # Log a snippet of char_to_idx to confirm loading
-            # snippet = {k: char_to_idx.get(k) for k in ['T', 'h', 'e', ' '] if k in char_to_idx}
-            # logging.info(f"DEBUG: char_to_idx snippet: {snippet}")
+            self.model.eval() # Set model to evaluation mode
 
-            # Remove manual encoding - generate_text handles it
-            # start_ids = []
-            # ... (encoding loop)
-            # logging.info(f"DEBUG: Encoded start_ids: {start_ids}")
-            # if not start_ids:
-            #      logging.warning("Start text resulted in empty sequence after encoding, cannot generate.")
-            #      return
-            # x = torch.tensor(start_ids, dtype=torch.long, device=self.device)[None, ...]
+            # Call the original generate_text function
+            generated_text = generate_text(
+                 model=self.model,
+                 char_to_idx=char_to_idx,
+                 idx_to_char=idx_to_char,
+                 seed_text=start_prompt,
+                 max_length=max_new_tokens, # Pass max_new_tokens as max_length
+                 temperature=temperature,
+                 top_k=top_k if top_k is not None else 0, # Convert None to 0 for old func
+                 top_p=top_p if top_p is not None else 0.0, # Convert None to 0.0
+                 device=self.device
+            )
+            self.logger.info(f"\n--- Generated Sample (Step {self.global_step}) ---\n{generated_text}\n-------------------------------------")
 
-            # Generate by passing seed_text and mappings
-            with torch.no_grad():
-                with torch.amp.autocast(device_type=self.device.type, enabled=self.use_amp):
-                     generated_text = generate_text(
-                         model=self.model,
-                         char_to_idx=char_to_idx,
-                         idx_to_char=idx_to_char,
-                         seed_text=start_text, # Pass seed_text directly
-                         max_length=max_new_tokens, # Use max_new_tokens for length
-                         temperature=temperature,
-                         device=self.device,
-                         # Pass other params if needed/available in generate_text signature
-                         # top_k=None 
-                     )
-            
-            # Decode using the dataset's decode method - No longer needed, generate_text returns string
-            # generated_text = decode_method(y[0].tolist())
-            logging.info(f"--- Generated Sample ---\
-{generated_text}\n------------------------")
-
-        except FileNotFoundError: # Catch specific error from CharDataset init
-             logging.warning(f"Cannot generate sample: vocab_path '{self.vocab_path}' not found during temporary dataset init.")
-             # No need to raise again, already logged
+        except FileNotFoundError:
+             self.logger.warning(f"Cannot generate sample: vocab_path '{self.vocab_path}' not found during temporary dataset init.")
         except Exception as e:
-            logging.error(f"Failed to generate sample: {e}", exc_info=True)
+            self.logger.error(f"Failed to generate sample: {e}", exc_info=True)
         finally:
-            self.model.train() # Ensure model is back in training mode
+            self.model.train()
 

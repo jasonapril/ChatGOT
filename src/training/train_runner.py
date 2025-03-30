@@ -28,6 +28,9 @@ import torch.optim as optim
 from typing import Dict, Any, Tuple, Optional, List
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+from datetime import datetime
+import subprocess
+import json
 
 # Hydra and OmegaConf
 import hydra
@@ -49,6 +52,8 @@ from src.utils import (
     load_json,
     save_json
 )
+# Import force_flush_logs directly from its module
+from src.utils.logging import force_flush_logs
 from src.training.optimizations import (
     setup_mixed_precision,
     setup_torch_compile,
@@ -61,35 +66,29 @@ from src.training.trainer import Trainer
 @hydra.main(config_path="../../conf", config_name="config", version_base=None)
 def run_training(cfg: DictConfig) -> None:
     """Hydra-managed function to run the training process."""
-    # --- Basic Logging Setup (Configure Trainer logger) ---
-    # Ensure file handler captures INFO from Trainer
-    log_file = "train_runner.log" # Default Hydra log file name
-    # Get the specific logger used by Trainer
-    trainer_logger = logging.getLogger("Trainer")
-    trainer_logger.setLevel(logging.INFO) # Set level for this specific logger
-    # Check if a file handler already exists from Hydra
-    # This is a bit hacky, assumes Hydra adds a FileHandler to the root
-    root_logger = logging.getLogger()
-    file_handler = None
-    for h in root_logger.handlers:
-        if isinstance(h, logging.FileHandler) and log_file in h.baseFilename:
-            file_handler = h
-            break
-    # If Hydra provided a file handler, add it to Trainer logger too
-    if file_handler:
-        # Ensure handler level is low enough
-        file_handler.setLevel(logging.INFO) 
-        trainer_logger.addHandler(file_handler)
-        trainer_logger.propagate = False # Prevent duplicate messages in root logger
-        logging.info("Added Hydra file handler to Trainer logger.")
-    else:
-        logging.warning("Could not find Hydra file handler to attach to Trainer logger.")
-    # --- End Basic Logging Setup ---
-
-    # Get the logger for the current module AFTER setting up handlers
+    
+    # Get the logger for the current module 
+    # Hydra configures the root logger, so getting __name__ logger should inherit handlers
     logger = logging.getLogger(__name__)
 
-    print("--- DEBUG: Entered run_training function ---") # Keep this for console confirmation
+    # --- Save Experiment Metadata --- #
+    try:
+        # Use HydraConfig to get output directory reliably
+        output_dir = HydraConfig.get().runtime.output_dir 
+        metadata = {
+            # Use .get() for safety in case keys are missing
+            "model_architecture": cfg.model.get('architecture', 'unknown'),
+            "dataset_target": cfg.data.get('train', {}).get('_target_', 'unknown'),
+            "experiment_name": cfg.get('experiment_name', 'unnamed'),
+            "start_timestamp": datetime.now().isoformat()
+        }
+        metadata_path = os.path.join(output_dir, "experiment_info.json")
+        save_json(metadata, metadata_path)
+        logger.info(f"Saved experiment metadata to {metadata_path}")
+    except Exception as e:
+        logger.error(f"Failed to save experiment metadata: {e}", exc_info=True)
+    # --- End Save Metadata --- #
+
     logger.info("\n" + "="*80 + "\n" + "INITIAL SETUP".center(80) + "\n" + "="*80)
     # Seed for reproducibility
     set_seed(cfg.seed)
@@ -98,111 +97,48 @@ def run_training(cfg: DictConfig) -> None:
     device_arg = "cpu" if cfg.force_cpu else "auto"
     device = setup_device(device_arg)
 
-    # Save final config (after Hydra composition and potential overrides)
-    # Hydra automatically saves the config in its output directory (.hydra)
-    # We can optionally save it again in a more prominent location if desired.
-    # config_save_path = os.path.join(cfg.hydra.run.dir, "resolved_config.yaml")
-    # with open(config_save_path, 'w') as f:
-    #     f.write(OmegaConf.to_yaml(cfg))
-    # logger.info(f"Final resolved configuration saved to {config_save_path}")
-
-    log_section_header(logger, "DATA PREPARATION") # Pass logger object
-
-    # Get Hydra's current working directory (output directory)
-    # hydra_output_dir = os.getcwd() # INCORRECT: This is the launch directory
-    hydra_output_dir = HydraConfig.get().runtime.output_dir # CORRECT way
+    # --- Prepare DataLoaders --- #
+    log_section_header(logger, "DATA PREPARATION")
+    hydra_output_dir = HydraConfig.get().runtime.output_dir
     logger.info(f"Hydra output directory: {hydra_output_dir}")
-    # Get original working directory BEFORE hydra changes it
-    try:
-        original_cwd = hydra.utils.get_original_cwd()
-        logger.info(f"Original working directory: {original_cwd}")
-    except ValueError:
-        logger.warning("Could not determine original CWD. Assuming it's the same as the current CWD.")
-        original_cwd = hydra_output_dir # Fallback, might be incorrect if Hydra changed dir
-
-    # Construct and ensure checkpoint directory
-    checkpoint_dir = os.path.join(hydra_output_dir, "checkpoints")
-    ensure_directory(checkpoint_dir)
-    logger.info(f"Checkpoint directory ensured: {checkpoint_dir}")
-
-    # --- Data Loading --- #
-    log_section_header(logger, "LOADING DATA")
-    # Remove separate dataset creation
-    # train_dataset = create_dataset_from_config(cfg.data)
-    # val_dataset = None # Placeholder
-    # logger.info(f"Training dataset created: {type(train_dataset).__name__}")
-    # if val_dataset:
-    #     logger.info(f"Validation dataset created: {type(val_dataset).__name__}")
-
-    # Create DataLoaders using the factory function from base.py
-    # This assumes prepare_dataloaders_from_config handles dataset creation internally
-    # and returns (train_loader, val_loader, test_loader)
-    logger.info("Preparing dataloaders...")
-    try:
-        train_dataloader, val_dataloader, _ = prepare_dataloaders_from_config(
-            data_config=cfg.data,
-            batch_size=cfg.data.batch_size,
-            num_workers=cfg.data.num_workers,
-            original_cwd=original_cwd # Pass original CWD
-        )
-        logger.info("Dataloaders prepared.")
-    except Exception as e:
-        logger.error(f"Failed to create dataloaders: {e}", exc_info=True)
+    original_cwd = hydra.utils.get_original_cwd()
+    logger.info(f"Original working directory: {original_cwd}")
+    train_loader, val_loader, test_loader = prepare_dataloaders_from_config(
+        data_config=cfg.data, 
+        batch_size=cfg.data.batch_size, 
+        num_workers=cfg.data.num_workers, 
+        original_cwd=original_cwd
+    )
+    if train_loader is None:
+        logger.error("Training dataloader could not be created. Exiting.")
         sys.exit(1)
 
-    # Check if dataloaders were created successfully
-    if train_dataloader:
-        logger.info(f"Train DataLoader created successfully.")
-    else:
-        logger.error("Failed to create Train DataLoader.")
-        sys.exit(1)
-
-    if val_dataloader:
-        logger.info(f"Validation DataLoader created successfully.")
-    else:
-        logger.info("No Validation DataLoader created (this might be intended based on config).")
-
-    # Remove old separate dataloader creation calls
-    # train_dataloader = create_dataloader(train_dataset, cfg.data, split='train')
-    # val_dataloader = create_dataloader(val_dataset, cfg.data, split='validation') if val_dataset else None
-    # logger.info(f"Train DataLoader created with batch size {cfg.data.batch_size}")
-    # if val_dataloader:
-    #     logger.info(f"Validation DataLoader created with batch size {cfg.data.batch_size}")
-
-    # --- Model Creation --- #
-    log_section_header(logger, "CREATING MODEL")
-    # Pass the model sub-config directly (OmegaConf DictConfig works)
+    # --- Build Model --- #
+    log_section_header(logger, "BUILDING MODEL")
     model = create_model_from_config(cfg.model)
     logger.info(f"Model created: {type(model).__name__}")
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Model Parameters: Total={total_params:,}, Trainable={trainable_params:,}")
-
-    # Apply activation checkpointing if requested
     if cfg.training.activation_checkpointing:
          configure_activation_checkpointing(model)
-
     model.to(device)
-
+    
     # --- Optimizer and Scheduler --- #
     log_section_header(logger, "SETTING UP OPTIMIZER & SCHEDULER")
-    # TODO: Implement flexible optimizer/scheduler creation using factories/registry
     if cfg.optimizer.type == 'adamw':
         optimizer = optim.AdamW(model.parameters(), lr=cfg.optimizer.learning_rate, weight_decay=cfg.optimizer.weight_decay)
-    # Add other optimizer types here
     else:
         raise ValueError(f"Unsupported optimizer type: {cfg.optimizer.type}")
     logger.info(f"Optimizer created: {type(optimizer).__name__}")
-
     scheduler = None
     if cfg.scheduler:
         if cfg.scheduler.type == 'cosine':
             from transformers import get_cosine_schedule_with_warmup
-            # Calculate total steps
-            steps_per_epoch = len(train_dataloader) // cfg.training.gradient_accumulation_steps
+            steps_per_epoch = len(train_loader) // cfg.training.gradient_accumulation_steps
             total_steps = steps_per_epoch * cfg.training.epochs
             if total_steps <= 0:
-                 logger.warning(f"Calculated total_steps <= 0 ({total_steps}). Disabling scheduler.")
+                 logger.warning(f"Calculated total_steps <= 0 ({total_steps}). Check epochs/dataloader/grad_accum. Disabling scheduler.")
             else:
                 scheduler = get_cosine_schedule_with_warmup(
                     optimizer,
@@ -210,54 +146,82 @@ def run_training(cfg: DictConfig) -> None:
                     num_training_steps=total_steps
                 )
                 logger.info(f"Scheduler created: Cosine with {cfg.scheduler.warmup_steps} warmup steps, {total_steps} total steps")
-        # Add other scheduler types here (linear, onecycle etc.)
-        elif cfg.scheduler.type:
-             logger.warning(f"Scheduler type '{cfg.scheduler.type}' not implemented or invalid, proceeding without scheduler.")
+        else:
+             logger.warning(f"Unsupported scheduler type: {cfg.scheduler.type}. No scheduler will be used.")
 
     # --- Callbacks --- #
     log_section_header(logger, "SETTING UP CALLBACKS")
     callbacks = []
-    # TODO: Instantiate callbacks based on cfg.callbacks using hydra.utils.instantiate
+    if cfg.callbacks:
+        for cb_conf in cfg.callbacks.values():
+            try:
+                callbacks.append(hydra.utils.instantiate(cb_conf))
+            except Exception as e:
+                 logger.error(f"Error instantiating callback {cb_conf.get('_target_')}: {e}", exc_info=True)
     logger.info(f"Initialized {len(callbacks)} callbacks.")
-
 
     # --- Trainer Initialization --- #
     log_section_header(logger, "INITIALIZING TRAINER")
-    try:
-        trainer = Trainer(
-            model=model,
-            optimizer=optimizer,
-            train_dataloader=train_dataloader,
-            val_dataloader=val_dataloader,
-            scheduler=scheduler,
-            device=device,
-            epochs=cfg.training.epochs,
-            config=OmegaConf.to_container(cfg.training, resolve=True), # Pass training config as dict
-            callbacks=callbacks,
-            use_amp=cfg.training.use_amp,
-            gradient_accumulation_steps=cfg.training.gradient_accumulation_steps,
-            max_grad_norm=cfg.training.max_grad_norm,
-            checkpoint_dir=checkpoint_dir, # Pass constructed checkpoint_dir path
-            log_interval=cfg.training.log_interval,
-            vocab_path=cfg.data.vocab_path # Pass vocab path
-        )
-        logger.info("Trainer initialized successfully.")
-    except Exception as e:
-        logger.error(f"Error initializing Trainer: {e}", exc_info=True)
-        sys.exit(1)
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        train_dataloader=train_loader,
+        val_dataloader=val_loader,
+        device=device,
+        # Pass training config args directly
+        epochs=cfg.training.epochs,
+        config=cfg.training, # Pass sub-config for other params like time_save_interval
+        callbacks=callbacks,
+        use_amp=cfg.training.use_amp,
+        gradient_accumulation_steps=cfg.training.gradient_accumulation_steps,
+        max_grad_norm=cfg.training.max_grad_norm,
+        # Construct checkpoint dir from hydra output + sub-config
+        checkpoint_dir=os.path.join(hydra_output_dir, cfg.training.get('checkpoint_subdir', 'checkpoints')), 
+        log_interval=cfg.training.log_interval,
+        # Pass resolved absolute vocab_path
+        vocab_path=os.path.join(original_cwd, cfg.data.vocab_path) if cfg.data.vocab_path and not os.path.isabs(cfg.data.vocab_path) else cfg.data.vocab_path 
+    )
+    logger.info("Trainer initialized successfully.")
 
     # --- Checkpoint Loading (Resume) --- #
-    checkpoint_path_cfg = cfg.resume_from
+    checkpoint_path_cfg = cfg.get('resume_from')
     absolute_checkpoint_path = None
+
     if checkpoint_path_cfg == "latest":
-        latest_path = get_latest_checkpoint(checkpoint_dir) # Use constructed checkpoint_dir
-        if latest_path:
-             logger.info(f"Found latest checkpoint: {latest_path}")
-             absolute_checkpoint_path = os.path.abspath(latest_path)
-        else:
-             logger.warning(f"Resume set to 'latest' but no checkpoint found in {checkpoint_dir}. Starting fresh.") # Use constructed checkpoint_dir
+        # Call script to find latest checkpoint matching current config
+        script_path = "scripts/get_latest_checkpoint.py"
+        try:
+            # Convert relevant parts of config to JSON string for script argument
+            # Filter sensitive or overly complex parts if necessary
+            config_subset = OmegaConf.to_container(cfg, resolve=True) 
+            # Select keys relevant for matching checkpoints (e.g., model type, dataset)
+            match_keys = ['model', 'data', 'experiment_name']
+            match_config = {k: config_subset.get(k) for k in match_keys if k in config_subset}
+            config_json = json.dumps(match_config)
+            
+            result = subprocess.run([
+                sys.executable, # Use the current Python interpreter
+                script_path,
+                "--config_json", config_json,
+                "--base_dir", os.path.join(original_cwd, "outputs") # Base search dir
+            ], capture_output=True, text=True, check=True)
+            
+            latest_checkpoint = result.stdout.strip()
+            if latest_checkpoint:
+                absolute_checkpoint_path = latest_checkpoint # Script should return absolute path
+                logger.info(f"Found latest checkpoint: {absolute_checkpoint_path}")
+            else:
+                logger.warning(f"'latest' specified but script {script_path} did not return a path.")
+        except FileNotFoundError:
+            logger.error(f"Script {script_path} not found. Cannot resume from latest.")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error running script {script_path}: {e}\nStdout: {e.stdout}\nStderr: {e.stderr}")
+        except Exception as e:
+            logger.error(f"Unexpected error running script {script_path}: {e}")
+
     elif checkpoint_path_cfg:
-         # Handle potentially relative path from original CWD
+         # Handle explicitly provided path (relative or absolute)
          if not os.path.isabs(checkpoint_path_cfg):
              # Get original working directory if Hydra changed it
              try:
@@ -268,11 +232,6 @@ def run_training(cfg: DictConfig) -> None:
                  absolute_checkpoint_path = os.path.abspath(checkpoint_path_cfg)
          else:
              absolute_checkpoint_path = checkpoint_path_cfg
-
-    # DEBUG: Log the resolved path before checking existence
-    if absolute_checkpoint_path:
-        logger.info(f"DEBUG: Resolved checkpoint path to check: {absolute_checkpoint_path}")
-        logger.info(f"DEBUG: Does path exist? {os.path.exists(absolute_checkpoint_path)}")
 
     if absolute_checkpoint_path and os.path.exists(absolute_checkpoint_path):
         logger.info(f"Checkpoint found at {absolute_checkpoint_path}. Attempting to load...")
@@ -285,44 +244,56 @@ def run_training(cfg: DictConfig) -> None:
     elif checkpoint_path_cfg:
         logger.warning(f"Specified checkpoint path {checkpoint_path_cfg} (resolved to {absolute_checkpoint_path}) not found. Starting fresh.")
     else:
-        logger.info("No checkpoint specified or found. Starting fresh training.") # Add log for clarity
+        logger.info("No checkpoint specified or found. Starting fresh training.") 
 
     # --- Optional: Torch Compile --- #
-    if cfg.training.compile_model:
-        log_section_header(logger, "COMPILING MODEL")
-        logger.info("Attempting to compile model with torch.compile()...")
-        try:
-            # Note: compilation might happen inside Trainer if needed later
-            trainer.model = torch.compile(trainer.model)
-            logger.info("Model compiled successfully.")
-        except Exception as e:
-            logger.error(f"torch.compile failed: {e}", exc_info=True)
-            # Decide whether to continue without compilation or exit
-            logger.warning("Proceeding without model compilation.")
+    if cfg.training.torch_compile:
+        logger.info("Applying torch.compile() to the model...")
+        setup_torch_compile(model)
 
-    # --- Start Training --- #
+    # --- Training --- #
     log_section_header(logger, "STARTING TRAINING")
     try:
+        # Start training
+        start_time = time.time()
         training_metrics = trainer.train()
-        logger.info("Training completed successfully.")
-        # Save final metrics
-        metrics_path = os.path.join(hydra_output_dir, "training_metrics.json") # Use hydra_output_dir
-        save_json(training_metrics, metrics_path)
-        logger.info(f"Training metrics saved to {metrics_path}")
+        end_time = time.time()
+        total_training_time = end_time - start_time
+        logger.info(f"Training finished in {format_time(total_training_time)}.")
+        logger.info(f"Final Training Metrics: {training_metrics}")
+
+        # --- Optional: Evaluation --- #
+        if val_loader:
+            log_section_header(logger, "STARTING EVALUATION (Validation Set)")
+            eval_metrics = trainer.evaluate(val_loader)
+            logger.info(f"Final Validation Metrics: {eval_metrics}")
+        else:
+            logger.info("No validation set provided, skipping final evaluation.")
+        
+        # Save final model explicitly? (Optional, trainer might save best/last)
+        # final_model_path = os.path.join(hydra_output_dir, "final_model.pt")
+        # torch.save(model.state_dict(), final_model_path)
+        # logger.info(f"Final model state saved to {final_model_path}")
 
     except Exception as e:
         logger.error("An error occurred during training:", exc_info=True)
-        # Potentially save a final checkpoint on error?
-        # error_checkpoint_path = os.path.join(checkpoint_dir, 'error_checkpoint.pt') # Use constructed checkpoint_dir
-        # logger.info(f"Attempting to save error checkpoint to {error_checkpoint_path}")
-        # trainer.save_checkpoint(error_checkpoint_path)
+        # Force flush logs in case of crash
+        force_flush_logs()
         sys.exit(1) # Exit with error code
+    except KeyboardInterrupt:
+        logger.warning("Training interrupted by user (KeyboardInterrupt).")
+        # Force flush logs after interruption
+        force_flush_logs()
+        sys.exit(130) # Standard exit code for Ctrl+C
+    finally:
+        # Ensure logs are flushed even on normal exit
+        force_flush_logs()
 
-    log_section_header(logger, "TRAINING FINISHED")
-    # --- Optional: Final Evaluation / Text Generation --- #
+    logger.info("\n" + "="*80 + "\n" + "TRAINING COMPLETE".center(80) + "\n" + "="*80)
 
+# Main execution guard
 if __name__ == "__main__":
-    run_training() # Call the hydra-decorated function
+    run_training()
 
     # Placeholder for the removed main function
     # main()

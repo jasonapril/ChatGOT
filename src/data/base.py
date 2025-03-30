@@ -11,12 +11,16 @@ from abc import ABC, abstractmethod
 import torch
 from torch.utils.data import Dataset, DataLoader
 import hydra.utils
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 # Import specific dataset types if needed for factory function fallbacks
 # --- Remove top-level import to break cycle ---
 # from src.data.dataset import CharDataset # Assuming CharDataset is in dataset.py
+
+# Import the collate function and tokenizer
+# from .collation import character_collate_fn
+# from .tokenizer import CharacterTokenizer 
+# from functools import partial # To create collate_fn with tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +95,7 @@ class BaseDataset(Dataset, ABC):
             Any: The data sample at the specified index.
         """
         raise NotImplementedError("Subclasses must implement __getitem__")
-
+    
     # Optional placeholder for common preprocessing logic
     # Subclasses can override this if needed, or implement their own steps.
     def preprocess(self, sample: Any) -> Any:
@@ -347,82 +351,87 @@ def create_dataloaders(
         return train_dataloader, None
 
 
-def create_dataset_from_config(config: DictConfig, split: str) -> BaseDataset:
+def create_dataset_from_config(data_config: DictConfig, split_config: DictConfig, original_cwd: Optional[str] = None) -> BaseDataset:
     """
-    Factory function to create a dataset instance from a configuration.
-    Prioritizes Hydra instantiation using `_target_` if present.
-    Includes fallback logic for known simple types like CharDataset.
+    Factory function to create a dataset instance from configuration dictionaries.
+    Resolves relative paths using original_cwd if provided.
 
     Args:
-        config (DictConfig): The dataset configuration (potentially nested under a split).
-        split (str): The dataset split (e.g., 'train', 'val', 'test').
+        data_config (DictConfig): The main data configuration (e.g., cfg.data).
+        split_config (DictConfig): Configuration for the specific split (e.g., cfg.data.train).
+        original_cwd (Optional[str]): The original working directory to resolve relative paths.
 
     Returns:
-        BaseDataset: An instance of a dataset.
-        
+        BaseDataset: An instance of the dataset defined by the configuration.
+
     Raises:
-        ValueError: If the dataset cannot be instantiated.
+        ValueError: If instantiation fails or required configuration is missing.
     """
-    logger.info(f"Attempting to create dataset for split '{split}'...")
-    
-    # Check for Hydra instantiation target first
-    if "_target_" in config:
-        logger.info(f"Instantiating dataset using Hydra target: {config._target_}")
-        try:
-            # Remove split=split argument as simplified CharDataset constructor doesn't take it
-            dataset = hydra.utils.instantiate(config)
-            if not isinstance(dataset, BaseDataset):
-                logger.warning(f"Instantiated object of type {type(dataset)} is not a BaseDataset subclass.")
-            return dataset
-        except Exception as e:
-            logger.error(f"Hydra instantiation failed for target {config._target_}: {e}", exc_info=True)
-            raise ValueError(f"Could not instantiate dataset from config using _target_: {config._target_}") from e
+    if not split_config or '_target_' not in split_config:
+        raise ValueError("Dataset configuration must contain a '_target_' key.")
 
-    # Fallback logic for known types if _target_ is not specified
-    logger.warning(f"No '_target_' found in dataset config for split '{split}'. Attempting fallback instantiation.")
-    data_format = config.get("format", "unknown") # Use .get for safer access
+    target_class_path = split_config._target_ # Get target before potentially modifying config
+    logger.info(f"Attempting to create dataset for split using Hydra target: {target_class_path}...")
 
-    # Example fallback for CharDataset (adjust condition as needed)
-    if data_format == "character":
-        # --- Import locally to break circular dependency ---
-        from src.data.dataset import CharDataset 
-        logger.info(f"Using fallback logic to create CharDataset.")
-        try:
-            # Extract specific args needed by CharDataset using attribute access
-            file_path = config.file_path  # Use attribute access
-            block_size = config.block_size # Use attribute access
-            
-            # Validate required args for fallback path
-            if file_path is None or block_size is None:
-                # This check might be less necessary with attribute access if keys are guaranteed
-                raise ValueError("Fallback for CharDataset requires 'file_path' and 'block_size' in config.")
-                
-            # Pass other config items as kwargs
-            other_kwargs = {k: v for k, v in config.items() if k not in ['file_path', 'block_size', 'format', '_target_']} # Exclude _target_ too
+    # Create a mutable copy (as a dict) to avoid modifying the original config object directly
+    # Use resolve=True to interpolate any OmegaConf variables first
+    instant_config = OmegaConf.to_container(split_config, resolve=True)
 
-            # Call with specific args + remaining config as kwargs
-            dataset = CharDataset(file_path=file_path, block_size=block_size, **other_kwargs) 
-            return dataset
-        except Exception as e:
-            logger.error(f"Failed to instantiate CharDataset using fallback: {e}", exc_info=True)
-            # Propagate the original error if it's specific, or the generic one
-            if isinstance(e, (ValueError, TypeError)): 
-                 raise # Reraise validation/type errors from CharDataset init
-            raise ValueError("Fallback instantiation for CharDataset failed.") from e
-    
-    # Add other fallbacks here if necessary
-    # elif data_format == "some_other_format":
-    #     logger.info("Using fallback for SomeOtherDataset...")
-    #     # dataset = SomeOtherDataset(...) 
-    #     # return dataset
-    
-    logger.error(f"Could not create dataset for split '{split}'. No '_target_' specified and no matching fallback logic for format '{data_format}'.")
-    raise ValueError(f"Unsupported dataset configuration for split '{split}': format '{data_format}'")
+    try:
+        # Merge necessary top-level keys if not present
+        if target_class_path == "src.data.dataset.CharDataset":
+            for key in ['vocab_path', 'block_size']:
+                 if key not in instant_config and key in data_config:
+                     instant_config[key] = data_config.get(key)
+                     logger.info(f"Added {key} from data_config: {instant_config[key]}")
+
+        # --- Resolve Paths using original_cwd ---
+        if original_cwd:
+            logger.debug(f"Attempting to resolve paths relative to CWD: {original_cwd}")
+            for key in ['file_path', 'vocab_path']:
+                # Check if key exists and its value can be treated as a path
+                if key in instant_config and instant_config[key] is not None:
+                    potential_path = str(instant_config[key]) # Convert to string just in case
+                    if potential_path: # Ensure it's not an empty string
+                        if not os.path.isabs(potential_path):
+                            # Construct absolute path relative to the original CWD
+                            absolute_path = os.path.join(original_cwd, potential_path)
+                            # Check if the resolved path actually exists
+                            if os.path.exists(absolute_path):
+                                logger.info(f"Resolving relative path for '{key}': '{potential_path}' -> '{absolute_path}'")
+                                instant_config[key] = absolute_path # Update the dict with the absolute path
+                            else:
+                                # Log a warning if the resolved path doesn't exist, but keep the original relative path
+                                logger.warning(f"Resolved path for '{key}' ('{absolute_path}') does not exist. Keeping original path: '{potential_path}'. Check config if this is unexpected.")
+                        else:
+                            logger.debug(f"Path for '{key}' ('{potential_path}') is already absolute. No change needed.")
+                    else:
+                        logger.debug(f"Key '{key}' value is empty after string conversion. Skipping path resolution.")
+                elif key in instant_config:
+                     logger.debug(f"Key '{key}' found but value is None. Skipping path resolution.")
+                # else: key not present, nothing to resolve
+        else:
+             logger.warning("original_cwd not provided to create_dataset_from_config. Cannot resolve relative paths.")
+        # --- End Resolve Paths ---
+
+        # Convert back to DictConfig *after* modifications
+        instant_config_omegaconf = OmegaConf.create(instant_config)
+
+        logger.info(f"Instantiating {target_class_path} with config: {OmegaConf.to_container(instant_config_omegaconf)}")
+        # Use the OmegaConf object for instantiation
+        dataset = hydra.utils.instantiate(instant_config_omegaconf)
+        logger.info(f"Successfully instantiated dataset: {type(dataset).__name__}")
+        return dataset
+    except Exception as e:
+        # Log the config *before* conversion back to OmegaConf for better debugging dict structure
+        logger.error(f"Failed to instantiate dataset from config (dict form used for path resolution): {instant_config}. Error: {e}", exc_info=True)
+        raise
 
 
 def prepare_dataloaders_from_config(data_config: DictConfig, batch_size: int, num_workers: int = 0, original_cwd: Optional[str] = None) -> Tuple[Optional[DataLoader], Optional[DataLoader], Optional[DataLoader]]:
     """
     Prepares train, validation, and test dataloaders based on the data configuration.
+    (Reverted signature)
 
     Args:
         data_config (DictConfig): The data configuration section (e.g., cfg.data).
@@ -436,83 +445,51 @@ def prepare_dataloaders_from_config(data_config: DictConfig, batch_size: int, nu
     """
     train_loader, val_loader, test_loader = None, None, None
     
-    # --- Removed Tokenizer Loading --- 
-    # Tokenizer loading/handling will be managed elsewhere (e.g., in Trainer or model)
-    # tokenizer = None # Placeholder
-    # if "tokenizer" in data_config and data_config.tokenizer.get("_target_"):
-    #     logger.info(f"Loading tokenizer: {data_config.tokenizer._target_}")
-    #     try:
-    #         tokenizer = hydra.utils.instantiate(data_config.tokenizer)
-    #     except Exception as e:
-    #         logger.error(f"Failed to instantiate tokenizer: {e}", exc_info=True)
-    #         # Decide whether to raise or continue without tokenizer
+    # Remove collate_fn logic
+    # collate_fn = None
+    # if isinstance(tokenizer, CharacterTokenizer):
+    #     ...
     # else:
-    #     logger.warning("No tokenizer configuration found or _target_ missing in data_config.tokenizer")
-        
+    #     ...
+
     for split in ["train", "val", "test"]:
         if split in data_config:
             logger.info(f"Preparing dataset and dataloader for split: {split}")
             split_config = data_config[split]
             
-            # --- Construct Absolute Path --- 
-            # If original_cwd is provided and file_path is relative, construct absolute path
-            if original_cwd and "file_path" in split_config and not os.path.isabs(split_config.file_path):
-                relative_path = split_config.file_path
-                absolute_path = os.path.join(original_cwd, relative_path)
-                logger.info(f"Resolving relative path '{relative_path}' to '{absolute_path}'")
-                # Create a mutable copy to modify
-                mutable_split_config = OmegaConf.to_container(split_config, resolve=True)
-                mutable_split_config['file_path'] = absolute_path
-                # Convert back to DictConfig if needed by downstream, or pass the dict
-                split_config = OmegaConf.create(mutable_split_config)
-            # -------------------------------
+            # --- Remove Manual Absolute Path Construction --- 
+            # if original_cwd and "file_path" in split_config and not os.path.isabs(split_config.file_path):
+            #     relative_path = split_config.file_path
+            #     absolute_path = os.path.join(original_cwd, relative_path)
+            #     logger.info(f"Resolving relative path '{relative_path}' to '{absolute_path}'")
+            #     mutable_split_config = OmegaConf.to_container(split_config, resolve=True)
+            #     mutable_split_config['file_path'] = absolute_path
+            #     split_config = OmegaConf.create(mutable_split_config)
+            # ---------------------------------------------
             
             try:
-                # Pass only the config, remove tokenizer argument
-                dataset = create_dataset_from_config(config=split_config, split=split)
+                # Pass top-level data_config and split_config to factory
+                dataset = create_dataset_from_config(data_config=data_config, split_config=split_config, original_cwd=original_cwd)
             except ValueError as e:
-                logger.error(f"Failed to create dataset for split '{split}': {e}")
-                # Depending on strictness, either raise e or continue
-                continue # Skip this split if dataset creation fails
+                # Factory function now logs details, just log context here
+                logger.error(f"Failed to create dataset for split '{split}'. See previous errors.")
+                continue 
             
             if len(dataset) == 0:
                 logger.warning(f"Dataset for split '{split}' is empty. Skipping DataLoader creation.")
                 continue
-                
-            # Determine shuffle based on split
+              
             shuffle = (split == "train")
             logger.info(f"DataLoader shuffle set to {shuffle} for split '{split}'")
             
-            # Use default collate_fn for now. 
-            # torch.utils.data.default_collate handles dicts of tensors correctly
-            # by stacking tensors for each key. This works for fixed-size sequence
-            # datasets like the current CharDataset.
-            # TODO: Implement flexible collate function selection (e.g., via config)
-            #       for handling padding (variable lengths) or on-the-fly tokenization.
-            collate_fn = None 
-            
-            # --- Tokenizer Strategy --- 
-            # For datasets requiring external tokenizers (e.g., Hugging Face BPE):
-            # 1. Configuration: Define a tokenizer config section (e.g., cfg.tokenizer) 
-            #    with `_target_` pointing to the tokenizer class (e.g., transformers.AutoTokenizer.from_pretrained)
-            #    and necessary args (e.g., `pretrained_model_name_or_path`).
-            # 2. Loading: Instantiate the tokenizer in the main training script: `tokenizer = hydra.utils.instantiate(cfg.tokenizer)`.
-            # 3. Application: Pass the loaded `tokenizer` instance to a custom `collate_fn`.
-            # 4. Collate Function: The custom `collate_fn` would:
-            #    - Receive a list of samples (e.g., dictionaries with raw text) from the DataLoader.
-            #    - Use the `tokenizer` to convert text to input_ids, add special tokens, etc.
-            #    - Pad sequences to a consistent length within the batch (e.g., using tokenizer.pad).
-            #    - Return the batch as a dictionary of tensors (e.g., {'input_ids': ..., 'attention_mask': ...}).
-            # 5. DataLoader: Pass the custom `collate_fn` here instead of `None`.
-            # --------------------------
-            
+            # Revert DataLoader creation to use default collate_fn
             loader = DataLoader(
                 dataset,
                 batch_size=batch_size,
                 shuffle=shuffle,
                 num_workers=num_workers,
-                pin_memory=torch.cuda.is_available(), # Pin memory if using GPU
-                collate_fn=collate_fn 
+                pin_memory=torch.cuda.is_available(),
+                collate_fn=None # Use default collate
             )
             
             if split == "train":
@@ -521,9 +498,7 @@ def prepare_dataloaders_from_config(data_config: DictConfig, batch_size: int, nu
                 val_loader = loader
             elif split == "test":
                 test_loader = loader
-        else:
-            logger.info(f"Split '{split}' not defined in data configuration.")
-            
+    
     return train_loader, val_loader, test_loader
 
 

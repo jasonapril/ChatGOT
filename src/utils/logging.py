@@ -50,6 +50,7 @@ def setup_logger(
 ) -> logging.Logger:
     """
     Set up a logger with file and/or console output.
+    If name is None (root logger), adds handlers instead of clearing existing ones.
     
     Args:
         name: Logger name (None for root logger)
@@ -63,12 +64,16 @@ def setup_logger(
     # Get logger
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    logger.propagate = False  # Don't propagate to parent loggers
     
-    # Clear existing handlers
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    
+    # If configuring a specific logger (not root), clear existing handlers and prevent propagation
+    if name is not None:
+        logger.propagate = False  
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+    # For root logger (name=None), we assume Hydra or another process might have set
+    # up handlers, so we ADD handlers instead of clearing.
+    # logger.propagate is typically True for root, so leave it.
+
     # Create formatters
     file_formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -77,18 +82,24 @@ def setup_logger(
         '%(asctime)s - %(levelname)s - %(message)s'
     )
     
-    # Add file handler if log_file provided
-    if log_file:
+    # Check if a similar handler already exists before adding
+    has_file_handler = any(isinstance(h, logging.FileHandler) and h.baseFilename == os.path.abspath(log_file) for h in logger.handlers) if log_file else False
+    has_console_handler = any(isinstance(h, logging.StreamHandler) and h.stream == sys.stdout for h in logger.handlers)
+    
+    # Add file handler if log_file provided and no similar handler exists
+    if log_file and not has_file_handler:
         os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)
+        if name is None: logger.info(f"setup_logger added FileHandler for root: {log_file}") # Debug log
     
-    # Add console handler if requested
-    if console:
+    # Add console handler if requested and no similar handler exists
+    if console and not has_console_handler:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(console_formatter)
         logger.addHandler(console_handler)
+        if name is None: logger.info("setup_logger added StreamHandler for root") # Debug log
     
     return logger
 

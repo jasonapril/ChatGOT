@@ -99,7 +99,7 @@ class Model(nn.Module, ABC):
         self.config = config # Store the validated config object
         # Get model_type from the stored config object
         self.model_type = self.config.model_type 
-
+    
     @abstractmethod
     def forward(self, *args, **kwargs):
         """
@@ -353,7 +353,7 @@ class LanguageModel(GenerativeModel):
         if not isinstance(self.config, LanguageModelConfig):
             logging.error("LanguageModel received incorrect config type despite type hint.")
             raise TypeError(f"Configuration error: Expected LanguageModelConfig, got {type(self.config)}")
-
+    
     def calculate_perplexity(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
         Calculate perplexity from logits and targets.

@@ -58,7 +58,11 @@ def generate_text(model, char_to_idx, idx_to_char, seed_text, max_length=500, te
             outputs = model(context)
             
             # Focus on the last token predictions
-            next_token_logits = outputs[0, -1, :].cpu()
+            # Assume outputs are logits or tuple where first element is logits
+            if isinstance(outputs, tuple):
+                next_token_logits = outputs[0][:, -1, :] 
+            else: # Assuming outputs are just logits
+                next_token_logits = outputs[:, -1, :]
             
             # Apply temperature
             next_token_logits = next_token_logits / temperature
@@ -66,11 +70,16 @@ def generate_text(model, char_to_idx, idx_to_char, seed_text, max_length=500, te
             # Apply repetition penalty
             if repetition_penalty > 1.0:
                 for prev_token in context[0]:
-                    next_token_logits[prev_token.item()] /= repetition_penalty
+                    # Only apply penalty if token_id is valid
+                    if 0 <= prev_token.item() < next_token_logits.size(-1):
+                         next_token_logits[0, prev_token.item()] /= repetition_penalty
             
             # Apply top-k filtering
             if top_k > 0:
-                indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][-1]
+                # Ensure top_k is not larger than vocab size
+                effective_top_k = min(top_k, next_token_logits.size(-1))
+                top_k_vals, _ = torch.topk(next_token_logits, effective_top_k)
+                indices_to_remove = next_token_logits < top_k_vals[:, [-1]] 
                 next_token_logits[indices_to_remove] = float('-inf')
             
             # Apply top-p (nucleus) filtering
@@ -81,10 +90,11 @@ def generate_text(model, char_to_idx, idx_to_char, seed_text, max_length=500, te
                 # Remove tokens with cumulative probability above the threshold
                 sorted_indices_to_remove = cumulative_probs > top_p
                 # Shift the indices to the right to keep also the first token above the threshold
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                if sorted_indices_to_remove.shape[-1] > 1:
+                     sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
                 sorted_indices_to_remove[..., 0] = 0
                 
-                indices_to_remove = sorted_indices[sorted_indices_to_remove]
+                indices_to_remove = torch.zeros_like(next_token_logits, dtype=torch.bool).scatter_(dim=-1, index=sorted_indices, src=sorted_indices_to_remove)
                 next_token_logits[indices_to_remove] = float('-inf')
             
             # Convert to probabilities
@@ -94,15 +104,22 @@ def generate_text(model, char_to_idx, idx_to_char, seed_text, max_length=500, te
             next_token = torch.multinomial(probs, 1).item()
             
             # Add to generated text
-            generated += idx_to_char[next_token]
+            # Handle potential KeyError if next_token is out of bounds for idx_to_char
+            next_char = idx_to_char.get(next_token, '<UNK>') # Use <UNK> or similar for safety
+            generated += next_char
             
             # Update context for next prediction
             context = torch.cat((context, torch.tensor([[next_token]], device=device)), dim=1)
             
             # Optionally truncate context to save memory for long generations
-            max_context_length = model.max_seq_length if hasattr(model, 'max_seq_length') else 1024
-            if context.size(1) > max_context_length:
-                context = context[:, -max_context_length:]
+            model_max_length = getattr(model.config, 'n_positions', 1024) if hasattr(model, 'config') else 1024
+            if context.size(1) > model_max_length:
+                context = context[:, -model_max_length:]
+            
+            # Check for EOS token using the *character* mapping if applicable
+            # eos_char = idx_to_char.get(char_to_idx.get("<eos>", -1), None)
+            # if eos_char and next_char == eos_char:
+            #     break
     
     return generated
 
@@ -183,7 +200,7 @@ def beam_search_generate(model, char_to_idx, idx_to_char, seed_text, max_length=
     model.eval()
     
     # Convert seed text to indices
-    context = [char_to_idx.get(c, char_to_idx.get("<unk>", 0)) for c in seed_text]
+    context = [char_to_idx.get(c, char_to_idx.get("", 0)) for c in seed_text]
     context = torch.tensor(context, dtype=torch.long, device=device).unsqueeze(0)
     
     # Initialize beams with seed
@@ -256,7 +273,7 @@ def batch_generate(model, char_to_idx, idx_to_char, prompts, max_length=500, tem
     max_prompt_len = 0
     
     for prompt in prompts:
-        context = [char_to_idx.get(c, char_to_idx.get("<unk>", 0)) for c in prompt]
+        context = [char_to_idx.get(c, char_to_idx.get("", 0)) for c in prompt]
         batch_context.append(context)
         max_prompt_len = max(max_prompt_len, len(context))
     

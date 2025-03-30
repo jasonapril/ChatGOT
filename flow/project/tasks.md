@@ -9,13 +9,16 @@ This file serves as the working memory for all active tasks in the project. It's
 - **Testing Strategy:** 🟡 ⏳ Throughout the refactoring process, ensure comprehensive test coverage is maintained and improved. This includes unit tests for individual components, integration tests for interactions between components, and end-to-end (feature) tests for verifying complete workflows (e.g., training, generation). Add specific testing sub-tasks to relevant refactoring items.
 
 - #### Experiment: Train Larger Model with Longer Context (Character-Level)
+  - **Name**: `got_char_1M_ctx256_bs64` # Assigned Experiment Name
   - **Goal**: Evaluate training performance (throughput) and model quality (loss, generation) with increased model capacity and context length on consumer hardware.
   - **Configuration**:
     - Model: ~1M parameters (`d_model=128, n_layers=6, n_head=8, d_hid=512`)
     - Context Length: 256 (`block_size=256`)
     - Tokenization: Character-level
     - Training: 5 epochs, `batch_size=64`, `gradient_accumulation_steps=1`
-  - **Status**: ⏸️ Paused (Attempting to resume from `outputs/2025-03-29/16-29-39/checkpoints/checkpoint_step_499.pt` after addressing generation error and `FutureWarning`)
+  - **Status**: ⏸️ Paused (Ready to resume from latest checkpoint)
+  - **Latest Checkpoint**: `outputs/2025-03-29/19-28-11/checkpoints/checkpoint_step_8570.pt`
+  - **Context**: Reverted block_size from 1024 to 256 due to performance issues. This run uses batch_size 64 to evaluate performance against previous baselines after code refactoring.
   - **Metrics**: Track Tokens/sec, loss curves (step & epoch), qualitative generation results.
 
 ### 🔴 High Priority
@@ -126,6 +129,19 @@ This file serves as the working memory for all active tasks in the project. It's
     - [x] Remove dynamic vocab update logic from `train_runner.py` and `generate_text.py`.
 
 ## Upcoming Tasks
+
+- ### 🟠 Refactor Data Pipeline for Tokenizer Flexibility
+  - **Goal**: Modify the data pipeline to support different tokenizers (character, subword, etc.) configured via Hydra, following the strategy outlined in `src/data/base.py`.
+  - **Steps**:
+    1. Define/Re-introduce standalone `Tokenizer` classes (e.g., `CharacterTokenizer`) in `src/data/tokenizer.py`.
+    2. Define corresponding Hydra configs (e.g., `conf/tokenizer/char.yaml`).
+    3. Update `conf/config.yaml` to include `tokenizer` defaults/placeholders.
+    4. Modify `Dataset` classes (e.g., `CharDataset`) to return raw text instead of tokenizing internally.
+    5. Implement custom `collate_fn` functions (e.g., `character_collate_fn` in `src/data/collation.py`) that use the instantiated tokenizer.
+    6. Modify `prepare_dataloaders_from_config` to accept the tokenizer, determine the correct `collate_fn`, and pass it to `DataLoader`.
+    7. Modify `train_runner.py` to instantiate the `tokenizer` via Hydra and pass it to `prepare_dataloaders_from_config` and `Trainer`.
+    8. Modify `Trainer` to accept and use the `tokenizer` object for sampling, removing `vocab_path`.
+  - **Status**: ⏳ To Do (Postponed from previous attempt)
 
 - ### 🟡 Review `benchmarking\\benchmarks` vs `outputs\\benchmarks`
 

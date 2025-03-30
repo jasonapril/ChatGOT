@@ -8,12 +8,11 @@ defaults:
   - experiment: null      # Expect override from command line or specific config
   - model: transformer
   - training: default
-  - data: char
+  - data: got_char
   - optimizer: adamw
-  - scheduler: cosine
+  - scheduler: cosine # Revert to match available file
   - callbacks: default    # Default callbacks configuration
-  # Move overrides after standard defaults
-  # - override hydra/hydra_logging: disabled # Can customize later
+  # - tokenizer: default_hf # REMOVE tokenizer group
   - _self_              # Allows defining variables directly in this file
 
 # Example top-level configuration parameters (optional)
@@ -25,20 +24,16 @@ defaults:
 #   # data_root: /path/to/datasets 
 
 # General settings
-project_name: "Craft"
+project_name: "ChatGoT"
+experiment_name: "default_experiment" # Add experiment name field
 
 # Add other top-level or default settings as needed 
 
 # Configuration for data handling
-data:
-  batch_size: 64 # Match previous high-performance run
-  num_workers: 0
+data: ??? # Ensure this is resolved by defaults
 
-# Tokenizer Configuration (NEW SECTION)
-tokenizer:
-  defaults:
-    - default_hf # Referencing conf/tokenizer/default_hf.yaml
-    - _self_ # Allows overriding defaults in this file or via command line
+# Configuration for tokenizer (placeholder)
+# tokenizer: ??? # REMOVE tokenizer placeholder
 
 # Configuration for the trainer 
 
@@ -51,7 +46,35 @@ resume_from: null # Can be set to "latest" or a specific path/to/checkpoint.pt v
 
 # Hydra settings (can be overridden)
 hydra:
-  output_subdir: .hydra 
+  output_subdir: .hydra
+  run:
+    # Use original CWD as the base for relative paths in config
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: True # Change CWD to the output directory for the run
+  # Explicitly configure job logging to ensure console output
+  job_logging:
+    # Define formatters (using a simple one for now)
+    formatters:
+      simple:
+        format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+    # Define handlers
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        level: INFO 
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        filename: ${hydra.job.name}.log # Use default log file name pattern
+        level: INFO
+    # Configure the root logger
+    root:
+      level: INFO
+      handlers: [console, file] # Make sure console is included
+    # Disable Hydra's default logger configs if they conflict
+    disable_existing_loggers: false 
 
 # Add a new group for generation parameters
 generation:

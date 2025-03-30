@@ -3,7 +3,7 @@ model_type: language # Base type
 architecture: transformer # Changed from model_name
 
 # --- LanguageModelConfig --- inherited fields
-vocab_size: 96 # Updated based on preprocessing game_of_thrones.txt
+vocab_size: 96
 max_seq_length: ${data.block_size} # Correct interpolation key
 
 # --- Transformer Specific --- fields in TransformerConfig
