@@ -1,5 +1,5 @@
 """
-ChatGoT Benchmarking Package
+Craft Benchmarking Package
 ===========================
 
 This package provides tools for benchmarking the text generation pipeline,

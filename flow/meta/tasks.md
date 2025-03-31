@@ -48,6 +48,8 @@ This document tracks tasks related to the development and improvement of the Flo
 
 ## Upcoming Tasks
 
+### Make System for Goals & Ensure Tasks Align with Goals Even If the Goals Change
+
 ### Create Short-term Buffer Mechanism
 - **Description**: Implement a system for temporarily storing ideas and thoughts before proper organization
 - **Notes**: Should be lightweight and require minimal effort to use

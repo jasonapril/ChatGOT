@@ -1,6 +1,23 @@
-# Flow System Core
+# Flow System Directory
 
-This directory contains the foundational documents that define how the Flow system operates. These are the authoritative sources for standards, templates, and rules.
+This directory contains the core definitions, guidelines, and principles that govern the Flow system's operation and usage across different projects.
+
+## Purpose
+
+The files here define the "how" of the Flow system:
+
+*   How tasks are tracked and managed.
+*   How documentation should be structured and maintained.
+*   How AI agents should interact with the system.
+*   The standard conventions and capabilities.
+
+## Key Files
+
+*   **`guidelines.md`**: The primary authoritative document. Contains core principles, usage instructions, task management details, AI interaction protocols, system conventions, and consistency guidelines. **Consult this first.**
+*   **`agent_capabilities.md`**: Describes the known capabilities and limitations of the assisting AI agent within the Flow system.
+*   **`README.md`**: This overview file.
+
+Consult these files for understanding how to use and maintain the Flow system effectively.
 
 ## Contents
 

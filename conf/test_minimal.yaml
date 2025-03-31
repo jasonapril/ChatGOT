@@ -1,0 +1,16 @@
+# conf/test_minimal.yaml
+# Minimal configuration for testing the training loop.
+# Inherits defaults from conf/config.yaml
+
+defaults:
+  - override /training: minimal_test # Override the training group specifically
+  - _self_
+
+# We can keep the default model (transformer) and data (got_char)
+# or override them here if needed.
+
+# Example: To use a tiny model config (if one exists like conf/model/tiny.yaml)
+# defaults:
+#   - override /model: tiny
+#   - override /training: minimal_test
+#   - _self_ 

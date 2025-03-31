@@ -1,4 +1,4 @@
-name: ChatGoT CI/CD
+name: Craft CI/CD
 
 on:
   push:

@@ -21,8 +21,9 @@ import time
 from typing import Dict, Any, Optional, Tuple
 import numpy as np
 from tqdm import tqdm
+from omegaconf import DictConfig, OmegaConf
 
-from src.logger import force_flush_logs, format_time
+from src.utils.logging import force_flush_logs, format_time
 
 def evaluate(model, dataloader, device, use_amp=False, log_interval=None):
     """

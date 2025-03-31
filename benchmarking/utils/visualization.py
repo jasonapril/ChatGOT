@@ -279,7 +279,7 @@ def _generate_html_report(results: Dict[str, Any], comparison: Optional[Dict[str
     <!DOCTYPE html>
     <html>
     <head>
-        <title>ChatGoT Benchmark Report</title>
+        <title>Craft Benchmark Report</title>
         <style>
             body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; }}
             h1, h2, h3 {{ color: #333; }}
@@ -293,7 +293,7 @@ def _generate_html_report(results: Dict[str, Any], comparison: Optional[Dict[str
         </style>
     </head>
     <body>
-        <h1>ChatGoT Benchmark Report</h1>
+        <h1>Craft Benchmark Report</h1>
         
         <h2>System Information</h2>
         <table>

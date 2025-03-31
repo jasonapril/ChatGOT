@@ -13,9 +13,7 @@ This directory contains the following files and subdirectories related to Flow's
 - `tasks.md`: Tasks specifically for improving the Flow system itself.
 - `glossary.md`: Definitions of key terms used within the Flow system.
 - `improvements.md`: Suggestions for enhancing the Flow system (potentially related to `tasks.md`).
-- `documentation_guidelines.md`: Specific guidelines related to writing and maintaining documentation (likely related to `system/consistency.md`).
-- `troubleshooting_and_debugging.md`: Consolidated guide covering general troubleshooting frameworks, code debugging strategies, and the post-mortem process.
-- `troubleshooting_guides/`: (Directory) Contains more specific guides for troubleshooting particular problems (often generated via post-mortems).
+- `config_implementation.md`: Details on how configuration is implemented within the Flow system.
 
 ## Purpose
 
@@ -32,4 +30,4 @@ Think of meta as "Flow thinking about Flow" - a layer of metacognition that help
 
 - [System Guidelines](../system/guidelines.md) - Operational rules for using Flow
 - [Configuration](../system/configuration.md) - Current system configuration
-- [Improvements](../planning/improvements.md) - General improvement suggestions 
+- [Improvements](../planning/improvements.md) - General improvement suggestions

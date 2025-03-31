@@ -22,7 +22,7 @@ from benchmarking.utils.visualization import create_benchmark_report
 def parse_args():
     """Parse command line arguments for the main benchmarking CLI."""
     parser = argparse.ArgumentParser(
-        description='ChatGoT Benchmarking Tools',
+        description='Craft Benchmarking Tools',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     

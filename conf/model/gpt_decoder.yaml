@@ -1,0 +1,22 @@
+# conf/model/gpt_decoder.yaml
+_target_: src.models.gpt_decoder.GPTDecoder # Specify the target class
+# vocab_size: 96 # Let data loader set this based on tokenizer
+d_model: 512
+n_layers: 8
+n_head: 8
+d_hid: 2048 # Typically calculated as 4 * d_model, but keeping original value
+dropout: 0.1
+attention_dropout: 0.1 # Same as 'attn_pdrop' from original
+layer_norm_eps: 1e-5
+activation: gelu
+bias: true
+init_method: normal
+init_range: 0.02 # Using 'initializer_range' from original
+pos_encoding_type: learned
+max_seq_length: ${data.block_size} # Use block_size from data config
+# prevent_dimension_adjustment: true # Not a standard param in base GPTDecoder? Review if needed.
+# Parameters moved from root level:
+n_positions: ${data.block_size} # Match block_size
+embd_pdrop: ${model.dropout} # Use model dropout
+scale_attn_weights: true
+use_cache: true # Relevant for inference, might not affect training directly 

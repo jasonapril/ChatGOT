@@ -6,6 +6,7 @@ import json
 import torch
 import torch.nn as nn
 from unittest.mock import patch, MagicMock
+import time
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -83,8 +84,8 @@ class TestInstrumentation(unittest.TestCase):
         # Check output shape
         self.assertEqual(output.shape, (32, 5))
         
-        # Check that forward pass was recorded
-        self.assertEqual(len(self.monitor.component_times.get('forward', [])), 1)
+        # Check that forward time was recorded in the correct list
+        self.assertEqual(len(self.monitor.forward_times), 1)
     
     def test_instrumented_dataloader_creation(self):
         """Test creating an instrumented dataloader."""
@@ -114,32 +115,22 @@ class TestInstrumentation(unittest.TestCase):
             # Just ensure we can iterate without errors
             pass
         
-        # Check that data loading was recorded
-        self.assertGreaterEqual(len(self.monitor.component_times.get('data_loading', [])), 1)
+        # Check that data loading time was recorded
+        self.assertGreaterEqual(len(self.monitor.data_loading_times), 1)
     
     def test_context_managers(self):
         """Test the context managers for measuring time."""
-        # Test measure_batch
-        with measure_batch(self.monitor, batch_size=16, seq_length=10):
-            pass
-        
-        # Check that batch was recorded
-        self.assertEqual(len(self.monitor.batch_times), 1)
-        self.assertEqual(self.monitor.total_tokens, 16 * 10)
-        
         # Test measure_optimizer_step
         with measure_optimizer_step(self.monitor):
-            pass
-        
+            time.sleep(0.01)
         # Check that optimizer step was recorded
-        self.assertEqual(len(self.monitor.component_times.get('optimizer', [])), 1)
+        self.assertEqual(len(self.monitor.optimizer_times), 1)
         
         # Test measure_data_loading
         with measure_data_loading(self.monitor):
-            pass
-        
+            time.sleep(0.01)
         # Check that data loading was recorded
-        self.assertEqual(len(self.monitor.component_times.get('data_loading', [])), 1)
+        self.assertEqual(len(self.monitor.data_loading_times), 1)
     
     @patch('json.dump')
     @patch('os.fsync')

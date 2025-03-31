@@ -269,16 +269,30 @@ class ThroughputMonitor:
             Dictionary with memory statistics in MB
         """
         with self._lock:
+            # Check CUDA availability FIRST
             if not self.cuda_available:
                 return {
-                    'allocated': 0,
-                    'reserved': 0,
+                    'allocated': 0.0,
+                    'reserved': 0.0,
+                    'peak': self.peak_memory # Keep peak even if CUDA is off now
+                }
+            
+            # If CUDA is available, get stats
+            try:
+                allocated_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+                reserved_mb = torch.cuda.memory_reserved() / (1024 ** 2)
+                # Peak memory is updated in end_batch, just retrieve it here
+                return {
+                    'allocated': allocated_mb,
+                    'reserved': reserved_mb,
                     'peak': self.peak_memory
                 }
-                
+            except RuntimeError as e:
+                 # Handle potential errors during CUDA calls (e.g., during shutdown)
+                 logging.warning(f"Error getting CUDA memory stats: {e}")
             return {
-                'allocated': torch.cuda.memory_allocated() / (1024 ** 2),
-                'reserved': torch.cuda.memory_reserved() / (1024 ** 2),
+                    'allocated': 0.0,
+                    'reserved': 0.0,
                 'peak': self.peak_memory
             }
     

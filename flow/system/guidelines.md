@@ -17,13 +17,14 @@ This document outlines the core principles and best practices for utilizing the 
 *   **Tasks (`flow/project/tasks.md`)**: Regularly update task statuses, add new tasks, link related issues/commits, and archive completed items. Use status emojis (e.g., ⏳, ✅, ⏸️, 🔴) for quick visual reference. Ensure task descriptions contain necessary context or links for ongoing work.
 *   **Guidelines (`flow/system/guidelines.md`)**: Consult this file for development standards, coding practices, and Flow system usage conventions.
 *   **Agent Capabilities (`flow/system/agent_capabilities.md`)**: Refer to this document for the known capabilities and limitations of the assisting AI agent.
-*   **Project Planning (`flow/planning/`)**: Use files in this directory for longer-term goals, potential improvements, and strategic decisions.
 
 ## AI Agent Interaction
 
 *   **Context is Key**: Provide clear context when requesting actions. Reference specific files, tasks, or previous messages.
+*   **Role Definition**: The AI agent acts as a junior developer. The USER (human developer) provides direction, makes decisions, and reviews work. The AI's role is to execute tasks as instructed, including writing/editing code, running scripts/commands, searching the codebase, and managing Flow documents.
 *   **Verify Actions**: Review proposed changes (code edits, commands) before approval.
 *   **Iterative Refinement**: Expect to iterate. If the agent's first attempt isn't perfect, provide specific feedback for correction.
+*   **Suggesting Next Steps**: When asked by the USER to suggest what to do next, the AI agent MUST consult the current working memory, primarily `flow/project/tasks.md`, to inform its recommendation.
 *   **Update Flow**: Ensure the agent updates relevant Flow documents (especially `tasks.md`) after completing actions or changing the project state.
 
 ## Overview
@@ -39,6 +40,55 @@ The guidelines outlined here ensure that all active tasks in [tasks.md](../activ
 - **Task Priority:** Mark tasks with priority levels where appropriate (🔴 Critical, 🟠 High, 🟡 Medium, 🟢 Low).
 - **Status Inference:** A task's activeness is determined by its presence in tasks.md. Explicit status flags make this clearer but are optional.
 - **Nested Tasks:** Although tasks may be inherently nested or complex, the system should enforce a single level of active entries in tasks.md. Detailed, granular subtasks should be managed in their respective documentation files to keep the primary list lean.
+
+## System Conventions and Configuration
+
+This section defines standard conventions and configuration preferences used within the Flow system documentation and workflow.
+
+### Appearance
+
+- **Priority Colors**:
+  - 🔴 Critical - Used for urgent items that block progress
+  - 🟠 High - Important items that need immediate attention
+  - 🟡 Medium - Standard work items
+  - 🟢 Low - Nice-to-have items or long-term improvements
+
+- **Status Indicators**:
+  - ⏳ In progress - Actively being worked on
+  - ✅ Completed - Work is finished and verified
+  - 🔄 Under review - Awaiting feedback or assessment
+  - ⏸️ Paused - Temporarily suspended
+  - 🚩 Blocked - Unable to proceed due to dependencies
+
+### Organization
+
+- **Core File Structure** (See `flow/README.md` for full structure):
+  - `flow/project/tasks.md` - Primary working document for active project tasks.
+  - `flow/system/guidelines.md` - Core documentation and guidelines (this file).
+  - `flow/project/conventions.md` - Project-specific conventions.
+  - `flow/meta/` - Development info for the Flow system itself.
+  - `flow/domains/` - Domain-specific knowledge.
+
+- **Task Categories** (Examples):
+  - Implementation - New features or components
+  - Bug Fix - Addressing errors or defects
+  - Research - Investigation and information gathering
+  - Documentation - Improving or extending documentation
+  - Refactoring - Restructuring without changing behavior
+
+### Default Behaviors
+
+- **Log Retention** (in `flow/project/logs/`):
+  - Keep recent task history in `flow/project/tasks.md`.
+  - Archive older completed task entries to the `flow/project/logs/` directory.
+  - Retention period for archived logs is project-dependent.
+
+- **Review Frequency** (Recommended):
+  - Daily check-ins for active tasks.
+  - Weekly review of entire task queue.
+  - Periodic consistency audits.
+
+These settings can be adapted based on project requirements, but changes should be documented, ideally in `flow/project/conventions.md` if project-specific.
 
 ## Updating Guidelines
 
@@ -128,6 +178,41 @@ To prevent the accumulation of unused or temporary files ("cruft"), especially w
 
 By adhering to these guidelines, we can maintain a cleaner, more organized, and navigable codebase.
 
+## Maintaining Consistency
+
+This section outlines strategies to prevent inconsistencies in the Flow documentation system, specifically addressing issues related to duplicate information, inconsistent formatting, and lack of clear authoritative sources.
+
+### Key Consistency Principles
+
+1.  **Single Source of Truth**: Each piece of information should be defined in exactly one place (often within this `guidelines.md` file or delegated to project/meta files).
+2.  **Cross-References**: Instead of duplicating information, use links (`[link text](path/to/file.md)`) to reference canonical definitions.
+3.  **Standardized Formats**: Use consistent formatting (like the status indicators defined above) and naming conventions across all documentation.
+4.  **Explicit Ownership**: Files should have clearly defined responsibilities (as outlined in `flow/README.md` and the READMEs within `system/`, `project/`, `meta/`).
+
+### Consistency Maintenance Practices
+
+-   **Regular Audits**:
+    -   Periodically audit documentation consistency.
+    -   Verify that cross-references remain valid.
+    -   Check for duplicated information that should be consolidated.
+-   **Change Management**:
+    -   When updating standards or guidelines, start with the authoritative source file (often this one).
+    -   Update related files as needed.
+    -   Document significant changes.
+-   **Refactoring Sessions**:
+    -   Periodically review the entire Flow documentation system.
+    -   Look for opportunities to consolidate or simplify.
+    -   Remove outdated information.
+
+### Technical Solutions for Consistency
+
+-   **Automated Validation** (Future Enhancement):
+    -   Consider simple scripts to verify cross-references.
+    -   Check for consistency in formatting/indicators.
+-   **Templates**:
+    -   Use standardized templates (like those defined above for tasks) for common documentation elements.
+    -   Ensure templates reference authoritative sources rather than duplicating information.
+
 ## Conclusion
 
 This document serves as the blueprint for managing task flows effectively. By following these guidelines, the system will remain both flexible and robust, capable of adapting to the complexities of projects while keeping the management process as frictionless as possible. 
@@ -151,4 +236,8 @@ To enable AI agents (like coding assistants) to effectively utilize the Flow sys
     *   They are identified as highly relevant by a semantic search.
     *   The current task explicitly requires understanding or adhering to a standard defined within that specific file.
 
-This prioritized retrieval process aims to provide the necessary context efficiently, leveraging the structured information within Flow without requiring the agent to read every file unnecessarily. 
+This prioritized retrieval process aims to provide the necessary context efficiently, leveraging the structured information within Flow without requiring the agent to read every file unnecessarily.
+
+## Adherence to Conventions
+
+Strive to follow common community conventions for Python project structure, coding style (e.g., PEP 8), naming, documentation, and tooling unless there is a documented and compelling reason specific to this project to deviate. This promotes consistency, readability, and interoperability. [TODO: This should be generalized, with Python-specifics moved to a Python domain file.]

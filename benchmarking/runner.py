@@ -210,7 +210,7 @@ class BenchmarkRunner:
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='ChatGoT Benchmark Runner',
+        description='Craft Benchmark Runner',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     

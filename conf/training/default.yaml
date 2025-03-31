@@ -15,9 +15,10 @@ sample_max_new_tokens: 100
 sample_temperature: 0.8
 sample_start_text: "The meaning of life is"
 
+# REMOVE Redundant generation block (already defined in config.yaml)
 # Generation config used by Trainer._generate_sample_and_log
-generation:
-  start_prompt: "The night is dark and "
-  max_new_tokens: 150
-  temperature: 0.8
-  top_k: null 
+# generation:
+#   start_prompt: "The night is dark and "
+#   max_new_tokens: 150
+#   temperature: 0.8
+#   top_k: null 

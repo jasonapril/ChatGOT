@@ -13,6 +13,9 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
+# Import AutoTokenizer
+from transformers import AutoTokenizer
+
 
 def prepare_data(
     input_file: str,
@@ -70,60 +73,162 @@ def prepare_text_data(
     config: Optional[Dict[str, Any]] = None
 ) -> str:
     """
-    Prepare text data for training.
+    Prepare text data for training. Supports character-level or pre-trained tokenizers.
     
     Args:
         input_file: Path to the input text file
         output_dir: Directory to save processed data
-        config: Configuration dictionary
+        config: Configuration dictionary (expected to have data.tokenizer_name)
         
     Returns:
-        Path to the processed dataset
+        Path to the main processed dataset file (e.g., train split path)
+        Note: This might need adjustment when splitting is fully implemented.
     """
     logging.info(f"Processing text data from {input_file}")
     
     # Get configuration
-    if config is None:
-        config = {}
+    cfg = config if config is not None else {}
+    data_cfg = cfg.get("data", {})
     
-    text_format = config.get("data", {}).get("format", "character")
-    
+    # Determine tokenizer type/name
+    tokenizer_name = data_cfg.get("tokenizer_name", None)
+    text_format = data_cfg.get("format", "character") # Fallback if no tokenizer
+
     # Read input file
     with open(input_file, "r", encoding="utf-8") as f:
         text = f.read()
     
     logging.info(f"Read {len(text)} characters from {input_file}")
     
-    # Process based on format
-    if text_format == "character":
-        # Character-level processing
+    processed_data = {}
+    vocab_size = None
+    tokenizer = None
+
+    # Process based on tokenizer or format
+    if tokenizer_name:
+        logging.info(f"Using tokenizer: {tokenizer_name}")
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+            # Add special tokens if they don't exist? Often handled by dataset/model.
+            # Example: if tokenizer.pad_token is None: tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+            
+            # Tokenize the entire text
+            # Use truncation/padding later in dataset loading if needed
+            # For large files, consider processing in chunks or using datasets library
+            logging.info(f"Tokenizing text with {tokenizer_name}...")
+            # Note: encode adds special tokens by default depending on tokenizer type
+            token_ids = tokenizer.encode(text) 
+            logging.info(f"Tokenized into {len(token_ids)} tokens.")
+
+            # Store tokenized data and tokenizer info
+            # Using numpy for potential memory mapping later
+            processed_data["token_ids"] = np.array(token_ids, dtype=np.uint16) # Use efficient dtype
+            processed_data["tokenizer_name"] = tokenizer_name
+            vocab_size = tokenizer.vocab_size
+            processed_data["vocab_size"] = vocab_size
+            # Save necessary tokenizer files alongside? Or assume name is enough?
+            # For now, assume name is sufficient for reloading.
+
+        except Exception as e:
+            logging.error(f"Failed to load or use tokenizer '{tokenizer_name}': {e}", exc_info=True)
+            raise
+
+    elif text_format == "character":
+        # Character-level processing (existing logic)
+        logging.info("Using character-level tokenization.")
         chars = sorted(list(set(text)))
         char_to_idx = {ch: i for i, ch in enumerate(chars)}
         idx_to_char = {i: ch for i, ch in enumerate(chars)}
+        vocab_size = len(chars)
         
-        data = {
-            "text": text,
+        # Store original text and mappings
+        processed_data = {
+            "text": text, # Keep original text for CharDataset
             "chars": chars,
             "char_to_idx": char_to_idx,
             "idx_to_char": idx_to_char,
-            "vocab_size": len(chars)
+            "vocab_size": vocab_size
         }
-        
-        logging.info(f"Vocabulary size: {len(chars)} unique characters")
+        logging.info(f"Vocabulary size: {vocab_size} unique characters")
     else:
-        raise ValueError(f"Unsupported text format: {text_format}")
+        raise ValueError(f"Unsupported text format/tokenizer: format='{text_format}', tokenizer_name='{tokenizer_name}'")
     
-    # Create output filename
-    output_filename = os.path.splitext(os.path.basename(input_file))[0]
-    output_path = os.path.join(output_dir, f"{output_filename}_processed.pkl")
+    # --- Integrate Data Splitting --- 
+    # Get split ratios from config
+    # Default to 80/10/10 if not provided
+    split_ratios = data_cfg.get('split_ratios', [0.8, 0.1, 0.1])
+    if len(split_ratios) != 3 or not all(isinstance(x, (int, float)) for x in split_ratios) or abs(sum(split_ratios) - 1.0) > 1e-6:
+        logging.warning(f"Invalid split_ratios '{split_ratios}'. Must be 3 numbers summing to 1. Using default [0.8, 0.1, 0.1].")
+        split_ratios = [0.8, 0.1, 0.1]
+    train_ratio, val_ratio, test_ratio = split_ratios
+    seed = cfg.get("seed", 42) # Use the global seed
+
+    # Decide what data to split
+    data_to_split = None
+    if tokenizer_name and "token_ids" in processed_data:
+        data_to_split = processed_data["token_ids"]
+        logging.info(f"Splitting {len(data_to_split)} token IDs...")
+    elif text_format == "character" and "text" in processed_data:
+        # Note: Splitting raw text might break context across splits.
+        # Better approach for char level might be to tokenize first, then split IDs.
+        # For now, matching previous potential behavior but logging warning.
+        # Let's tokenize first, then split IDs for character level too.
+        char_to_idx = processed_data["char_to_idx"]
+        raw_text = processed_data["text"]
+        token_ids = [char_to_idx.get(c, 0) for c in raw_text] # Simple tokenization
+        data_to_split = np.array(token_ids, dtype=np.uint16)
+        # Remove raw text if we split IDs
+        # processed_data.pop("text", None)
+        logging.info(f"Splitting {len(data_to_split)} character token IDs...")
+        
+    if data_to_split is None or len(data_to_split) == 0:
+         logging.error("No data available to split.")
+         # Return something reasonable or raise error? Return None for now.
+         return None 
+
+    # Split the data (indices)
+    # Ensure split_data can handle numpy array directly or list of indices
+    # Convert numpy array to list for split_data if needed, though numpy indexing is better
+    num_items = len(data_to_split)
+    indices = np.arange(num_items)
+    train_indices, val_indices, test_indices = split_data(indices, train_ratio, val_ratio, test_ratio, seed)
     
-    # Save processed data
-    with open(output_path, "wb") as f:
-        pickle.dump(data, f)
+    logging.info(f"Split sizes: Train={len(train_indices)}, Val={len(val_indices)}, Test={len(test_indices)}")
+
+    # Prepare data for each split
+    output_paths = {}
+    output_filename_base = os.path.splitext(os.path.basename(input_file))[0]
     
-    logging.info(f"Processed data saved to {output_path}")
-    
-    return output_path
+    for split_name, split_indices in zip(["train", "val", "test"], [train_indices, val_indices, test_indices]):
+        if len(split_indices) == 0:
+             logging.info(f"Skipping empty split: {split_name}")
+             continue
+
+        split_data_content = {} 
+        if tokenizer_name:
+            # Save token IDs for the split
+            split_data_content["token_ids"] = data_to_split[split_indices]
+            split_data_content["tokenizer_name"] = tokenizer_name
+            split_data_content["vocab_size"] = vocab_size
+        elif text_format == "character":
+            # Save token IDs and mappings for the split
+            split_data_content["token_ids"] = data_to_split[split_indices]
+            split_data_content["chars"] = processed_data["chars"]
+            split_data_content["char_to_idx"] = processed_data["char_to_idx"]
+            split_data_content["idx_to_char"] = processed_data["idx_to_char"]
+            split_data_content["vocab_size"] = vocab_size
+
+        # Save the split data
+        split_output_path = os.path.join(output_dir, f"{output_filename_base}_{split_name}.pkl")
+        with open(split_output_path, "wb") as f:
+            pickle.dump(split_data_content, f)
+        logging.info(f"Saved {split_name} split ({len(split_indices)} items/tokens) to {split_output_path}")
+        output_paths[split_name] = split_output_path
+
+    # --- End Data Splitting --- 
+
+    # Return the dictionary of output paths
+    return output_paths
 
 
 def prepare_image_data(
@@ -224,7 +329,7 @@ def prepare_json_data(
 
 
 def split_data(
-    data: List[Any],
+    data: Union[List[Any], np.ndarray], # Allow numpy array
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,

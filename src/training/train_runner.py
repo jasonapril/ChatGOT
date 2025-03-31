@@ -61,15 +61,28 @@ from src.training.optimizations import (
 )
 from src.training.trainer import Trainer
 
+# Add hydra.utils import for instantiate
+import hydra.utils
+# Add copy for deep copying config sections
+import copy
+
 # --- Main Execution Block --- #
 
 @hydra.main(config_path="../../conf", config_name="config", version_base=None)
 def run_training(cfg: DictConfig) -> None:
     """Hydra-managed function to run the training process."""
-    
+    # --- Remove VERY EARLY DEBUG --- 
+    # print("--- DEBUG: Entered run_training function ---", file=sys.stderr)
+    # try:
+    #     resume_val = cfg.get("resume_from", "<NOT FOUND>") # Corrected access
+    #     print(f"--- DEBUG: cfg.resume_from = {resume_val} (Type: {type(resume_val)}) ---", file=sys.stderr)
+    # except Exception as e:
+    #     print(f"--- DEBUG: Error accessing cfg.resume_from: {e} ---", file=sys.stderr)
+    # --- END VERY EARLY DEBUG ---
+
     # Get the logger for the current module 
-    # Hydra configures the root logger, so getting __name__ logger should inherit handlers
     logger = logging.getLogger(__name__)
+    # print(f"--- DEBUG: Logger {logger.name} effective level: {logger.getEffectiveLevel()} ---", file=sys.stderr) # Remove this too
 
     # --- Save Experiment Metadata --- #
     try:
@@ -148,77 +161,54 @@ def run_training(cfg: DictConfig) -> None:
                 logger.info(f"Scheduler created: Cosine with {cfg.scheduler.warmup_steps} warmup steps, {total_steps} total steps")
         else:
              logger.warning(f"Unsupported scheduler type: {cfg.scheduler.type}. No scheduler will be used.")
+    logger.info(f"Scheduler created: {cfg.scheduler.type}")
 
-    # --- Callbacks --- #
-    log_section_header(logger, "SETTING UP CALLBACKS")
-    callbacks = []
-    if cfg.callbacks:
-        for cb_conf in cfg.callbacks.values():
-            try:
-                callbacks.append(hydra.utils.instantiate(cb_conf))
-            except Exception as e:
-                 logger.error(f"Error instantiating callback {cb_conf.get('_target_')}: {e}", exc_info=True)
-    logger.info(f"Initialized {len(callbacks)} callbacks.")
-
-    # --- Trainer Initialization --- #
-    log_section_header(logger, "INITIALIZING TRAINER")
-    trainer = Trainer(
-        model=model,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        train_dataloader=train_loader,
-        val_dataloader=val_loader,
-        device=device,
-        # Pass training config args directly
-        epochs=cfg.training.epochs,
-        config=cfg.training, # Pass sub-config for other params like time_save_interval
-        callbacks=callbacks,
-        use_amp=cfg.training.use_amp,
-        gradient_accumulation_steps=cfg.training.gradient_accumulation_steps,
-        max_grad_norm=cfg.training.max_grad_norm,
-        # Construct checkpoint dir from hydra output + sub-config
-        checkpoint_dir=os.path.join(hydra_output_dir, cfg.training.get('checkpoint_subdir', 'checkpoints')), 
-        log_interval=cfg.training.log_interval,
-        # Pass resolved absolute vocab_path
-        vocab_path=os.path.join(original_cwd, cfg.data.vocab_path) if cfg.data.vocab_path and not os.path.isabs(cfg.data.vocab_path) else cfg.data.vocab_path 
-    )
-    logger.info("Trainer initialized successfully.")
-
-    # --- Checkpoint Loading (Resume) --- #
-    checkpoint_path_cfg = cfg.get('resume_from')
+    # --- Determine Checkpoint Path --- #
+    logger.debug(f"Attempting to access resume_from config...")
+    checkpoint_path_cfg = cfg.get("resume_from")
+    logger.debug(f"Value of cfg.resume_from: '{checkpoint_path_cfg}' (Type: {type(checkpoint_path_cfg)})")
     absolute_checkpoint_path = None
+    loaded_config_from_checkpoint = None # Initialize to None
 
     if checkpoint_path_cfg == "latest":
         # Call script to find latest checkpoint matching current config
-        script_path = "scripts/get_latest_checkpoint.py"
+        logger.info("'latest' specified for resume_from. Running script to find checkpoint...")
+        script_path = os.path.join(hydra.utils.get_original_cwd(), "scripts", "get_latest_checkpoint.py")
         try:
-            # Convert relevant parts of config to JSON string for script argument
-            # Filter sensitive or overly complex parts if necessary
-            config_subset = OmegaConf.to_container(cfg, resolve=True) 
-            # Select keys relevant for matching checkpoints (e.g., model type, dataset)
-            match_keys = ['model', 'data', 'experiment_name']
-            match_config = {k: config_subset.get(k) for k in match_keys if k in config_subset}
-            config_json = json.dumps(match_config)
-            
-            result = subprocess.run([
+            # Construct arguments for the script based on current config
+            script_args = [
                 sys.executable, # Use the current Python interpreter
                 script_path,
-                "--config_json", config_json,
-                "--base_dir", os.path.join(original_cwd, "outputs") # Base search dir
-            ], capture_output=True, text=True, check=True)
+                # Add filters based on current config
+                # Ensure these keys exist in your config structure
+                "--model-architecture", cfg.model.get('architecture', 'unknown'),
+                "--dataset-target", cfg.data.get('train', {}).get('_target_', 'unknown'),
+                "--experiment-name", cfg.get('experiment_name', 'unknown'),
+            ]
             
-            latest_checkpoint = result.stdout.strip()
-            if latest_checkpoint:
-                absolute_checkpoint_path = latest_checkpoint # Script should return absolute path
-                logger.info(f"Found latest checkpoint: {absolute_checkpoint_path}")
-            else:
-                logger.warning(f"'latest' specified but script {script_path} did not return a path.")
+            # Base directory for searching runs
+            base_search_dir = os.path.join(original_cwd, "outputs/hydra") # Search within outputs/hydra
+            script_args.extend(["--base-dir", base_search_dir])
+
+            logger.info(f"Running script to find latest checkpoint: {' '.join(script_args)}")
+            result = subprocess.run(script_args, capture_output=True, text=True, check=False) # Use check=False initially
+
+            if result.returncode == 0:
+                latest_checkpoint = result.stdout.strip()
+                if latest_checkpoint and os.path.exists(latest_checkpoint): # Check if path exists
+                    absolute_checkpoint_path = latest_checkpoint # Assume script returns absolute path
+                    logger.info(f"Found latest checkpoint via script: {absolute_checkpoint_path}")
+                elif latest_checkpoint: # Script returned path but it doesn't exist
+                     logger.warning(f"Script returned path '{latest_checkpoint}' but it does not exist.")
+                else: # Script succeeded but returned empty string
+                    logger.warning(f"'latest' specified but script {script_path} did not return a path.")
+            else: # Script failed
+                logger.error(f"Script {script_path} failed with return code {result.returncode}. Cannot resume from latest.\nStderr: {result.stderr}")
+
         except FileNotFoundError:
             logger.error(f"Script {script_path} not found. Cannot resume from latest.")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error running script {script_path}: {e}\nStdout: {e.stdout}\nStderr: {e.stderr}")
         except Exception as e:
-            logger.error(f"Unexpected error running script {script_path}: {e}")
+            logger.error(f"Unexpected error running script {script_path}: {e}", exc_info=True)
 
     elif checkpoint_path_cfg:
          # Handle explicitly provided path (relative or absolute)
@@ -233,18 +223,106 @@ def run_training(cfg: DictConfig) -> None:
          else:
              absolute_checkpoint_path = checkpoint_path_cfg
 
+    # --- Instantiate Callbacks --- #
+    callbacks = []
+    if "callbacks" in cfg:
+        # Deep copy the callbacks config section to allow modification
+        callbacks_cfg = copy.deepcopy(cfg.callbacks)
+
+        # Instantiate callbacks using the potentially modified config
+        # Iterate over the list associated with the 'callbacks_list' key
+        for cb_conf in callbacks_cfg.get('callbacks_list', []):
+            try:
+                # Inject tokenizer if it's the SampleGenerationCallback
+                if isinstance(cb_conf, DictConfig) and cb_conf.get('_target_') == 'src.training.callbacks.SampleGenerationCallback':
+                    # Pass the instantiated tokenizer object
+                    callbacks.append(hydra.utils.instantiate(cb_conf, tokenizer=tokenizer))
+                else:
+                    callbacks.append(hydra.utils.instantiate(cb_conf))
+                logger.info(f"Initialized callback: {cb_conf.get('_target_') if isinstance(cb_conf, DictConfig) else 'Unknown Callback Config Format'}")
+            except Exception as e:
+                target_name = cb_conf.get('_target_', 'Unknown') if isinstance(cb_conf, DictConfig) else 'Invalid Config'
+                logger.error(f"Failed to instantiate callback {target_name}: {e}", exc_info=True)
+
+    # --- Initialize Trainer --- #
+    log_section_header(logger, "INITIALIZING TRAINER")
+    # Make sure checkpoint dir exists relative to hydra output
+    hydra_output_dir = os.getcwd() # Hydra sets current working dir to output dir
+    checkpoint_subdir = cfg.training.get('checkpoint_subdir', 'checkpoints')
+    trainer_checkpoint_dir = os.path.join(hydra_output_dir, checkpoint_subdir)
+
+    # Get original CWD for resolving relative paths like vocab_path if needed
+    original_cwd = "./" # Default if original_cwd cannot be obtained
+    try:
+        original_cwd = hydra.utils.get_original_cwd()
+    except ValueError:
+        logger.warning("Could not determine original CWD, assuming paths in config are relative to Hydra CWD or absolute.")
+
+    # Resolve vocab path
+    resolved_vocab_path = None
+    if cfg.data.vocab_path:
+        if not os.path.isabs(cfg.data.vocab_path):
+             resolved_vocab_path = os.path.join(original_cwd, cfg.data.vocab_path)
+        else:
+             resolved_vocab_path = cfg.data.vocab_path
+
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        train_dataloader=train_loader,
+        val_dataloader=val_loader,
+        device=device,
+        epochs=cfg.training.epochs,
+        config=cfg, # Pass the *current* config for now
+        callbacks=callbacks, # Pass initially instantiated callbacks
+        use_amp=cfg.training.use_amp,
+        gradient_accumulation_steps=cfg.training.gradient_accumulation_steps,
+        max_grad_norm=cfg.training.max_grad_norm,
+        checkpoint_dir=trainer_checkpoint_dir, 
+        log_interval=cfg.training.log_interval,
+        vocab_path=resolved_vocab_path
+    )
+    logger.info("Trainer initialized successfully.")
+    
+    # --- Load Checkpoint State (if path determined earlier) --- #
     if absolute_checkpoint_path and os.path.exists(absolute_checkpoint_path):
         logger.info(f"Checkpoint found at {absolute_checkpoint_path}. Attempting to load...")
-        trainer.load_checkpoint(absolute_checkpoint_path)
-        # Generate a sample immediately after resuming
-        logger.info("Generating initial sample after loading checkpoint...")
-        trainer._generate_sample_and_log()
+        # Now load the checkpoint using the initialized trainer
+        loaded_config_from_checkpoint = trainer.load_checkpoint(absolute_checkpoint_path)
+        
+        if loaded_config_from_checkpoint:
+            logger.info(f"Trainer state loaded from {absolute_checkpoint_path}")
+            # *** Now update callbacks if needed ***
+            resumed_experiment_id = loaded_config_from_checkpoint.get('experiment_id')
+            if resumed_experiment_id:
+                logger.info(f"Resuming experiment ID: {resumed_experiment_id}. Updating TensorBoard logger.")
+                for cb in trainer.callbacks:
+                    if isinstance(cb, TensorBoardLogger):
+                        # NOTE: Assuming TensorBoardLogger has a method to update its log_dir or logger object
+                        # If not, this might need adjustment based on the callback's implementation.
+                        # For simplicity, let's assume it re-initializes its writer based on config.
+                        # We might need to update the trainer's config reference as well if callbacks rely on it directly.
+                        # A cleaner way might be to re-instantiate callbacks after loading config.
+                        resumed_log_dir = f"outputs/tensorboard/{resumed_experiment_id}"
+                        cb.log_dir = resumed_log_dir # Assuming direct modification is possible/intended
+                        cb._configure_writer() # Assuming a method to reconfigure the writer
+                        logger.info(f"Updated TensorBoard log_dir to: {resumed_log_dir}")
+                        break
+            
+            # Generate a sample immediately after resuming
+            logger.info("Generating initial sample after loading checkpoint...")
+            trainer._generate_sample_and_log()
+        else:
+            logger.error("Failed to load checkpoint state, cannot resume. Starting fresh.")
+            absolute_checkpoint_path = None # Prevent further attempts
+
     elif checkpoint_path_cfg and not absolute_checkpoint_path:
         pass # Already logged warning if 'latest' failed
     elif checkpoint_path_cfg:
         logger.warning(f"Specified checkpoint path {checkpoint_path_cfg} (resolved to {absolute_checkpoint_path}) not found. Starting fresh.")
     else:
-        logger.info("No checkpoint specified or found. Starting fresh training.") 
+        logger.info("No checkpoint specified or found. Starting fresh training.")
 
     # --- Optional: Torch Compile --- #
     if cfg.training.torch_compile:
@@ -261,19 +339,6 @@ def run_training(cfg: DictConfig) -> None:
         total_training_time = end_time - start_time
         logger.info(f"Training finished in {format_time(total_training_time)}.")
         logger.info(f"Final Training Metrics: {training_metrics}")
-
-        # --- Optional: Evaluation --- #
-        if val_loader:
-            log_section_header(logger, "STARTING EVALUATION (Validation Set)")
-            eval_metrics = trainer.evaluate(val_loader)
-            logger.info(f"Final Validation Metrics: {eval_metrics}")
-        else:
-            logger.info("No validation set provided, skipping final evaluation.")
-        
-        # Save final model explicitly? (Optional, trainer might save best/last)
-        # final_model_path = os.path.join(hydra_output_dir, "final_model.pt")
-        # torch.save(model.state_dict(), final_model_path)
-        # logger.info(f"Final model state saved to {final_model_path}")
 
     except Exception as e:
         logger.error("An error occurred during training:", exc_info=True)
@@ -294,13 +359,3 @@ def run_training(cfg: DictConfig) -> None:
 # Main execution guard
 if __name__ == "__main__":
     run_training()
-
-    # Placeholder for the removed main function
-    # main()
-
-    # Placeholder for the removed TrainRunner class
-    # train_runner = TrainRunner(config_path="path_to_config.json")
-    # train_runner.run()
-
-    # Placeholder for the removed main function
-    # main() 

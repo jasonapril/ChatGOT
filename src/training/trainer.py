@@ -25,10 +25,6 @@ from src.data.dataset import CharDataset # Import CharDataset
 from src.training.generation import generate_text # Correct import for generate_text
 import sys
 
-# TODO: Import necessary components like callbacks, specific loss functions, etc.
-# from .callbacks import TrainerCallback # Example
-# from .utils import save_checkpoint, load_checkpoint # Example
-
 
 class Trainer:
     """
@@ -92,13 +88,18 @@ class Trainer:
         self.vocab_path = vocab_path
 
         # Time-based checkpointing (use self.config if available)
-        training_config = self.config 
-        self.time_save_interval_minutes = training_config.get('time_save_interval_minutes', 0)
+        # Access nested training config correctly
+        training_cfg = self.config.get('training', {}) # Get the training sub-config
+        self.time_save_interval_minutes = training_cfg.get('time_save_interval_minutes', 0)
         self.time_save_interval_seconds = self.time_save_interval_minutes * 60 if self.time_save_interval_minutes else 0
-        self.last_time_save = time.time() # Initialize last save time
+        # Read max_steps from the training sub-config
+        self.max_steps = training_cfg.get('max_steps', float('inf'))
         self.logger = logging.getLogger(self.__class__.__name__) # Initialize logger
+        self.last_time_save = time.time() # Initialize last save time
         if self.time_save_interval_seconds > 0:
             self.logger.info(f"Time-based checkpointing enabled every {self.time_save_interval_minutes} minutes.")
+        if self.max_steps != float('inf'):
+            self.logger.info(f"Training will stop after {self.max_steps} global steps.")
 
         self.scaler = GradScaler(enabled=self.use_amp)
         self.current_epoch = 0
@@ -119,16 +120,9 @@ class Trainer:
             else:
                 self.logger.warning(f"Callback {type(callback).__name__} does not have a set_trainer method.")
 
-    # --- Placeholder methods to be implemented ---
-
     def train(self):
         """Main training loop orchestrating epochs and steps."""
         self.logger.info("Starting training...")
-        # TODO: Implement the main training loop (epochs)
-        #       - Call _train_epoch and _evaluate
-        #       - Manage checkpoints
-        #       - Call relevant callback hooks (on_train_begin/end, on_epoch_begin/end)
-        # --- Start Implementation ---
         self._callback_on_train_begin()
         train_start_time = time.time()
 
@@ -139,44 +133,53 @@ class Trainer:
             epoch_start_time = time.time()
             self._callback_on_epoch_begin(epoch)
 
+            # Check if max_steps reached before starting epoch
+            if self.max_steps is not None and self.global_step >= self.max_steps:
+                self.logger.info(f"Reached max_steps ({self.max_steps}). Stopping training.")
+                break
+
             # Train
             train_metrics = self._train_epoch()
             self.metrics['train_loss'].append(train_metrics.get('loss', float('nan')))
 
-            # Evaluate
+            # Evaluate ONLY if max_steps hasn't been reached
             val_metrics = {}
-            if self.val_dataloader is not None:
-                val_metrics = self._evaluate()
-                current_val_loss = val_metrics.get('loss', float('inf'))
-                self.metrics['val_loss'].append(current_val_loss)
+            if self.global_step < self.max_steps:
+                if self.val_dataloader is not None:
+                    val_metrics = self._evaluate()
+                    current_val_loss = val_metrics.get('loss', float('inf'))
+                    self.metrics['val_loss'].append(current_val_loss)
 
-                # Save best model checkpoint
-                # Assuming lower loss is better for self.best_val_metric
-                if current_val_loss < self.best_val_metric:
-                    self.best_val_metric = current_val_loss
-                    best_model_path = os.path.join(self.checkpoint_dir, 'best_model.pt')
-                    self.logger.info(f"New best validation metric: {self.best_val_metric:.4f}. Saving best model...")
-                    self.save_checkpoint(best_model_path, is_best=True)
+                    # Save best model checkpoint
+                    if current_val_loss < self.best_val_metric:
+                        self.best_val_metric = current_val_loss
+                        best_model_path = os.path.join(self.checkpoint_dir, 'best_model.pt')
+                        self.logger.info(f"New best validation metric: {self.best_val_metric:.4f}. Saving best model...")
+                        self.save_checkpoint(best_model_path, is_best=True)
+                else:
+                    # Optionally log that validation is skipped if no dataloader exists
+                    # self.logger.debug("No validation dataloader, skipping evaluation.")
+                    pass
+            else:
+                self.logger.info(f"Skipping evaluation because max_steps ({self.max_steps}) was reached during training epoch.")
 
-            # Periodic checkpoint saving (example: save every epoch)
-            # TODO: Make save interval configurable
+            # Periodic checkpoint saving
             save_interval = self.config.get('save_interval', 1)
             if save_interval > 0 and (epoch + 1) % save_interval == 0:
                  checkpoint_path = os.path.join(self.checkpoint_dir, f'checkpoint_epoch_{epoch+1}.pt')
                  self.logger.info(f"Saving periodic checkpoint for epoch {epoch+1}...")
                  self.save_checkpoint(checkpoint_path)
 
-            # Time-based checkpoint saving (checked once per epoch after completion)
+            # Time-based checkpoint saving
             current_time = time.time()
             if self.time_save_interval_seconds > 0 and (current_time - self.last_time_save) > self.time_save_interval_seconds:
-                timed_checkpoint_path = os.path.join(self.checkpoint_dir, f'checkpoint_step_{self.global_step}.pt') # Use global_step for uniqueness
+                timed_checkpoint_path = os.path.join(self.checkpoint_dir, f'checkpoint_step_{self.global_step}.pt')
                 self.logger.info(f"Saving timed checkpoint after {(current_time - self.last_time_save)/60:.1f} minutes (End of Epoch {epoch+1}, Global Step: {self.global_step})...")
                 self.save_checkpoint(timed_checkpoint_path)
-                self.last_time_save = current_time # Reset timer after saving
-                # Generate sample after saving timed checkpoint
+                self.last_time_save = current_time
                 self._generate_sample_and_log()
 
-            # Log epoch summary (use metrics returned)
+            # Log epoch summary
             epoch_time = time.time() - epoch_start_time
             log_msg = f"Epoch {epoch + 1}/{self.epochs} finished in {epoch_time:.2f}s | "
             log_msg += f"Train Loss: {train_metrics.get('loss', 'N/A'):.4f}"
@@ -188,13 +191,15 @@ class Trainer:
             epoch_logs = {**train_metrics, **{f"val_{k}": v for k, v in val_metrics.items()}}
             self._callback_on_epoch_end(epoch, logs=epoch_logs)
 
+            self.logger.debug(f"End of epoch {epoch+1} loop iteration. Global step: {self.global_step}, Max steps: {self.max_steps}")
+
+            # No need for the second max_steps check here, it's handled inside _train_epoch
+
         total_train_time = time.time() - train_start_time
         self.logger.info(f"Training finished in {total_train_time:.2f}s. Best Val Metric: {self.best_val_metric:.4f}")
         self._callback_on_train_end()
 
         return self.metrics
-        # --- End Implementation ---
-        #pass
 
     def _train_epoch(self) -> Dict[str, float]:
         """Trains the model for one epoch."""
@@ -228,7 +233,7 @@ class Trainer:
             enumerate(self.train_dataloader), 
             total=total_batches, 
             desc=f"Epoch {self.current_epoch + 1}",
-            leave=False
+            leave=True
         )
         for i, batch in progress_bar:
             # Skip batches if resuming mid-epoch
@@ -298,13 +303,17 @@ class Trainer:
                     # Zero gradients *after* stepping
                     self.optimizer.zero_grad(set_to_none=True)
 
-                    # Step the scheduler (if one exists) - Assuming step-based scheduler
+                    # Step the scheduler
                     if self.scheduler is not None:
-                         # Check scheduler type? OneCycleLR steps per batch/step
-                         # Linear warmup typically steps per step
                         self.scheduler.step()
 
                     self.global_step += 1
+
+                    # CORRECT PLACEMENT for max_steps check within epoch loop
+                    self.logger.debug(f"Checking max_steps: global_step={self.global_step}, max_steps={self.max_steps}")
+                    if self.max_steps is not None and self.global_step >= self.max_steps:
+                        self.logger.info(f"Reached max_steps ({self.max_steps}). Ending epoch early.")
+                        break # Exit the inner batch loop
 
                     # Check time every step
                     current_time = time.time()
@@ -328,7 +337,7 @@ class Trainer:
                         
                         # Use tqdm.write for console AND logger.info for file log
                         progress_bar.write(log_msg) 
-                        self.logger.info(log_msg) # Log to file handler as well
+                        self.logger.info(log_msg) # Uncommented to ensure logs go to file handler
                         
                         # Re-add progress bar update
                         progress_bar.set_postfix(step_logs) 
@@ -367,7 +376,6 @@ class Trainer:
         self.logger.info(f"Epoch {self.current_epoch + 1} finished in {epoch_time:.2f}s. Avg Loss: {avg_epoch_loss:.4f}, Tokens/sec: {tokens_per_sec:.2f}")
 
         return {'loss': avg_epoch_loss, 'tokens_per_sec': tokens_per_sec}
-        # --- End Implementation ---
 
     def _evaluate(self) -> Dict[str, float]:
         """Evaluates the model on the validation set."""
@@ -375,7 +383,6 @@ class Trainer:
             self.logger.info("No validation dataloader provided, skipping evaluation.")
             return {}
         self.logger.info("Starting evaluation...")
-        # --- Start Implementation ---
         self.model.eval()
         total_loss = 0.0
         total_batches = len(self.val_dataloader)
@@ -413,23 +420,35 @@ class Trainer:
         # TODO: Add evaluate_end callback hook if needed
 
         return {'loss': avg_loss, 'tokens_per_sec': tokens_per_sec}
-        # --- End Implementation ---
 
     def save_checkpoint(self, path: str, is_best: bool = False):
         """Saves a checkpoint of the model and training state."""
-        # TODO: Implement checkpoint saving logic
-        #       - Gather model state, optimizer state, scheduler state, epoch, step, etc.
-        # --- Start Implementation ---
         # Ensure directory exists
         os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        # Ensure config is serializable (convert OmegaConf if needed)
+        serializable_config = self.config
+        try:
+            # Attempt to resolve OmegaConf to primitive types if it's OmegaConf
+            # Check if it's DictConfig rather than dict
+            from omegaconf import DictConfig, OmegaConf
+            if isinstance(self.config, DictConfig):
+                serializable_config = OmegaConf.to_container(self.config, resolve=True)
+        except ImportError:
+            # If OmegaConf not installed or fails, proceed with original (might raise error later)
+            pass
+        except Exception as e:
+            self.logger.warning(f"Could not serialize OmegaConf config for checkpoint: {e}")
+            # Fallback or store None?
+            serializable_config = None # Avoid saving potentially problematic object
 
         checkpoint = {
             'epoch': self.current_epoch,
             'global_step': self.global_step,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'best_val_metric': self.best_val_metric, # Use best_val_metric
-            'config': self.config # Optionally save config
+            'best_val_metric': self.best_val_metric,
+            'config': serializable_config # Save the potentially converted config
         }
         if self.scheduler is not None:
             checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
@@ -454,26 +473,24 @@ class Trainer:
 
         except Exception as e:
             self.logger.error(f"Failed to save checkpoint to {path}: {e}", exc_info=True)
-        # --- End Implementation ---
-        #pass
 
-    def load_checkpoint(self, path: str):
-        """Loads the trainer state from a checkpoint file."""
-        # print(f"--- DEBUG: Trainer.load_checkpoint called with path: {path} (stderr)", file=sys.stderr, flush=True)
+    def load_checkpoint(self, path: str) -> Optional[Dict[str, Any]]:
+        """Loads the trainer state from a checkpoint file.
+
+        Returns:
+            The loaded config dictionary from the checkpoint, or None if loading failed.
+        """
         if not os.path.exists(path):
             self.logger.error(f"Checkpoint file not found: {path}")
-            # print(f"--- DEBUG: Checkpoint file not found: {path} (stderr)", file=sys.stderr, flush=True)
-            return
+            return None
 
+        loaded_config = None
         try:
-            # print("--- DEBUG: Attempting torch.load... (stderr)", file=sys.stderr, flush=True)
             # Load checkpoint onto the correct device directly
-            checkpoint = torch.load(path, map_location=self.device) 
-            # print("--- DEBUG: torch.load successful. (stderr)", file=sys.stderr, flush=True)
+            checkpoint = torch.load(path, map_location=self.device)
 
             # Load model state
             if 'model_state_dict' in checkpoint:
-                # print("--- DEBUG: Loading model_state_dict... (stderr)", file=sys.stderr, flush=True)
                 # Handle potential DataParallel/DDP wrapping
                 state_dict = checkpoint['model_state_dict']
                 # Simple check for keys starting with 'module.'
@@ -484,37 +501,26 @@ class Trainer:
                     self.model.load_state_dict(new_state_dict)
                 else:
                     self.model.load_state_dict(state_dict)
-                # print("--- DEBUG: Model state loaded. (stderr)", file=sys.stderr, flush=True)
             else:
                 self.logger.warning("Checkpoint does not contain 'model_state_dict'.")
-                # print("--- DEBUG: No model_state_dict found in checkpoint. (stderr)", file=sys.stderr, flush=True)
 
             # Load optimizer state
             if 'optimizer_state_dict' in checkpoint:
-                 # print("--- DEBUG: Loading optimizer_state_dict... (stderr)", file=sys.stderr, flush=True)
                  self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                 # print("--- DEBUG: Optimizer state loaded. (stderr)", file=sys.stderr, flush=True)
             else:
                 self.logger.warning("Checkpoint does not contain 'optimizer_state_dict'. Optimizer state not loaded.")
-                # print("--- DEBUG: No optimizer_state_dict found. (stderr)", file=sys.stderr, flush=True)
 
             # Load scheduler state
             if self.scheduler and 'scheduler_state_dict' in checkpoint:
-                # print("--- DEBUG: Loading scheduler_state_dict... (stderr)", file=sys.stderr, flush=True)
                 self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-                # print("--- DEBUG: Scheduler state loaded. (stderr)", file=sys.stderr, flush=True)
             elif self.scheduler:
                 self.logger.warning("Checkpoint does not contain 'scheduler_state_dict'. Scheduler state not loaded.")
-                # print("--- DEBUG: No scheduler_state_dict found. (stderr)", file=sys.stderr, flush=True)
 
             # Load scaler state for AMP
             if self.use_amp and 'scaler_state_dict' in checkpoint:
-                # print("--- DEBUG: Loading scaler_state_dict... (stderr)", file=sys.stderr, flush=True)
                 self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
-                # print("--- DEBUG: Scaler state loaded. (stderr)", file=sys.stderr, flush=True)
             elif self.use_amp:
                 self.logger.warning("Checkpoint does not contain 'scaler_state_dict'. AMP scaler state not loaded.")
-                # print("--- DEBUG: No scaler_state_dict found. (stderr)", file=sys.stderr, flush=True)
 
             # Load training state (epoch, step, etc.)
             self.current_epoch = checkpoint.get('epoch', 0) # Default to 0 if not found
@@ -522,23 +528,22 @@ class Trainer:
             self.loaded_global_step = self.global_step # Store the step we are resuming *from*
             self.best_val_metric = checkpoint.get('best_val_metric', float('inf'))
             self.metrics = checkpoint.get('metrics', {'train_loss': [], 'val_loss': []})
-            # print(f"--- DEBUG: Loaded epoch={self.current_epoch}, global_step={self.global_step} (stderr)", file=sys.stderr, flush=True)
+            # *** Store loaded config ***
+            loaded_config = checkpoint.get('config')
 
             self.logger.info(f"Successfully loaded checkpoint from {path} at epoch {self.current_epoch}, step {self.global_step}")
-            # print("--- DEBUG: Trainer.load_checkpoint finished successfully. (stderr)", file=sys.stderr, flush=True)
+            return loaded_config # Return the loaded config
 
         except FileNotFoundError:
             self.logger.error(f"Checkpoint file not found during load attempt: {path}")
-            # print(f"--- DEBUG: FileNotFoundError during torch.load: {path} (stderr)", file=sys.stderr, flush=True)
-            # Optionally re-raise or handle differently
+            return None
         except Exception as e:
             self.logger.error(f"Failed to load checkpoint from {path}: {e}", exc_info=True)
-            # print(f"--- DEBUG: Exception during checkpoint loading: {e} (stderr)", file=sys.stderr, flush=True)
+            return None
             # Optionally re-raise or exit, depending on desired behavior
-            # raise e 
+            # raise e
 
     # --- Callback Hook Methods --- (Similar to base.py)
-    # TODO: Implement calls to these hooks within train, _train_epoch, _evaluate
 
     def _callback_on_train_begin(self, logs=None):
         logs = logs or {}

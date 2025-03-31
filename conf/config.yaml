@@ -24,7 +24,7 @@ defaults:
 #   # data_root: /path/to/datasets 
 
 # General settings
-project_name: "ChatGoT"
+project_name: "Craft"
 experiment_name: "default_experiment" # Add experiment name field
 
 # Add other top-level or default settings as needed 
@@ -49,7 +49,7 @@ hydra:
   output_subdir: .hydra
   run:
     # Use original CWD as the base for relative paths in config
-    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: outputs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
   job:
     chdir: True # Change CWD to the output directory for the run
   # Explicitly configure job logging to ensure console output

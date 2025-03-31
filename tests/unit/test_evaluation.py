@@ -4,10 +4,12 @@ import sys
 import torch
 import torch.nn as nn
 from unittest.mock import patch, MagicMock
+from omegaconf import OmegaConf
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from src.utils.logging import force_flush_logs, format_time
 from src.training.evaluation import (
     evaluate,
     evaluate_with_metrics,
@@ -52,6 +54,8 @@ class TestEvaluation(unittest.TestCase):
         
         # Set device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Ensure model is moved to the correct device
+        self.model.to(self.device)
     
     @patch('time.time')
     @patch('logging.info')
@@ -78,8 +82,8 @@ class TestEvaluation(unittest.TestCase):
     @patch('logging.info')
     def test_evaluate_with_log_interval(self, mock_logging, mock_time):
         """Test evaluation with logging interval."""
-        # Mock time.time to return sequential times
-        mock_time.side_effect = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        # Mock time.time to return sequential times - Provide enough values
+        mock_time.side_effect = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
         
         # Run evaluation with log interval
         avg_loss = evaluate(

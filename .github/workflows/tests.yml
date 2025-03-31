@@ -1,4 +1,4 @@
-name: ChatGoT Tests
+name: Craft Tests
 
 on:
   push:
@@ -39,7 +39,7 @@ jobs:
     
     - name: Generate test coverage report
       run: |
-        pytest --cov=chatgot tests/
+        pytest --cov=craft tests/
         
   validate:
     runs-on: ubuntu-latest

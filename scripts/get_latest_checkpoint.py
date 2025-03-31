@@ -13,6 +13,7 @@ import argparse
 import glob
 import re
 from datetime import datetime
+import sys # Import sys for stderr printing
 
 OUTPUTS_DIR = "outputs" # Base directory for Hydra runs
 METADATA_FILE = "experiment_info.json"
@@ -24,18 +25,19 @@ def parse_args():
     parser.add_argument("--model-architecture", type=str, help="Filter runs by model architecture.")
     parser.add_argument("--dataset-target", type=str, help="Filter runs by dataset target class.")
     parser.add_argument("--experiment-name", type=str, help="Filter runs by experiment name.")
+    parser.add_argument("--base-dir", type=str, default="outputs/hydra", help="Base directory containing Hydra runs.")
     # Add more filter arguments as needed (e.g., --experiment-name)
     return parser.parse_args()
 
-def find_latest_run_dir(filter_args):
-    latest_run_dir = None
-    latest_run_time = datetime.min
+def find_matching_run_dirs_sorted(filter_args):
+    """Finds all run directories matching filter criteria, sorted newest first."""
+    matching_runs = [] # Store tuples of (datetime, path)
+    base_search_dir = filter_args.base_dir
 
-    if not os.path.isdir(OUTPUTS_DIR):
-        # print(f"Outputs directory not found: {OUTPUTS_DIR}", file=sys.stderr)
-        return None
+    if not os.path.isdir(base_search_dir):
+        return []
 
-    date_dirs = sorted(glob.glob(os.path.join(OUTPUTS_DIR, "*-*-*")), reverse=True)
+    date_dirs = sorted(glob.glob(os.path.join(base_search_dir, "*-*-*")), reverse=True)
 
     for date_dir in date_dirs:
         if not os.path.isdir(date_dir):
@@ -48,21 +50,21 @@ def find_latest_run_dir(filter_args):
                 continue
             
             try:
-                run_time = datetime.strptime(os.path.basename(run_dir), "%H-%M-%S")
-                # Combine date and time - simplistic, assumes dir structure YYYY-MM-DD/HH-MM-SS
-                run_datetime = datetime.combine(datetime.strptime(os.path.basename(date_dir), "%Y-%m-%d").date(), run_time.time())
+                run_time_str = os.path.basename(run_dir)
+                date_str = os.path.basename(date_dir)
+                run_datetime = datetime.strptime(f"{date_str} {run_time_str}", "%Y-%m-%d %H-%M-%S")
             except ValueError:
-                continue # Skip directories with unexpected names
+                continue 
 
             metadata_path = os.path.join(run_dir, METADATA_FILE)
             if not os.path.exists(metadata_path):
-                continue # Skip runs without metadata
+                continue 
 
             try:
                 with open(metadata_path, 'r') as f:
                     metadata = json.load(f)
-            except Exception:
-                continue # Skip runs with invalid metadata
+            except Exception as e:
+                continue 
 
             # Apply filters
             match = True
@@ -72,51 +74,62 @@ def find_latest_run_dir(filter_args):
                 match = False
             if filter_args.dataset_target and metadata.get("dataset_target") != filter_args.dataset_target:
                 match = False
-            # Add more filter checks here
             
             if match:
-                # Found the latest matching run so far
-                return run_dir 
-                # # If we wanted the absolute latest, we'd compare run_datetime
-                # if run_datetime > latest_run_time:
-                #     latest_run_time = run_datetime
-                #     latest_run_dir = run_dir
+                matching_runs.append((run_datetime, run_dir))
                 
-    return None # No matching run found
+    # Sort by datetime descending (newest first)
+    matching_runs.sort(key=lambda item: item[0], reverse=True)
+    
+    # Return only the paths, sorted newest first
+    sorted_run_dirs = [run_path for dt, run_path in matching_runs]
+    return sorted_run_dirs
 
-def find_latest_checkpoint(run_dir):
+def find_latest_checkpoint_in_dir(run_dir):
+    """Finds the checkpoint with the highest step number in a specific run directory."""
     checkpoint_dir = os.path.join(run_dir, CHECKPOINT_DIR_NAME)
     if not os.path.isdir(checkpoint_dir):
-        return None
+        return None, -1 # Return path and step number
 
     checkpoints = glob.glob(os.path.join(checkpoint_dir, CHECKPOINT_PATTERN))
-    latest_checkpoint = None
+    latest_checkpoint_path = None
     max_step = -1
 
     step_regex = re.compile(r"checkpoint_step_(\d+)\.pt")
 
-    for ckpt in checkpoints:
-        match = step_regex.search(os.path.basename(ckpt))
+    for ckpt_path in checkpoints:
+        match = step_regex.search(os.path.basename(ckpt_path))
         if match:
             step = int(match.group(1))
             if step > max_step:
                 max_step = step
-                latest_checkpoint = ckpt
+                latest_checkpoint_path = ckpt_path
 
-    return latest_checkpoint
+    return latest_checkpoint_path, max_step
 
 if __name__ == "__main__":
     args = parse_args()
-    latest_run_dir = find_latest_run_dir(args)
+    
+    # Find all matching runs, sorted newest first
+    matching_run_dirs = find_matching_run_dirs_sorted(args)
 
-    if latest_run_dir:
-        latest_checkpoint_path = find_latest_checkpoint(latest_run_dir)
-        if latest_checkpoint_path:
-            # Print the relative path from the assumed execution directory (project root)
-            print(os.path.relpath(latest_checkpoint_path))
+    overall_best_checkpoint_path = None
+    overall_max_step = -1
+
+    if matching_run_dirs:
+        # Iterate through matching runs to find the overall best checkpoint
+        for run_dir in matching_run_dirs:
+            latest_checkpoint_path, max_step = find_latest_checkpoint_in_dir(run_dir)
+            
+            if latest_checkpoint_path and max_step > overall_max_step:
+                overall_max_step = max_step
+                overall_best_checkpoint_path = latest_checkpoint_path
+
+        # After checking all matching runs, print the overall best
+        if overall_best_checkpoint_path:
+            abs_path = os.path.abspath(overall_best_checkpoint_path)
+            print(abs_path) # Print path to stdout for the calling script
         else:
-            # print(f"No checkpoints found in latest matching run: {latest_run_dir}", file=sys.stderr)
             pass # Exit silently if no checkpoint found
     else:
-        # print("No matching run directory found.", file=sys.stderr)
         pass # Exit silently if no run found 

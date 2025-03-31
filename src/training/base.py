@@ -409,8 +409,9 @@ class LanguageModelTrainer(Trainer):
         self.optimizer.zero_grad(set_to_none=True)
         
         for i, batch in progress_bar:
-            # Get batch
-            inputs, targets = batch
+            # Get batch tensors from the dictionary using keys
+            inputs = batch['input_ids']
+            targets = batch['labels']
             # Pass step number (global_step) to callback
             step_logs = {}
             self._callback_on_step_begin(self.global_step, logs=step_logs)

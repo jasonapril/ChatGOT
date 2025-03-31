@@ -6,6 +6,14 @@ This file serves as the working memory for all active tasks in the project. It's
 
 ## Active Tasks
 
+- **Test End-to-End Workflow**: 🟡 ⏳ Run minimal training test to verify core loop, logging, config after refactors.
+  - *Script*: `python -m src.training.train_runner training=minimal_test`
+  - *Status*: Ready to run
+
+- **Implement Consistent TensorBoard Logging**: 🟡 ⏸️ Modify configuration and potentially training script to ensure TensorBoard logs from resumed runs append to the original experiment log directory, identified by a unique `experiment_id`.
+  - *Depends on*: [Fix and Utilize TensorBoard Logging](#fix-and-utilize-tensorboard-logging-tensorboardlogger) (tests passing)
+  - *Context*: Needed to correctly visualize loss curves across interrupted training sessions. (Paused pending basic workflow test)
+
 - **Testing Strategy:** 🟡 ⏳ Throughout the refactoring process, ensure comprehensive test coverage is maintained and improved. This includes unit tests for individual components, integration tests for interactions between components, and end-to-end (feature) tests for verifying complete workflows (e.g., training, generation). Add specific testing sub-tasks to relevant refactoring items.
 
 - #### Experiment: Train Larger Model with Longer Context (Character-Level)
@@ -16,22 +24,15 @@ This file serves as the working memory for all active tasks in the project. It's
     - Context Length: 256 (`block_size=256`)
     - Tokenization: Character-level
     - Training: 5 epochs, `batch_size=64`, `gradient_accumulation_steps=1`
-  - **Status**: ⏸️ Paused (Ready to resume from latest checkpoint)
-  - **Latest Checkpoint**: `outputs/2025-03-29/19-28-11/checkpoints/checkpoint_step_8570.pt`
+  - **Status**: 🟡 Starting Fresh (Resume path invalid/starting new run)
+  - **Latest Checkpoint**: outputs/2025-03-29/19-28-11/checkpoints/checkpoint_step_8570.pt # Old path
   - **Context**: Reverted block_size from 1024 to 256 due to performance issues. This run uses batch_size 64 to evaluate performance against previous baselines after code refactoring.
   - **Metrics**: Track Tokens/sec, loss curves (step & epoch), qualitative generation results.
 
 ### 🔴 High Priority
 
-*These tasks represent major foundational refactoring.* 
+*These tasks represent major foundational refactoring.*
 
-- [✅] **Complete Model Architecture Refactoring** (Est. Effort: High) - Standardize model interfaces, config handling (Pydantic), factory, registration.
-    - [x] Define model abstraction hierarchy (`Model` -> `GenerativeModel` -> `LanguageModel`).
-    - [x] Refactor existing models (`Transformer`, `GPTDecoder`) to fit the new structure.
-    - [x] Integrate `generate` method into `GenerativeModel`.
-    - [x] Update model loading/saving to use `state_dict` and config.
-    - [x] Ensure consistent naming and structure in `src/models/`.
-    - [x] Add unit tests for base classes, factory, and `TransformerModel` (including `generate`).
 - [ ] **Standardize Data Pipeline** (Est. Effort: High) - Create unified Dataset/DataLoader logic.
     - [x] Define base class `BaseDataset` (`src/data/base.py`).
     - [x] Refactor `CharDataset` to inherit from `BaseDataset` and use config (`src/data/dataset.py`).
@@ -52,7 +53,6 @@ This file serves as the working memory for all active tasks in the project. It's
     - ⏳ Improve Configuration Validation (Pydantic/JSONSchema) (`src/config/config_manager.py`)
       - *Prerequisite for: Refactor Dataset Loading*
       - 🔍 Identified during code review 2025-03-28
-    - ⏳ Fix Config Defaults (Paths in `conf/*.yaml`) ✅
 
 - #### Refactor Core Training Logic
   - **Sub-tasks**:
@@ -64,7 +64,6 @@ This file serves as the working memory for all active tasks in the project. It's
     - ⏳ Deprecate/Remove Old Training Scripts (`train_runner.py`, `training_loop.py`, etc.)
       - *Depends on: Integrate Optimizations*
       - 🔍 Identified during code review 2025-03-28
-    - ⏳ Integrate Proven Training Logic (`scripts/train_with_samples.py` -> `Trainer`) ✅
 
 - #### Refactor Specific Components
   - **Sub-tasks**:
@@ -79,9 +78,10 @@ This file serves as the working memory for all active tasks in the project. It's
 
 - #### Improve Testing & CI
   - **Sub-tasks**:
-    - ⏳ Implement Tests for Remaining Callbacks (`SampleGenerationCallback`, `TensorBoardLogger`)
-      - **Status**: ⏸️ Paused (See details below)
-      - 🔍 Identified as missing during review 2025-03-29
+    - ⏳ **Fix and Utilize TensorBoard Logging** (`TensorBoardLogger`)
+      - **Status**: 🟡 Active (Debugging test failures - Paused pending basic workflow test)
+      - 🔍 Previously identified as missing tests during review 2025-03-29
+    - ⏳ Implement Tests for `SampleGenerationCallback`
     - ⏳ Refactor Test Structure and Runner (`tests/run_all_tests.py`, directory org)
       - 🔍 Identified during code review 2025-03-28
     - ⏳ Fix Test Import Handling (Remove `try-except-mock`)
@@ -97,50 +97,24 @@ This file serves as the working memory for all active tasks in the project. It's
 
 - #### Documentation & Dependencies
   - **Sub-tasks**:
-    - ⏳ Update Architecture Documentation ✅
     - ⏳ Investigate Model "Memory Architecture" (`docs/model.md` investigation)
       - 🔍 Identified during code review 2025-03-28
     - ⏳ Update Data Pipeline Documentation (`docs/data_pipeline.md`)
       - 🔍 Identified during code review 2025-03-28
-    - ⏳ Correct Config Import in README ✅
     - ⏳ Update Model Documentation (Parameter Count Difference) (`docs/model.md` update)
       - 🔍 Identified during code review 2025-03-28
     - ⏳ Verify `transformers` Dependency (Scheduler Usage)
       - 🔍 Identified during code review 2025-03-28
 
-- ### 🟡 Implement Tests for Remaining Callbacks (Details)
-  - **Status**: ⏸️ Paused
-  - **Description**: Ensure comprehensive test coverage for all trainer callbacks (`SampleGenerationCallback`, `TensorBoardLogger`).
-  - **Context**: 
-    - Initially added `TestTensorBoardLogger`.
-    - Encountered persistent `TypeError` issues with `@patch` and method signatures, particularly for `TestSampleGenerationCallback`.
-    - Current blockers: 
-      - `TestSampleGenerationCallback`: `TypeError: setUp() missing 1 required positional argument: 'mock_logging'` despite code appearing correct.
-      - `TestTensorBoardLogger`: AssertionErrors related to mock calls not being detected.
-    - Paused due to persistent test execution errors blocking progress.
-
-## Refactoring
-
-- [x] Refactor vocabulary handling:
-    - [x] Create `preprocess.py` script to calculate and save vocab/mappings from raw data.
-    - [x] Update `CharDataset` to load precomputed vocab instead of calculating it.
-    - [x] Update model config (`conf/model/transformer.yaml`) with the static vocab size.
-    - [x] Update data config (`conf/data/char.yaml`) and `DataManager` if needed to pass vocab path.
-    - [x] Remove dynamic vocab update logic from `train_runner.py` and `generate_text.py`.
-
 ## Upcoming Tasks
+
+- ### 🟡 Review Legacy Code
+  - **Goal**: Review `src/` and `scripts/` directories to identify and remove or archive deprecated/legacy code (e.g., potentially unused utilities) after confirming functionality of refactored components (like `src/cli/run.py`).
+  - **Status**: ⏳ To Do
 
 - ### 🟠 Refactor Data Pipeline for Tokenizer Flexibility
   - **Goal**: Modify the data pipeline to support different tokenizers (character, subword, etc.) configured via Hydra, following the strategy outlined in `src/data/base.py`.
-  - **Steps**:
-    1. Define/Re-introduce standalone `Tokenizer` classes (e.g., `CharacterTokenizer`) in `src/data/tokenizer.py`.
-    2. Define corresponding Hydra configs (e.g., `conf/tokenizer/char.yaml`).
-    3. Update `conf/config.yaml` to include `tokenizer` defaults/placeholders.
-    4. Modify `Dataset` classes (e.g., `CharDataset`) to return raw text instead of tokenizing internally.
-    5. Implement custom `collate_fn` functions (e.g., `character_collate_fn` in `src/data/collation.py`) that use the instantiated tokenizer.
-    6. Modify `prepare_dataloaders_from_config` to accept the tokenizer, determine the correct `collate_fn`, and pass it to `DataLoader`.
-    7. Modify `train_runner.py` to instantiate the `tokenizer` via Hydra and pass it to `prepare_dataloaders_from_config` and `Trainer`.
-    8. Modify `Trainer` to accept and use the `tokenizer` object for sampling, removing `vocab_path`.
+  - **Steps**: (See original task for detailed steps)
   - **Status**: ⏳ To Do (Postponed from previous attempt)
 
 - ### 🟡 Review `benchmarking\\benchmarks` vs `outputs\\benchmarks`
@@ -161,9 +135,25 @@ This file serves as the working memory for all active tasks in the project. It's
 
 ## Completed Tasks (Recent)
 
+- [✅] **Complete Model Architecture Refactoring** (Est. Effort: High) ✅ 2025-03-30 (Assumed completed based on sub-tasks)
 - ### 🟡 Implement Basic Unit Tests ✅ 2025-03-28
 - ### 🟡 Implement Folder Structure ✅ 2025-03-28
 - ### 🔴 Update Architecture Documentation ✅ 2025-03-28
 - ### 🟡 Fix Config Defaults ✅ 2025-03-28
 - ### 🔴 Integrate Proven Training Logic ✅ 2025-03-28
 - ### 🟡 Complete Config Refactor (`configs` -> `conf`) ✅ 2025-03-28
+
+### Data Processing Enhancements
+
+-   **Task:** Implement Standard Tokenization in `src/data/processors.py`.
+    -   **Status:** ✅ Done (2024-03-31)
+    -   **Description:** Modify `prepare_text_data` (or add new logic) to load and use standard tokenizers (e.g., Hugging Face `transformers`/`tokenizers` like 'gpt2') based on configuration, saving token IDs instead of raw text. Save necessary tokenizer info (vocab size, special tokens).
+    -   **Priority:** High
+-   **Task:** Integrate Data Splitting in `src/data/processors.py`.
+    -   **Status:** ✅ Done (2024-03-31)
+    -   **Description:** Modify the data preparation logic (e.g., in `prepare_text_data`) to call the existing `split_data` function after loading/tokenizing, saving separate processed files for train, validation, and potentially test splits. Ensure configuration allows specifying split ratios.
+    -   **Priority:** High
+-   **Task:** Add Unit Tests for Tokenization and Splitting.
+    -   **Status:** ✅ Done (2024-03-31)
+    -   **Description:** Update `tests/unit/test_data_processors.py` to add tests covering the new standard tokenization logic (handling different tokenizers) and the integrated data splitting functionality.
+    -   **Priority:** High
