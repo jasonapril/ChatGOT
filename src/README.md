@@ -1,12 +1,15 @@
 # Source Code (`src/`)
 
-This directory contains the core Python source code for the Craft project.
+This directory contains the core Python source code for the project.
 
-## Key Subdirectories:
+## Structure
 
-*   `cli/`: Command-line interface entry points (e.g., `run.py` using Typer/Hydra).
-*   `data/`: Modules related to dataset loading, processing, and management (e.g., `CharDataset`, data builders).
-*   `models/`: Model definitions (e.g., `base.py`, `gpt_decoder.py`, `factory.py`).
-*   `performance/`: Code related to performance monitoring, instrumentation, and potentially visualization during runs (e.g., `throughput_core.py`).
-*   `training/`: Core logic for the training loop, optimizers, schedulers, callbacks, and generation algorithms (e.g., `trainer.py`, `optimizations.py`, `generation.py`).
-*   `utils/`: General utility functions supporting various parts of the codebase (e.g., logging, I/O, checkpoints, metrics). 
+*   `cli/`: Command-line interface entry points (using Typer/Click).
+*   `config/`: Configuration loading and management (using OmegaConf/Hydra helpers).
+*   `data/`: Modules related to dataset loading, processing, and management (e.g., `PickledDataset`, `base.py`, `processors.py`).
+*   `models/`: Model definitions (e.g., `TransformerModel`) and related utilities.
+*   `training/`: Training loop logic (`Trainer`), callbacks, and related utilities.
+*   `utils/`: General utility functions (logging, I/O, etc.).
+*   `__init__.py`: Package initializer.
+
+Consult `README.md` files within subdirectories for more details. 

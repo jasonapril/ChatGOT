@@ -126,9 +126,36 @@ def run_training(cfg: DictConfig) -> None:
         logger.error("Training dataloader could not be created. Exiting.")
         sys.exit(1)
 
+    # --- Determine vocab_size from training dataset --- #
+    vocab_size = None
+    if hasattr(train_loader.dataset, 'vocab_size'):
+        vocab_size = getattr(train_loader.dataset, 'vocab_size')
+        if isinstance(vocab_size, int):
+            logger.info(f"Determined vocab_size from dataset: {vocab_size}")
+        else:
+            logger.warning(f"Dataset has 'vocab_size' but it's not an int ({type(vocab_size)}). Cannot set automatically.")
+            vocab_size = None
+    else:
+        logger.warning("Training dataset does not have 'vocab_size' attribute. Cannot set automatically.")
+    
+    if vocab_size is None:
+        logger.error("Failed to determine vocab_size. Check dataset implementation and config.")
+        sys.exit(1)
+
     # --- Build Model --- #
     log_section_header(logger, "BUILDING MODEL")
-    model = create_model_from_config(cfg.model)
+    # Inject vocab_size into model config before instantiation
+    try:
+        OmegaConf.set_struct(cfg.model.config, False) # Allow adding vocab_size
+        cfg.model.config.vocab_size = vocab_size
+        OmegaConf.set_struct(cfg.model.config, True)
+        logger.info(f"Injected vocab_size={vocab_size} into model config.")
+    except Exception as e:
+        logger.error(f"Failed to inject vocab_size into cfg.model.config: {e}")
+        sys.exit(1)
+
+    logger.info(f"Instantiating model using hydra: {cfg.model._target_}")
+    model = hydra.utils.instantiate(cfg.model)
     logger.info(f"Model created: {type(model).__name__}")
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -260,11 +287,11 @@ def run_training(cfg: DictConfig) -> None:
 
     # Resolve vocab path
     resolved_vocab_path = None
-    if cfg.data.vocab_path:
-        if not os.path.isabs(cfg.data.vocab_path):
-             resolved_vocab_path = os.path.join(original_cwd, cfg.data.vocab_path)
-        else:
-             resolved_vocab_path = cfg.data.vocab_path
+    # if cfg.data.vocab_path:
+    #     if not os.path.isabs(cfg.data.vocab_path):
+    #          resolved_vocab_path = os.path.join(original_cwd, cfg.data.vocab_path)
+    #     else:
+    #          resolved_vocab_path = cfg.data.vocab_path
 
     trainer = Trainer(
         model=model,

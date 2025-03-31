@@ -6,9 +6,9 @@ defaults:
   # Specify configuration groups to compose.
   # The order matters; later entries override earlier ones.
   - experiment: null      # Expect override from command line or specific config
-  - model: transformer
+  - model: transformer_model
   - training: default
-  - data: got_char
+  - data: got_char_level
   - optimizer: adamw
   - scheduler: cosine # Revert to match available file
   - callbacks: default    # Default callbacks configuration

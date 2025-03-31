@@ -12,15 +12,20 @@ import sys
 from unittest.mock import patch, MagicMock
 # Import Hydra exception for checking
 from hydra.errors import InstantiationException
+import logging
 
 # Modules to test
 from src.data.base import BaseDataset, create_dataset_from_config
-from src.data.dataset import CharDataset
+from src.data.dataset import PickledDataset
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-class TestCharDataset(unittest.TestCase):
-    """Tests for the CharDataset class."""
+# Configure logging for tests (optional)
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+class TestPickledDataset(unittest.TestCase):
+    """Tests for the PickledDataset class."""
 
     def setUp(self):
         """Create temporary text and vocab files for testing."""
@@ -61,7 +66,7 @@ class TestCharDataset(unittest.TestCase):
     def test_initialization(self):
         """Test initialization building vocab from file (implicit)."""
         # Provide the consistent vocab_path, CharDataset should load it
-        dataset = CharDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path=self.temp_vocab_path)
+        dataset = PickledDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path=self.temp_vocab_path)
         self.assertIsInstance(dataset, BaseDataset)
         # Assert vocab was loaded correctly
         self.assertEqual(dataset.vocab_size, len(set(self.test_text)))
@@ -73,13 +78,13 @@ class TestCharDataset(unittest.TestCase):
 
     def test_len(self):
         """Test the __len__ method."""
-        dataset = CharDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path=self.temp_vocab_path)
+        dataset = PickledDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path=self.temp_vocab_path)
         expected_len = len(self.test_text) - self.block_size
         self.assertEqual(len(dataset), expected_len)
 
     def test_getitem(self):
         """Test the __getitem__ method."""
-        dataset = CharDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path=self.temp_vocab_path)
+        dataset = PickledDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path=self.temp_vocab_path)
         idx = 0
         sample = dataset[idx]
         
@@ -107,7 +112,7 @@ class TestCharDataset(unittest.TestCase):
 
     def test_decode(self):
         """Test the decode method."""
-        dataset = CharDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path=self.temp_vocab_path)
+        dataset = PickledDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path=self.temp_vocab_path)
         indices = [0, 1, 2, 3, 4] # Corresponds to 'abcde' with consistent vocab
         decoded_text = dataset.decode(indices)
         self.assertEqual(decoded_text, "abcde")
@@ -127,7 +132,7 @@ class TestCharDataset(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as empty_f:
             empty_f_path = empty_f.name
         # Provide a vocab path (even dummy) as it's required
-        dataset = CharDataset(file_path=empty_f_path, block_size=self.block_size, vocab_path=self.temp_dummy_vocab_path)
+        dataset = PickledDataset(file_path=empty_f_path, block_size=self.block_size, vocab_path=self.temp_dummy_vocab_path)
         # Length should be based on file content, which is 0
         self.assertEqual(len(dataset.data), 0)
         self.assertEqual(len(dataset), 0) 
@@ -151,7 +156,7 @@ class TestCharDataset(unittest.TestCase):
         temp_vocab_short_file.close()
         temp_vocab_short_path = temp_vocab_short_file.name
         
-        dataset = CharDataset(file_path=short_f_path, block_size=block_size, vocab_path=temp_vocab_short_path)
+        dataset = PickledDataset(file_path=short_f_path, block_size=block_size, vocab_path=temp_vocab_short_path)
         # Data length is from file
         self.assertEqual(len(dataset.data), len(short_text))
         # Dataset length (__len__) is max(0, data_len - block_size)
@@ -169,13 +174,13 @@ class TestCharDataset(unittest.TestCase):
         """Test initialization with an invalid file path but valid vocab path."""
         with self.assertRaises(FileNotFoundError):
              # Provide valid dummy vocab, but invalid file path
-            CharDataset(file_path='non_existent_file.txt', block_size=self.block_size, vocab_path=self.temp_dummy_vocab_path)
+            PickledDataset(file_path='non_existent_file.txt', block_size=self.block_size, vocab_path=self.temp_dummy_vocab_path)
 
     def test_invalid_vocab_path(self):
         """Test initialization with valid file path but invalid vocab path."""
         with self.assertRaises(FileNotFoundError):
              # Provide valid file path, but invalid vocab path
-            CharDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path='non_existent_vocab.json')
+            PickledDataset(file_path=self.temp_file_path, block_size=self.block_size, vocab_path='non_existent_vocab.json')
 
 class TestDatasetFactory(unittest.TestCase):
     """Tests for the dataset factory function."""
@@ -216,11 +221,11 @@ class TestDatasetFactory(unittest.TestCase):
         """Test creating a dataset using Hydra's _target_."""
         # Add _target_ for direct instantiation
         split_config_with_target = OmegaConf.merge(self.split_config, {
-            '_target_': 'src.data.dataset.CharDataset'
+            '_target_': 'src.data.dataset.PickledDataset'
         })
         
         dataset = create_dataset_from_config(self.base_data_config, split_config_with_target, self.cwd)
-        self.assertIsInstance(dataset, CharDataset)
+        self.assertIsInstance(dataset, PickledDataset)
         # Add more assertions based on expected dataset properties
         self.assertEqual(dataset.vocab_size, 3)
         self.assertEqual(len(dataset.data), 3)
@@ -249,7 +254,7 @@ class TestDatasetFactory(unittest.TestCase):
         del incomplete_split_config.block_size
         
         split_config_with_target = OmegaConf.merge(incomplete_split_config, {
-            '_target_': 'src.data.dataset.CharDataset'
+            '_target_': 'src.data.dataset.PickledDataset'
         })
         
         # Expect Hydra's InstantiationException which wraps the TypeError

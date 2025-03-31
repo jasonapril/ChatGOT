@@ -33,17 +33,6 @@ This file serves as the working memory for all active tasks in the project. It's
 
 *These tasks represent major foundational refactoring.*
 
-- [ ] **Standardize Data Pipeline** (Est. Effort: High) - Create unified Dataset/DataLoader logic.
-    - [x] Define base class `BaseDataset` (`src/data/base.py`).
-    - [x] Refactor `CharDataset` to inherit from `BaseDataset` and use config (`src/data/dataset.py`).
-    - [x] Refactor factory `create_dataset_from_config` for Hydra/fallback (`src/data/base.py`).
-    - [x] Verify default `collate_fn` works for `CharDataset`.
-    - [x] Add unit tests for `BaseDataset`, `CharDataset`, and factory.
-    - [ ] Define standard tokenizer configuration and loading strategy (Documented in `src/data/base.py`).
-    - [ ] Implement unified preprocessing steps (if needed beyond `collate_fn`).
-    - [ ] Implement custom `collate_fn` for padding/tokenization (when needed).
-- [ ] **Refactor Training Loop** (Est. Effort: Medium) - Decouple components, improve clarity.
-
 ### 🟠 Medium Priority
 
 *These tasks improve existing components or address known gaps.*
@@ -67,9 +56,6 @@ This file serves as the working memory for all active tasks in the project. It's
 
 - #### Refactor Specific Components
   - **Sub-tasks**:
-    - ⏳ Refactor Data Handling Details (`CharDataset`, Vocab, Splitting)
-      - *Contributes to: Standardize Data Pipeline Goal*
-      - 🔍 Identified during code review 2025-03-28
     - ⏳ Remove Unused PositionalEncoding (`src/models/transformer.py`)
       - 🔍 Identified during code review 2025-03-28
     - ⏳ Clarify/Consolidate Model Implementations & Generation (`gpt_decoder.py`, `transformer.py`, `generation.py`)
@@ -157,3 +143,15 @@ This file serves as the working memory for all active tasks in the project. It's
     -   **Status:** ✅ Done (2024-03-31)
     -   **Description:** Update `tests/unit/test_data_processors.py` to add tests covering the new standard tokenization logic (handling different tokenizers) and the integrated data splitting functionality.
     -   **Priority:** High
+
+### Data & Preprocessing
+
+- [x] Create `PickledDataset` to load pre-tokenized `.pkl` files (Done)
+- [x] Update data config (`got_char_level.yaml`) to use `PickledDataset` (Done)
+- [x] Generate character-level `.pkl` files using `dataset prepare` (Done)
+- [x] ~~Refactor Data Handling Details (`CharDataset`, Vocab, Splitting)~~ (Deprecated `CharDataset` removed)
+- [ ] Evaluate need for `data/base.py` - is it still useful?
+- [ ] Review `src/data/processors.py` splitting logic (does it handle edge cases well?).
+- [ ] Implement data processing for other potential data types (JSON, etc.) if needed.
+
+### Model & Architecture

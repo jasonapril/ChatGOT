@@ -1,137 +1,92 @@
 # src/cli/train_commands.py
 import typer
 import logging
-from typing import Optional, List
-from pathlib import Path
+import sys
+import subprocess
+from typing import List, Optional
 
-import hydra
-from omegaconf import OmegaConf
+# Rich console for better output formatting
 from rich.console import Console
 
-# Use absolute imports based on src being in PYTHONPATH or adjusted relative paths
-# Assuming src/ is runnable via python -m src.cli.run
-from ..models.factory import create_model_from_config
-from ..data.base import prepare_dataloaders_from_config
-from ..training.base import create_trainer_from_config
-from ..utils.common import set_seed, setup_device
+# --- Remove unused imports ---
+# from pathlib import Path
+# import hydra
+# from omegaconf import DictConfig, OmegaConf
+# from src.utils import set_seed, setup_device
+# from src.data.base import prepare_dataloaders_from_config # Now handled by train_runner
+# from src.models.factory import create_model_from_config # Now handled by train_runner
+# from src.training.base import create_trainer_from_config # Now handled by train_runner
 
-# Create Typer app for training commands
-train_app = typer.Typer(help="Commands for model training")
-console = Console() # Use a console instance, maybe import from run.py?
-                    # For now, create a local one.
-logger = logging.getLogger(__name__) # Get logger
+# Get the logger for this module
+logger = logging.getLogger(__name__)
+console = Console()
+
+# Create a Typer app for training commands
+train_app = typer.Typer()
 
 @train_app.command("language")
 def train_language_model(
-    resume: bool = typer.Option(False, "--resume", "-r", help="Resume training from checkpoint"),
-    checkpoint_path: Optional[str] = typer.Option(None, "--checkpoint", help="Path to specific checkpoint for resuming"),
-    overrides: List[str] = typer.Option(None, "--override", help="Hydra overrides (e.g., training=minimal_test)"),
+    resume: bool = typer.Option(False, "--resume", "-r", help="Resume training from latest/specified checkpoint."),
+    checkpoint_path: Optional[str] = typer.Option(None, "--checkpoint", "-c", help="Specific checkpoint path to resume from."),
+    # Accept overrides as a list of strings
+    overrides: Optional[List[str]] = typer.Option(None, "--override", help="Hydra config overrides (e.g., 'experiment=chatgot_100m' 'data.batch_size=16').") 
 ):
-    """Train a language model using Hydra, composing from conf/config.yaml."""
+    """
+    Train a language model using the configuration defined by an experiment.
+    Delegates to src.training.train_runner.py.
     
-    # Define the path to the main config directory relative to this script's location
-    # src/cli/train_commands.py -> conf/ is ../../conf
-    # It's often more robust to use hydra.utils.get_original_cwd() or package resources
-    # For simplicity assuming standard structure where conf is relative to project root
+    Example: 
+        python -m src.cli.run train language --override experiment=chatgot_100m
+        python -m src.cli.run train language --override experiment=chatgot_100m --override data.batch_size=16
+        python -m src.cli.run train language --override experiment=chatgot_100m --resume
+        python -m src.cli.run train language --override experiment=chatgot_100m --checkpoint path/to/checkpoint.pt
+    """
+    console.print("Initiating training via src.training.train_runner.py...")
+
+    # --- Construct Command for train_runner.py --- 
+    command = [
+        sys.executable,  # Use the same python interpreter
+        "-m",
+        "src.training.train_runner" # Target script
+    ]
     
-    # Determine absolute path to conf dir relative to this file
-    # __file__ -> src/cli/train_commands.py
-    # -> src/cli/ -> src/ -> project_root/
-    conf_dir_abs = str(Path(__file__).parent.parent.parent / "conf")
-    main_config_name = "config"
+    # --- Handle Overrides --- 
+    # Start with overrides passed via the --override option
+    final_overrides = overrides if overrides is not None else []
+    
+    # Add resume/checkpoint override logic
+    if resume and checkpoint_path:
+        console.print(f"[yellow]Warning:[/yellow] Both --resume and --checkpoint provided. Using --checkpoint: {checkpoint_path}")
+        final_overrides.append(f"resume_from={checkpoint_path}")
+    elif resume:
+        console.print("Resume requested. Setting resume_from=latest.")
+        final_overrides.append("resume_from=latest")
+    elif checkpoint_path:
+         console.print(f"Specific checkpoint provided. Setting resume_from={checkpoint_path}.")
+         final_overrides.append(f"resume_from={checkpoint_path}")
+    # else: no resume override needed
+    
+    command.extend(final_overrides) # Add all collected overrides
 
-    console.print(f"Initializing Hydra with main config='{main_config_name}' from '{conf_dir_abs}'")
-    if overrides:
-        console.print(f"Applying overrides: {overrides}")
-
-    # Manually initialize Hydra relative to the main config directory
+    # --- Execute train_runner.py --- 
+    console.print(f"Running command: {' '.join(command)}")
     try:
-        hydra.core.global_hydra.GlobalHydra.instance().clear() # Clear previous Hydra instance if any
-        with hydra.initialize_config_dir(config_dir=conf_dir_abs, version_base=None):
-            # Always compose the main 'config.yaml', applying command-line overrides
-            cfg = hydra.compose(config_name=main_config_name, overrides=overrides or [])
-            console.print("Hydra configuration composed successfully.")
-
-            # Now use the composed cfg object
-            output_dir = Path.cwd() # Hydra changes CWD
-            console.print(f"Hydra run directory (CWD): {output_dir}")
-
-            # Set seed
-            set_seed(cfg.get("seed", 42))
-            
-            # Set up device
-            device_name = cfg.get("system", {}).get("device", "auto") 
-            device = setup_device(device_name)
-            
-            # Prepare data
-            console.print(f"Preparing data from configuration...")
-            train_dataloader, val_dataloader, test_dataloader = prepare_dataloaders_from_config(
-                data_config=cfg.data, 
-                batch_size=cfg.data.batch_size, 
-                num_workers=cfg.data.get("num_workers", 0)
-            )
-            
-            # Create model
-            console.print(f"Creating model from configuration...")
-            model = create_model_from_config(cfg.model)
-            
-            # Create trainer
-            console.print(f"Setting up trainer...")
-            trainer_cfg = cfg.training
-            OmegaConf.set_struct(trainer_cfg, False) # Allow modifications
-            trainer_cfg.hydra_output_dir = str(output_dir) 
-            trainer_cfg.device = str(device) 
-            OmegaConf.set_struct(trainer_cfg, True)
-
-            trainer = create_trainer_from_config(
-                model=model,
-                train_dataloader=train_dataloader,
-                val_dataloader=val_dataloader,
-                config=trainer_cfg,
-            )
-            
-            # Resume training logic
-            actual_checkpoint_path = None
-            if resume:
-                if checkpoint_path:
-                    chkpt_path_obj = Path(checkpoint_path)
-                    if chkpt_path_obj.exists():
-                         actual_checkpoint_path = chkpt_path_obj
-                    else:
-                         if not chkpt_path_obj.is_absolute():
-                              try:
-                                   original_cwd = hydra.utils.get_original_cwd()
-                                   resolved_path = Path(original_cwd) / checkpoint_path
-                                   if resolved_path.exists():
-                                        actual_checkpoint_path = resolved_path
-                                   else:
-                                        console.print(f"[yellow]Warning:[/yellow] Checkpoint path '{checkpoint_path}' (resolved to '{resolved_path}') not found.")
-                              except Exception as e:
-                                   console.print(f"[yellow]Warning:[/yellow] Error resolving relative checkpoint path: {e}")
-                         else:
-                              console.print(f"[yellow]Warning:[/yellow] Specified checkpoint path '{checkpoint_path}' not found.")
-            
-            if actual_checkpoint_path:
-                console.print(f"Resuming training from checkpoint: {actual_checkpoint_path}")
-                trainer.load_checkpoint(str(actual_checkpoint_path))
-            elif resume:
-                console.print("[yellow]Warning:[/yellow] Resume requested but no valid checkpoint found or specified.")
-
-            # Train model
-            console.print(f"Starting training...")
-            metrics = trainer.train()
-            
-            console.print(f"Training completed!")
-            if 'train_loss' in metrics and metrics['train_loss']:
-                console.print(f"Final train loss: {metrics['train_loss'][-1]:.4f}")
-            if 'val_loss' in metrics and metrics['val_loss']:
-                console.print(f"Final validation loss: {metrics['val_loss'][-1]:.4f}")
-
-    except hydra.errors.ConfigCompositionException as e:
-        logger.exception("Hydra configuration composition failed.")
-        console.print(f"[bold red]Config Error:[/bold red] {e}")
-        raise
+        # Use subprocess.run, stream output directly
+        process = subprocess.run(
+            command,
+            check=True, # Raise exception on non-zero exit code
+            text=True, # Decode stdout/stderr as text
+            stdout=sys.stdout, # Redirect runner's stdout to cli's stdout
+            stderr=sys.stderr  # Redirect runner's stderr to cli's stderr
+        )
+        console.print("[green]Training runner script finished successfully.[/green]")
+    except FileNotFoundError:
+        console.print(f"[bold red]Error:[/bold red] Could not find Python executable '{sys.executable}'.")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[bold red]Error:[/bold red] Training runner script failed with exit code {e.returncode}.")
     except Exception as e:
-        logger.exception("Training failed.")
-        console.print(f"[bold red]Error:[/bold red] {e}")
-        raise 
+        console.print(f"[bold red]An unexpected error occurred:[/bold red] {e}")
+        logger.exception("Unexpected error while running train_runner.py")
+
+    # Removed the old direct training logic
+    # ... (old hydra init, data prep, model creation, trainer code) ... 

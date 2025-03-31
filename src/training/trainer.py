@@ -21,7 +21,6 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import contextlib # For potential future DDP no_sync context
 from src.utils.io import ensure_directory # Revert to absolute import
-from src.data.dataset import CharDataset # Import CharDataset
 from src.training.generation import generate_text # Correct import for generate_text
 import sys
 
@@ -87,13 +86,23 @@ class Trainer:
         self.log_interval = log_interval
         self.vocab_path = vocab_path
 
-        # Time-based checkpointing (use self.config if available)
-        # Access nested training config correctly
-        training_cfg = self.config.get('training', {}) # Get the training sub-config
-        self.time_save_interval_minutes = training_cfg.get('time_save_interval_minutes', 0)
+        # Get the training sub-config dictionary (prefer experiment if exists)
+        # NOTE: Assumes cfg is passed into self.config
+        base_training_cfg = self.config.get('training', {})
+        exp_training_cfg = self.config.get('experiment', {}).get('training', {})
+        # Merge experiment config over base config
+        merged_training_cfg = {**base_training_cfg, **exp_training_cfg}
+
+        # Use merged config to get values, falling back to direct args or defaults
+        self.epochs = merged_training_cfg.get('epochs', self.epochs)
+        self.gradient_accumulation_steps = merged_training_cfg.get('gradient_accumulation_steps', self.gradient_accumulation_steps)
+        self.max_grad_norm = merged_training_cfg.get('max_grad_norm', self.max_grad_norm)
+        self.log_interval = merged_training_cfg.get('log_interval', self.log_interval) # Override direct arg if in config
+        self.use_amp = merged_training_cfg.get('use_amp', self.use_amp)
+        self.time_save_interval_minutes = merged_training_cfg.get('time_save_interval_minutes', 0)
         self.time_save_interval_seconds = self.time_save_interval_minutes * 60 if self.time_save_interval_minutes else 0
-        # Read max_steps from the training sub-config
-        self.max_steps = training_cfg.get('max_steps', float('inf'))
+        self.max_steps = merged_training_cfg.get('max_steps', float('inf'))
+
         self.logger = logging.getLogger(self.__class__.__name__) # Initialize logger
         self.last_time_save = time.time() # Initialize last save time
         if self.time_save_interval_seconds > 0:
@@ -101,7 +110,10 @@ class Trainer:
         if self.max_steps != float('inf'):
             self.logger.info(f"Training will stop after {self.max_steps} global steps.")
 
-        self.scaler = GradScaler(enabled=self.use_amp)
+        # Use recommended torch.amp.GradScaler
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp) if self.device.type == 'cuda' else torch.amp.GradScaler('cpu', enabled=self.use_amp)
+        # self.scaler = GradScaler(enabled=self.use_amp) # DEPRECATED
+
         self.current_epoch = 0
         self.global_step = 0
         self.loaded_global_step = -1
@@ -300,9 +312,6 @@ class Trainer:
                     # Update the scaler for next iteration
                     self.scaler.update()
 
-                    # Zero gradients *after* stepping
-                    self.optimizer.zero_grad(set_to_none=True)
-
                     # Step the scheduler
                     if self.scheduler is not None:
                         self.scheduler.step()
@@ -325,10 +334,18 @@ class Trainer:
 
                     step_time_accumulator += (current_time - last_log_time)
 
+                    # DEBUG: Check log condition values
+                    self.logger.debug(f"Checking log condition: global_step={self.global_step}, log_interval={self.log_interval}, is_last_batch={is_last_batch_step}") 
+
                     if (self.global_step % self.log_interval == 0) or is_last_batch_step:
                         # Calculate T/s over the log interval
                         interval_tokens_sec = step_token_accumulator / step_time_accumulator if step_time_accumulator > 0 else 0
                         step_logs['T/s'] = f"{interval_tokens_sec:.0f}"
+
+                         # DEBUG: Log contents of step_logs and handlers
+                        self.logger.debug(f"step_logs content: {step_logs}")
+                        self.logger.debug(f"self.logger handlers: {self.logger.handlers}")
+                        self.logger.debug(f"Root logger handlers: {logging.getLogger().handlers}")
 
                          # Simple log message construction
                         log_msg = f"Step: {self.global_step}, Batch: {i+1}/{total_batches}, Loss: {loss_val:.4f}"
@@ -336,11 +353,11 @@ class Trainer:
                         log_msg += f", ~T/s: {step_logs['T/s']}"
                         
                         # Use tqdm.write for console AND logger.info for file log
-                        progress_bar.write(log_msg) 
-                        self.logger.info(log_msg) # Uncommented to ensure logs go to file handler
+                        progress_bar.write(log_msg) # Use default stdout
+                        self.logger.info(log_msg) # Keep for file log
                         
                         # Re-add progress bar update
-                        progress_bar.set_postfix(step_logs) 
+                        progress_bar.set_postfix(step_logs) # Update the TQDM bar itself
 
                         # Perform timed save/sample *if interval exceeded* and it's a log step
                         if time_interval_exceeded:
@@ -580,64 +597,99 @@ class Trainer:
     def _generate_sample_and_log(self):
         """Generates a text sample using the current model state and logs it."""
         self.logger.info("Attempting to generate sample...")
-        # Revert checks to use vocab_path
-        if not self.vocab_path:
-            self.logger.warning("Cannot generate sample: vocab_path not provided to Trainer.")
+
+        # --- Get Dataset and Decoder ---
+        dataset = None
+        if self.train_dataloader and hasattr(self.train_dataloader, 'dataset'):
+            dataset = self.train_dataloader.dataset
+        elif self.val_dataloader and hasattr(self.val_dataloader, 'dataset'):
+            dataset = self.val_dataloader.dataset
+
+        if not dataset:
+            self.logger.warning("Cannot generate sample: No dataset found in train or val dataloader.")
             return
-        if not os.path.exists(self.vocab_path):
-             self.logger.warning(f"Cannot generate sample: vocab_path '{self.vocab_path}' not found.")
-             return
 
-        # Revert generation logic to use CharDataset for vocab/decode
+        if not hasattr(dataset, 'decode') or not callable(dataset.decode):
+            self.logger.warning("Cannot generate sample: Dataset does not have a callable 'decode' method.")
+            return
+        
+        # Check if the dataset has the necessary mapping for encoding the prompt
+        if not hasattr(dataset, 'char_to_idx') or not dataset.char_to_idx:
+             if not hasattr(dataset, 'tokenizer') or not hasattr(dataset.tokenizer, 'encode'):
+                  self.logger.warning("Cannot generate sample: Dataset lacks char_to_idx and a tokenizer with an encode method for the prompt.")
+                  return
+
+        # --- Get Generation Config ---
+        gen_config = self.config.get('generation', {})
+        start_prompt = gen_config.get('start_prompt', "The ") # Default prompt
+        max_new_tokens = gen_config.get('max_new_tokens', 100)
+        temperature = gen_config.get('temperature', 1.0) # Default 1.0 for generate
+        top_k = gen_config.get('top_k', 50) # Default 50 for generate
+        top_p = gen_config.get('top_p', None) # Allow None
+        do_sample = gen_config.get('do_sample', True) # Default to sampling
+
+        # --- Encode Prompt ---
         try:
-            # Instantiate CharDataset temporarily to access vocab and decode method
-            # Provide a VALID dummy file_path (e.g., vocab_path itself if text file)
-            # If vocab_path points to a JSON, need a placeholder text file.
-            # Let's assume vocab_path IS the text file for simplicity here, adjust if needed.
-            try:
-                 with open(self.vocab_path, 'r') as f:
-                     _ = f.read(1) # Check if readable as text
-                 dummy_file_path = self.vocab_path
-            except:
-                 # If vocab_path is likely JSON, create a dummy text file path reference
-                 dummy_file_path = os.path.splitext(self.vocab_path)[0] + ".dummy.txt"
-                 if not os.path.exists(dummy_file_path):
-                      with open(dummy_file_path, 'w') as f: f.write("dummy")
-                      self.logger.debug(f"Created dummy file {dummy_file_path} for CharDataset init.")
-            
-            temp_dataset = CharDataset(file_path=dummy_file_path, block_size=1, vocab_path=self.vocab_path)
-            char_to_idx = temp_dataset.char_to_idx
-            idx_to_char = temp_dataset.idx_to_char # Get idx_to_char map
-            decode_method = temp_dataset.decode # Get the decode method
+            if hasattr(dataset, 'char_to_idx') and dataset.char_to_idx:
+                # Handle character-level encoding using char_to_idx from PickledDataset
+                input_ids = [dataset.char_to_idx.get(char, 0) for char in start_prompt] # Use 0 for unknown? Or handle differently?
+                input_ids = torch.tensor([input_ids], dtype=torch.long, device=self.device) # Add batch dim
+            elif hasattr(dataset, 'tokenizer') and hasattr(dataset.tokenizer, 'encode'):
+                 # Handle tokenization using an attached tokenizer object
+                 encoded_prompt = dataset.tokenizer.encode(start_prompt, return_tensors="pt")
+                 input_ids = encoded_prompt.to(self.device)
+            else:
+                 # This case should have been caught earlier, but defensive check
+                 self.logger.error("Failed to find encoding method (char_to_idx or tokenizer.encode) on dataset.")
+                 return
 
-            # Get sampling parameters from config (Corrected Access if using self.config)
-            gen_config = self.config.get('generation', {})
-            start_prompt = gen_config.get('start_prompt', "The ")
-            max_new_tokens = gen_config.get('max_new_tokens', 100)
-            temperature = gen_config.get('temperature', 0.8)
-            top_k = gen_config.get('top_k', None) # Use None for generate_text
-            top_p = gen_config.get('top_p', None) # Use None for generate_text
-
-            self.model.eval() # Set model to evaluation mode
-
-            # Call the original generate_text function
-            generated_text = generate_text(
-                 model=self.model,
-                 char_to_idx=char_to_idx,
-                 idx_to_char=idx_to_char,
-                 seed_text=start_prompt,
-                 max_length=max_new_tokens, # Pass max_new_tokens as max_length
-                 temperature=temperature,
-                 top_k=top_k if top_k is not None else 0, # Convert None to 0 for old func
-                 top_p=top_p if top_p is not None else 0.0, # Convert None to 0.0
-                 device=self.device
-            )
-            self.logger.info(f"\n--- Generated Sample (Step {self.global_step}) ---\n{generated_text}\n-------------------------------------")
-
-        except FileNotFoundError:
-             self.logger.warning(f"Cannot generate sample: vocab_path '{self.vocab_path}' not found during temporary dataset init.")
         except Exception as e:
-            self.logger.error(f"Failed to generate sample: {e}", exc_info=True)
+            self.logger.error(f"Failed to encode start prompt '{start_prompt}': {e}", exc_info=True)
+            return
+
+        # --- Generate ---
+        try:
+            self.model.eval() # Set model to evaluation mode
+            
+            # Check if model has a 'generate' method
+            if not hasattr(self.model, 'generate') or not callable(self.model.generate):
+                 self.logger.error("Cannot generate sample: Model does not have a callable 'generate' method.")
+                 # Optionally fall back to manual sampling loop if needed
+                 return
+
+            with torch.no_grad():
+                # Use model.generate, assuming HF-like interface
+                # Add generation parameters as needed
+                generation_kwargs = {
+                    "max_new_tokens": max_new_tokens,
+                    "temperature": temperature,
+                    "top_k": top_k,
+                    "do_sample": do_sample,
+                    "pad_token_id": getattr(dataset.tokenizer, 'pad_token_id', 50256) if hasattr(dataset, 'tokenizer') else 50256, # Default EOS/PAD for GPT2
+                    # Add top_p if it's not None
+                    **({"top_p": top_p} if top_p is not None else {}),
+                }
+                
+                self.logger.debug(f"Calling model.generate with input_ids shape {input_ids.shape} and args: {generation_kwargs}")
+                
+                output_sequences = self.model.generate(
+                    input_ids=input_ids,
+                    **generation_kwargs
+                )
+                
+                self.logger.debug(f"Model generated output_sequences shape: {output_sequences.shape}")
+
+
+            # --- Decode and Log ---
+            # Decode the generated sequence (removing the prompt part)
+            # Assuming output_sequences includes the prompt
+            generated_ids = output_sequences[0, input_ids.shape[-1]:].tolist() # Get only generated ids
+            generated_text = dataset.decode(generated_ids)
+
+            self.logger.info(f"\n--- Generated Sample (Step {self.global_step}) ---\nPrompt: {start_prompt}\nGenerated: {generated_text}\n-------------------------------------\n")
+
+        except Exception as e:
+            self.logger.error(f"Failed during model.generate or decoding: {e}", exc_info=True)
         finally:
-            self.model.train()
+            self.model.train() # Ensure model is back in training mode
 

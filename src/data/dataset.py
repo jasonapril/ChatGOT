@@ -5,6 +5,8 @@ import torch
 import logging
 import os
 import json # Import json
+import pickle
+import numpy as np
 from typing import Dict, Any
 
 from torch.utils.data import Dataset
@@ -15,112 +17,98 @@ from .base import BaseDataset
 logger = logging.getLogger(__name__)
 
 
-class CharDataset(BaseDataset):
-    """Character-level dataset from a text file, using precomputed vocabulary."""
-    
-    # Modified __init__ to accept vocab_path
-    def __init__(self, file_path: str, block_size: int, vocab_path: str):
+# Removed load_data function. Use factory functions like create_dataset_from_config. 
+
+
+class PickledDataset(BaseDataset):
+    """Dataset that loads pre-tokenized data from a pickle file."""
+
+    def __init__(self, file_path: str, block_size: int):
         """
-        Initializes the CharDataset using a precomputed vocabulary.
-        
+        Initializes the Dataset from a .pkl file containing tokenized data.
+
         Args:
-            file_path (str): Path to the text file containing the data sequence.
+            file_path (str): Path to the .pkl file.
             block_size (int): Maximum sequence length for blocks.
-            vocab_path (str): Path to the precomputed vocabulary JSON file.
         """
-        # Store main parameters
         self.file_path = file_path
         self.block_size = block_size
-        self.vocab_path = vocab_path
-        
-        # --- Load Precomputed Vocabulary --- 
-        logger.info(f"Loading precomputed vocabulary from: {self.vocab_path}")
-        if not os.path.exists(self.vocab_path):
-            logger.error(f"Vocabulary file not found: {self.vocab_path}")
-            raise FileNotFoundError(f"Vocabulary file not found: {self.vocab_path}")
-        try:
-            with open(self.vocab_path, 'r', encoding='utf-8') as f:
-                vocab_data = json.load(f)
-            self.char_to_idx = vocab_data['char_to_idx']
-            self.idx_to_char = {int(k): v for k, v in vocab_data['idx_to_char'].items()} # Ensure keys are int
-            self.vocab_size = vocab_data['vocab_size']
-            logger.info(f"Loaded vocabulary. Size: {self.vocab_size}")
-        except Exception as e:
-            logger.error(f"Failed to load or parse vocabulary file {self.vocab_path}: {e}", exc_info=True)
-            raise
 
-        # --- Load and Process Text Data using the loaded vocabulary ---
-        logger.info(f"Loading character data from: {self.file_path}")
+        logger.info(f"Loading pre-tokenized data from: {self.file_path}")
         if not os.path.exists(self.file_path):
-            logger.error(f"Data file path not found: {self.file_path}")
-            raise FileNotFoundError(f"Invalid data file path: {self.file_path}")
+            logger.error(f"Pickled data file not found: {self.file_path}")
+            raise FileNotFoundError(f"Pickled data file not found: {self.file_path}")
+        
         try:
-            with open(self.file_path, 'r', encoding='utf-8') as f:
-                self.text = f.read()
+            with open(self.file_path, 'rb') as f:
+                data_dict = pickle.load(f)
+            
+            if "token_ids" not in data_dict:
+                raise ValueError(f"Pickle file {self.file_path} missing 'token_ids' key.")
+            if "vocab_size" not in data_dict:
+                 raise ValueError(f"Pickle file {self.file_path} missing 'vocab_size' key.")
+                
+            # Store token ids (convert to tensor for efficiency if large? Keep as list/numpy for now)
+            self.data = data_dict["token_ids"]
+            if isinstance(self.data, np.ndarray):
+                 # Convert numpy to list of ints, might be safer for slicing?
+                 # Or convert to torch tensor later in getitem? Let's keep numpy for now.
+                 pass 
+            elif not isinstance(self.data, (list, np.ndarray)):
+                 raise TypeError(f"'token_ids' in {self.file_path} must be a list or numpy array.")
+
+            self.vocab_size = data_dict["vocab_size"]
+            
+            # Store other metadata if needed (e.g., tokenizer_name, char maps for char-level)
+            self.tokenizer_name = data_dict.get("tokenizer_name")
+            self.char_to_idx = data_dict.get("char_to_idx")
+            self.idx_to_char = data_dict.get("idx_to_char")
+
+            logger.info(f"Loaded {len(self.data)} tokens. Vocab size: {self.vocab_size}. Tokenizer: {self.tokenizer_name or 'character'}")
+
         except Exception as e:
-            logger.error(f"Failed to read data file {self.file_path}: {e}", exc_info=True)
+            logger.error(f"Failed to load or parse pickle file {self.file_path}: {e}", exc_info=True)
             raise
 
-        if not self.text:
-            logger.warning(f"Loaded text file {self.file_path} is empty.")
-            self.data = [] # Represent as empty list
-        else:
-            # Convert text to indices using the loaded char_to_idx map
-            # Handle characters potentially not in the loaded vocab (e.g., if data file differs slightly)
-            self.data = []
-            unknown_chars = set()
-            for char in self.text:
-                idx = self.char_to_idx.get(char)
-                if idx is not None:
-                    self.data.append(idx)
-                else:
-                    unknown_chars.add(char)
-            if unknown_chars:
-                logger.warning(f"Found {len(unknown_chars)} character(s) in {self.file_path} not present in vocabulary {self.vocab_path}. These characters were skipped: {unknown_chars}")
-            logger.info(f"Loaded and indexed {len(self.data)} characters from {self.file_path} using vocabulary from {self.vocab_path}.")
-    
     def __len__(self):
-        """Return the number of possible sequences."""
-        if not self.data or len(self.data) <= self.block_size:
+        """Return the number of sequences (blocks) in the dataset."""
+        # Check if data exists and has enough elements for at least one block
+        if not hasattr(self, 'data') or self.data.size == 0 or len(self.data) <= self.block_size:
             return 0
-        return len(self.data) - self.block_size
-    
+        # Calculate the number of full blocks available
+        # Subtract block_size because the last block needs a target
+        return (len(self.data) - self.block_size) // self.block_size
+
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """
         Get a training sample as a dictionary.
-        
+
         Args:
             idx (int): Index to retrieve.
-            
+
         Returns:
             Dict[str, torch.Tensor]: Dictionary with 'input_ids' and 'labels'.
         """
         if idx >= len(self):
             raise IndexError("Index out of bounds")
-            
-        # Get a chunk of data (sequence + next char)
-        chunk = self.data[idx:idx + self.block_size + 1]
+
+        # Get a chunk of token_ids
+        # Slicing works on lists and numpy arrays
+        chunk = self.data[idx * self.block_size:idx * self.block_size + self.block_size + 1]
+        
+        # Convert chunk to tensors
         x = torch.tensor(chunk[:-1], dtype=torch.long)
         y = torch.tensor(chunk[1:], dtype=torch.long)
         return {'input_ids': x, 'labels': y}
     
-    # Restore decode method
+    # Optional: Add a decode method if idx_to_char is available
     def decode(self, indices):
-        """
-        Convert indices back to characters.
-        
-        Args:
-            indices (list or tensor): List of indices to convert.
-            
-        Returns:
-            str: Decoded text.
-        """
         if not hasattr(self, 'idx_to_char') or not self.idx_to_char:
-            return ""
+             logger.warning("Decode called but idx_to_char mapping not found in loaded data.")
+             return ""
         if isinstance(indices, torch.Tensor):
             indices = indices.cpu().tolist()
+        # Handle potential nested lists if batch dim wasn't squeezed
         if indices and isinstance(indices[0], list):
-             indices = indices[0]
-        return ''.join([self.idx_to_char.get(i, '?') for i in indices])
-
-# Removed load_data function. Use factory functions like create_dataset_from_config. 
+             indices = indices[0] 
+        return ''.join([self.idx_to_char.get(i, '?') for i in indices]) 

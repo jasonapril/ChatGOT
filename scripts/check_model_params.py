@@ -10,6 +10,7 @@ import yaml
 from pathlib import Path
 
 import torch
+from transformers import AutoTokenizer
 
 # Add the project root to the path
 project_root = Path(__file__).parent.parent
@@ -169,11 +170,11 @@ def analyze_model_params(config_path=None):
     logger.info(f"  Actual parameter count:   {actual_params:,}")
     logger.info(f"  Difference:               {actual_params - expected_params['total']:,}")
     
-    # Check for any potential issues
-    if vocab_size == 95 and actual_params > 114_000_000:
-        logger.info("\nPotential issue detected:")
-        logger.info("  CharDataset vocabulary size might be different from config.")
-        logger.info("  Try running with a sample text file to check actual vocabulary size.")
+    # # Check for any potential issues (Example for old CharDataset/110M setup)
+    # if vocab_size == 95 and actual_params > 114_000_000:
+    #     logger.info("\nPotential issue detected:")
+    #     logger.info("  CharDataset vocabulary size might be different from config.") 
+    #     logger.info("  Try running with a sample text file to check actual vocabulary size.")
     
     return expected_params, actual_params
 

@@ -370,16 +370,30 @@ def create_dataset_from_config(data_config: DictConfig, split_config: DictConfig
     if not split_config or '_target_' not in split_config:
         raise ValueError("Dataset configuration must contain a '_target_' key.")
 
-    target_class_path = split_config._target_ # Get target before potentially modifying config
+    # Determine the target class path
+    target_class_path = split_config._target_
+    if not target_class_path:
+        # Fallback: Infer based on data_cfg or default?
+        # For now, require _target_ in the split config for clarity.
+        raise ValueError(f"Dataset target class ('_target_') not specified in configuration for split '{split_name}'.")
+
+    # --- Special Handling (Example for CharDataset - REMOVE LATER) ---
+    # if target_class_path == "src.data.dataset.CharDataset":
+    #     # CharDataset might need specific args like vocab_path resolved
+    #     if 'vocab_path' in split_cfg and not os.path.isabs(split_cfg.vocab_path):
+    #         split_cfg.vocab_path = os.path.join(original_cwd, split_cfg.vocab_path)
+    #         logger.debug(f"Resolved relative vocab_path for CharDataset: {split_cfg.vocab_path}")
+    # --- End Special Handling ---
+
     logger.info(f"Attempting to create dataset for split using Hydra target: {target_class_path}...")
 
-    # Create a mutable copy (as a dict) to avoid modifying the original config object directly
+    # Resolve relative file path within the split config
     # Use resolve=True to interpolate any OmegaConf variables first
     instant_config = OmegaConf.to_container(split_config, resolve=True)
 
     try:
         # Merge necessary top-level keys if not present
-        if target_class_path == "src.data.dataset.CharDataset":
+        if target_class_path == "src.data.dataset.CharDataset": # TODO: CharDataset should be removed should be removed. Why is this stil here?
             for key in ['vocab_path', 'block_size']:
                  if key not in instant_config and key in data_config:
                      instant_config[key] = data_config.get(key)
@@ -431,7 +445,7 @@ def create_dataset_from_config(data_config: DictConfig, split_config: DictConfig
 def prepare_dataloaders_from_config(data_config: DictConfig, batch_size: int, num_workers: int = 0, original_cwd: Optional[str] = None) -> Tuple[Optional[DataLoader], Optional[DataLoader], Optional[DataLoader]]:
     """
     Prepares train, validation, and test dataloaders based on the data configuration.
-    (Reverted signature)
+    (Reverted signature to return only dataloaders)
 
     Args:
         data_config (DictConfig): The data configuration section (e.g., cfg.data).
@@ -444,32 +458,20 @@ def prepare_dataloaders_from_config(data_config: DictConfig, batch_size: int, nu
             Train, validation, and test dataloaders. Returns None for splits not defined in the config.
     """
     train_loader, val_loader, test_loader = None, None, None
-    
-    # Remove collate_fn logic
-    # collate_fn = None
-    # if isinstance(tokenizer, CharacterTokenizer):
-    #     ...
-    # else:
-    #     ...
+    # train_dataset = None # REMOVED - No longer need to extract vocab_size here
+    # vocab_size = None    # REMOVED
 
     for split in ["train", "val", "test"]:
         if split in data_config:
             logger.info(f"Preparing dataset and dataloader for split: {split}")
             split_config = data_config[split]
             
-            # --- Remove Manual Absolute Path Construction --- 
-            # if original_cwd and "file_path" in split_config and not os.path.isabs(split_config.file_path):
-            #     relative_path = split_config.file_path
-            #     absolute_path = os.path.join(original_cwd, relative_path)
-            #     logger.info(f"Resolving relative path '{relative_path}' to '{absolute_path}'")
-            #     mutable_split_config = OmegaConf.to_container(split_config, resolve=True)
-            #     mutable_split_config['file_path'] = absolute_path
-            #     split_config = OmegaConf.create(mutable_split_config)
-            # ---------------------------------------------
-            
             try:
                 # Pass top-level data_config and split_config to factory
                 dataset = create_dataset_from_config(data_config=data_config, split_config=split_config, original_cwd=original_cwd)
+                # REMOVED: No need to store train_dataset
+                # if split == "train":
+                #     train_dataset = dataset 
             except ValueError as e:
                 # Factory function now logs details, just log context here
                 logger.error(f"Failed to create dataset for split '{split}'. See previous errors.")
@@ -498,8 +500,17 @@ def prepare_dataloaders_from_config(data_config: DictConfig, batch_size: int, nu
                 val_loader = loader
             elif split == "test":
                 test_loader = loader
-    
-    return train_loader, val_loader, test_loader
+
+    # REMOVED: Logic to extract and log vocab_size
+    # if train_dataset is not None:
+    #     if hasattr(train_dataset, 'vocab_size'):
+    #         ...
+    #     else:
+    #         ...
+    # else:
+    #     ...
+        
+    return train_loader, val_loader, test_loader # Return only the 3 dataloaders
 
 
 def create_data_manager_from_config(config: DictConfig) -> DataManager:

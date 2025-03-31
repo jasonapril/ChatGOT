@@ -12,7 +12,7 @@ from ..utils.common import set_seed, setup_device
 # Placeholder imports - these will need refinement
 from ..models.factory import create_model_from_config
 from ..utils.io import load_json # Example, might load config from checkpoint
-# from transformers import AutoTokenizer # Example if using HF tokenizers
+from transformers import AutoTokenizer # Example if using HF tokenizers
 
 # Create Typer app for generation commands
 generate_app = typer.Typer(help="Commands for text generation")
@@ -65,34 +65,32 @@ def generate_text(
         model.eval()
         console("Model loaded successfully.")
 
-        # TODO: Implement Tokenizer Loading!
-        # How is the tokenizer defined/saved? 
-        # - Is it saved in the checkpoint?
-        # - Is its name/path in the config?
-        # - Assuming 'tokenizer_name' or 'vocab_path' might be in data config saved in checkpoint
-        data_cfg_dict = checkpoint.get("config", {}).get("data", {})
-        tokenizer_name_or_path = data_cfg_dict.get("tokenizer_name", None) # Example: Might be 'gpt2'
-        vocab_path = data_cfg_dict.get("vocab_path", None) # Example: Might be path to vocab.json
-        
+        # Load Tokenizer / Vocabulary
+        # TODO: Standardize how tokenizer/vocab is loaded based on model config
         tokenizer = None
-        if tokenizer_name_or_path:
-            console(f"Attempting to load tokenizer: {tokenizer_name_or_path}")
-            # Placeholder: Use AutoTokenizer or load CharDataset vocab
-            # from transformers import AutoTokenizer
-            # tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
-            logger.warning(f"Tokenizer loading for '{tokenizer_name_or_path}' not fully implemented.")
-            # For now, let's assume a mock tokenizer for testing structure
-            class MockTokenizer:
-                def encode(self, text, return_tensors=None): return torch.randint(0, 50, (1, len(text)), device=resolved_device)
-                def decode(self, ids): return "[decoded mock text]"
-            tokenizer = MockTokenizer()
-        elif vocab_path:
-             logger.warning(f"Loading CharDataset vocab from {vocab_path} not implemented here yet.")
-             tokenizer = MockTokenizer() # Fallback mock
+        vocab_path = None # Find vocab path from config if possible
+        # Placeholder: logic to determine if it should be AutoTokenizer or vocab file
+        if vocab_path:
+             logger.warning(f"Loading vocab from {vocab_path} not fully implemented here yet.")
+             # Need to load char_to_idx, idx_to_char if character model
+             char_to_idx = {} # Placeholder
+             idx_to_char = {} # Placeholder
         else:
-             logger.error("Could not determine tokenizer from checkpoint configuration.")
-             raise typer.Exit(code=1)
-        
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(checkpoint_path) # Try loading from checkpoint dir
+                logger.info(f"Loaded AutoTokenizer from {checkpoint_path}")
+            except Exception as e:
+                logger.warning(f"Could not load AutoTokenizer from checkpoint dir {checkpoint_path}: {e}. Trying default 'gpt2'.")
+                try:
+                    tokenizer = AutoTokenizer.from_pretrained('gpt2')
+                    logger.info("Loaded default 'gpt2' tokenizer.")
+                except Exception as e_gpt2:
+                     logger.error(f"Could not load default 'gpt2' tokenizer: {e_gpt2}. Cannot proceed with generation.")
+                     return
+            # If using AutoTokenizer, we likely don't need char_to_idx/idx_to_char separately
+            char_to_idx = None
+            idx_to_char = None
+
         console("Tokenizer placeholder loaded.")
 
     except FileNotFoundError:

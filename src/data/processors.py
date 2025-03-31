@@ -143,7 +143,7 @@ def prepare_text_data(
         
         # Store original text and mappings
         processed_data = {
-            "text": text, # Keep original text for CharDataset
+            "text": text, # Store raw text if needed for some reason, but maybe not necessary for splits?
             "chars": chars,
             "char_to_idx": char_to_idx,
             "idx_to_char": idx_to_char,

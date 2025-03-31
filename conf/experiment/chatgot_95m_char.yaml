@@ -1,0 +1,73 @@
+# Configuration for ChatGoT ~100M parameters - Refactored for Hydra/Trainer
+
+# Hydra settings (optional, provides defaults)
+defaults:
+  - _self_
+  # - model: gpt_decoder # REMOVED - Inherit from main config
+  # The rest of the defaults should come from the main config.yaml
+  # We only override specific sections below.
+
+# Configuration for the experiment run
+experiment_name: "chatgot_95m_char" # Reflects model size and level
+experiment_id: ${experiment_name}_${now:%Y%m%d_%H%M%S} # Unique ID for the run
+
+# System settings (Overriding defaults if needed)
+system:
+  seed: 42
+  device: auto # Trainer will attempt auto-detection
+
+# Model configuration is now primarily defined in conf/model/gpt_decoder.yaml
+# We could override specific parameters here if needed, e.g.:
+# model:
+#   dropout: 0.15 
+
+# Data configuration (Overriding defaults)
+# data:
+#   _target_: src.data.text.build_text_dataloaders # Example target data builder
+#   file_path: data/raw/got/game_of_thrones.txt # Renamed from 'path'
+#   # tokenizer_name: gpt2 # REMOVED - Using CharDataset defined in data config
+#   vocab_size: null # Let the data loader determine this from tokenizer
+#   block_size: 256
+#   batch_size: 32
+#   num_workers: 4 # Explicitly set
+
+# Training configuration (Overriding defaults)
+training:
+  # _target_ is optional if using create_trainer_from_config
+  num_epochs: 10
+  learning_rate: 5e-4 # Might need adjustment for larger model
+  optimizer:
+    # _target_ can default to torch.optim.AdamW if configured in main config
+    lr: ${training.learning_rate}
+    weight_decay: 0.01
+  scheduler:
+    # _target_ can default if configured in main config
+    num_warmup_steps: 1000
+  gradient_accumulation_steps: 1 # Might need adjustment for larger model
+  max_grad_norm: 1.0
+  use_amp: true # TEMP: Re-enable AMP
+  gradient_checkpointing: false # TEMP: Keep Grad Checkpointing Disabled
+  log_interval: 10 # Updated from 50
+  eval_interval: 500 # If evaluation is implemented
+  # Other training defaults from conf/training/default.yaml are used unless overridden
+
+# Callbacks configuration (Overriding default empty list)
+callbacks:
+  callbacks_list: # Re-enable callbacks
+    - _target_: src.training.callbacks.TensorBoardLogger
+      log_dir: outputs/tensorboard/${experiment_id}
+    - _target_: src.training.callbacks.SampleGenerationCallback
+      log_interval: 1000
+      max_length: 400
+      temperature: 0.8
+      num_samples: 2
+      prompt: 'The night is dark and full of terrors'
+
+# Configuration for the tokenizer path
+# tokenizer_path: gpt2 # REMOVED - Not used by CharDataset
+
+# MLflow configuration (optional)
+mlflow:
+  experiment_name: ${experiment_name} # Use top-level name
+  log_params: true
+  log_metrics: true 
