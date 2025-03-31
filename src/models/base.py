@@ -39,6 +39,7 @@ class GenerativeModelConfig(BaseModelConfig):
 class LanguageModelConfig(GenerativeModelConfig):
     """Config for Language Models"""
     model_type: str = Field("language", description="Model type set to language.")
+    architecture: Optional[str] = Field(None, description="Name for the specific model architecture (e.g., transformer, rnn).")
     vocab_size: int = Field(..., description="Size of the vocabulary (required).")
     d_model: int = Field(768, description="Model dimension.")
     n_head: int = Field(12, description="Number of attention heads.")

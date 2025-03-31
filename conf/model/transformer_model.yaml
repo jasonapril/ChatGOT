@@ -1,9 +1,11 @@
 # conf/model/transformer_model.yaml
 _target_: src.models.transformer.TransformerModel
+# architecture: transformer # Moved inside config
 
 # Instantiate the config object first
 config:
   _target_: src.models.base.LanguageModelConfig
+  architecture: transformer # Added here
   # --- Model Architecture Parameters --- #
   # These parameters now belong under the 'config:' key
   d_model: 768

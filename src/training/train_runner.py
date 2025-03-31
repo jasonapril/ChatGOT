@@ -36,6 +36,7 @@ import json
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.core.hydra_config import HydraConfig # Import HydraConfig
+from transformers import get_scheduler # Use transformers scheduler
 
 # Import local modules
 from src.models.factory import create_model_from_config
@@ -293,6 +294,17 @@ def run_training(cfg: DictConfig) -> None:
     #     else:
     #          resolved_vocab_path = cfg.data.vocab_path
 
+    # Resolve the config to a plain dict BEFORE passing to Trainer
+    try:
+        # No need to import OmegaConf again here
+        resolved_cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+    except ImportError: # Should not happen if imported at top
+        logger.warning("OmegaConf not found, cannot resolve config before passing to Trainer.")
+        resolved_cfg_dict = cfg # Pass as-is if OmegaConf not available
+    except Exception as e:
+         logger.error(f"Error resolving OmegaConf config: {e}. Passing unresolved config to Trainer.")
+         resolved_cfg_dict = cfg # Pass as-is on error
+
     trainer = Trainer(
         model=model,
         optimizer=optimizer,
@@ -300,8 +312,8 @@ def run_training(cfg: DictConfig) -> None:
         train_dataloader=train_loader,
         val_dataloader=val_loader,
         device=device,
-        epochs=cfg.training.epochs,
-        config=cfg, # Pass the *current* config for now
+        epochs=cfg.training.epochs, # Keep accessing original cfg for direct params if needed
+        config=resolved_cfg_dict, # Pass the resolved dictionary
         callbacks=callbacks, # Pass initially instantiated callbacks
         use_amp=cfg.training.use_amp,
         gradient_accumulation_steps=cfg.training.gradient_accumulation_steps,
@@ -318,30 +330,18 @@ def run_training(cfg: DictConfig) -> None:
         # Now load the checkpoint using the initialized trainer
         loaded_config_from_checkpoint = trainer.load_checkpoint(absolute_checkpoint_path)
         
-        if loaded_config_from_checkpoint:
-            logger.info(f"Trainer state loaded from {absolute_checkpoint_path}")
-            # *** Now update callbacks if needed ***
-            resumed_experiment_id = loaded_config_from_checkpoint.get('experiment_id')
-            if resumed_experiment_id:
-                logger.info(f"Resuming experiment ID: {resumed_experiment_id}. Updating TensorBoard logger.")
-                for cb in trainer.callbacks:
-                    if isinstance(cb, TensorBoardLogger):
-                        # NOTE: Assuming TensorBoardLogger has a method to update its log_dir or logger object
-                        # If not, this might need adjustment based on the callback's implementation.
-                        # For simplicity, let's assume it re-initializes its writer based on config.
-                        # We might need to update the trainer's config reference as well if callbacks rely on it directly.
-                        # A cleaner way might be to re-instantiate callbacks after loading config.
-                        resumed_log_dir = f"outputs/tensorboard/{resumed_experiment_id}"
-                        cb.log_dir = resumed_log_dir # Assuming direct modification is possible/intended
-                        cb._configure_writer() # Assuming a method to reconfigure the writer
-                        logger.info(f"Updated TensorBoard log_dir to: {resumed_log_dir}")
-                        break
-            
+        # Check if the trainer's global step was updated, indicating successful state load
+        if trainer.global_step > 0 and trainer.loaded_global_step > 0:
+            logger.info(f"Trainer state loaded successfully (resuming from Global Step: {trainer.global_step}).")
+            # *** Callbacks were already initialized, assume paths are correct for the current run ***
+            # *** Logging experiment_id verification removed ***
+
             # Generate a sample immediately after resuming
             logger.info("Generating initial sample after loading checkpoint...")
             trainer._generate_sample_and_log()
         else:
-            logger.error("Failed to load checkpoint state, cannot resume. Starting fresh.")
+            # This block should now only be reached if load_checkpoint truly failed earlier
+            logger.error("Failed to load checkpoint state (global_step not updated), cannot resume. Starting fresh.")
             absolute_checkpoint_path = None # Prevent further attempts
 
     elif checkpoint_path_cfg and not absolute_checkpoint_path:

@@ -10,6 +10,7 @@ defaults:
 # Configuration for the experiment run
 experiment_name: "chatgot_95m_char" # Reflects model size and level
 experiment_id: ${experiment_name}_${now:%Y%m%d_%H%M%S} # Unique ID for the run
+resume_from: latest # Attempt to resume from latest checkpoint matching filters
 
 # System settings (Overriding defaults if needed)
 system:
@@ -31,31 +32,36 @@ system:
 #   batch_size: 32
 #   num_workers: 4 # Explicitly set
 
-# Training configuration (Overriding defaults)
+# Training configuration (Overrides general training params)
 training:
-  # _target_ is optional if using create_trainer_from_config
   num_epochs: 10
-  learning_rate: 5e-4 # Might need adjustment for larger model
-  optimizer:
-    # _target_ can default to torch.optim.AdamW if configured in main config
-    lr: ${training.learning_rate}
-    weight_decay: 0.01
-  scheduler:
-    # _target_ can default if configured in main config
-    num_warmup_steps: 1000
-  gradient_accumulation_steps: 1 # Might need adjustment for larger model
+  learning_rate: 5e-4 # Define the base LR for this experiment HERE
+  gradient_accumulation_steps: 1
   max_grad_norm: 1.0
-  use_amp: true # TEMP: Re-enable AMP
-  gradient_checkpointing: false # TEMP: Keep Grad Checkpointing Disabled
-  log_interval: 10 # Updated from 50
-  eval_interval: 500 # If evaluation is implemented
-  # Other training defaults from conf/training/default.yaml are used unless overridden
+  use_amp: true
+  gradient_checkpointing: false
+  log_interval: 10
+  eval_interval: 500
+  # activation_checkpointing: false # Inherit from default
+  # torch_compile: false # Inherit from default
+  # checkpoint_subdir: 'checkpoints' # Inherit from default
 
-# Callbacks configuration (Overriding default empty list)
+# Optimizer configuration (Overrides optimizer group)
+optimizer:
+  # type: adamw # Inherited from config.yaml default
+  learning_rate: 5e-4 # Set directly, remove interpolation
+  weight_decay: 0.01 # Specify override if different from default adamw config
+
+# Scheduler configuration (Overrides scheduler group)
+scheduler:
+  # type: cosine # Inherited from config.yaml default
+  num_warmup_steps: 1000
+
+# Callbacks configuration (Overrides callbacks group)
 callbacks:
   callbacks_list: # Re-enable callbacks
     - _target_: src.training.callbacks.TensorBoardLogger
-      log_dir: outputs/tensorboard/${experiment_id}
+      log_dir: outputs/tensorboard/${experiment_name}_${now:%Y%m%d_%H%M%S}
     - _target_: src.training.callbacks.SampleGenerationCallback
       log_interval: 1000
       max_length: 400

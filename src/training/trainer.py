@@ -503,11 +503,14 @@ class Trainer:
 
         loaded_config = None
         try:
+            print(f"[DEBUG] Attempting to load checkpoint from: {path}") # Added print
             # Load checkpoint onto the correct device directly
             checkpoint = torch.load(path, map_location=self.device)
+            print("[DEBUG] torch.load successful.") # Added print
 
             # Load model state
             if 'model_state_dict' in checkpoint:
+                print("[DEBUG] Loading model_state_dict...") # Added print
                 # Handle potential DataParallel/DDP wrapping
                 state_dict = checkpoint['model_state_dict']
                 # Simple check for keys starting with 'module.'
@@ -518,47 +521,58 @@ class Trainer:
                     self.model.load_state_dict(new_state_dict)
                 else:
                     self.model.load_state_dict(state_dict)
+                print("[DEBUG] model_state_dict loaded.") # Added print
             else:
                 self.logger.warning("Checkpoint does not contain 'model_state_dict'.")
 
             # Load optimizer state
             if 'optimizer_state_dict' in checkpoint:
+                 print("[DEBUG] Loading optimizer_state_dict...") # Added print
                  self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                 print("[DEBUG] optimizer_state_dict loaded.") # Added print
             else:
                 self.logger.warning("Checkpoint does not contain 'optimizer_state_dict'. Optimizer state not loaded.")
 
             # Load scheduler state
             if self.scheduler and 'scheduler_state_dict' in checkpoint:
+                print("[DEBUG] Loading scheduler_state_dict...") # Added print
                 self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                print("[DEBUG] scheduler_state_dict loaded.") # Added print
             elif self.scheduler:
                 self.logger.warning("Checkpoint does not contain 'scheduler_state_dict'. Scheduler state not loaded.")
 
             # Load scaler state for AMP
             if self.use_amp and 'scaler_state_dict' in checkpoint:
+                print("[DEBUG] Loading scaler_state_dict...") # Added print
                 self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
+                print("[DEBUG] scaler_state_dict loaded.") # Added print
             elif self.use_amp:
                 self.logger.warning("Checkpoint does not contain 'scaler_state_dict'. AMP scaler state not loaded.")
 
             # Load training state (epoch, step, etc.)
+            print("[DEBUG] Loading training state (epoch, step, metrics...).") # Added print
             self.current_epoch = checkpoint.get('epoch', 0) # Default to 0 if not found
             self.global_step = checkpoint.get('global_step', 0) 
             self.loaded_global_step = self.global_step # Store the step we are resuming *from*
             self.best_val_metric = checkpoint.get('best_val_metric', float('inf'))
-            self.metrics = checkpoint.get('metrics', {'train_loss': [], 'val_loss': []})
+            self.metrics = checkpoint.get('metrics', {'train_loss': [], 'val_loss': []}) # Example metrics tracking
             # *** Store loaded config ***
             loaded_config = checkpoint.get('config')
+            print("[DEBUG] Training state loaded.") # Added print
 
             self.logger.info(f"Successfully loaded checkpoint from {path} at epoch {self.current_epoch}, step {self.global_step}")
             return loaded_config # Return the loaded config
 
         except FileNotFoundError:
+            # This case seems unlikely if the path exists check passed earlier, but keep it.
+            print(f"[DEBUG] Caught FileNotFoundError for: {path}") # Added print
             self.logger.error(f"Checkpoint file not found during load attempt: {path}")
             return None
         except Exception as e:
-            self.logger.error(f"Failed to load checkpoint from {path}: {e}", exc_info=True)
+            # Log AND print the detailed error
+            print(f"[DEBUG] Caught generic Exception during load_checkpoint: {type(e).__name__} - {e}") # Added print
+            self.logger.error(f"Failed to load checkpoint from {path}: {e}", exc_info=True) # Log with traceback
             return None
-            # Optionally re-raise or exit, depending on desired behavior
-            # raise e
 
     # --- Callback Hook Methods --- (Similar to base.py)
 
@@ -664,10 +678,13 @@ class Trainer:
                     "max_new_tokens": max_new_tokens,
                     "temperature": temperature,
                     "top_k": top_k,
-                    "do_sample": do_sample,
-                    "pad_token_id": getattr(dataset.tokenizer, 'pad_token_id', 50256) if hasattr(dataset, 'tokenizer') else 50256, # Default EOS/PAD for GPT2
+                    # "do_sample": do_sample, # Removed - Not accepted by base model generate
+                    # "pad_token_id": ..., # Removed - Not accepted by base model generate
                     # Add top_p if it's not None
                     **({"top_p": top_p} if top_p is not None else {}),
+                    # Can add repetition_penalty and eos_token_id if needed from config
+                    # "repetition_penalty": gen_config.get('repetition_penalty', 1.0),
+                    # "eos_token_id": getattr(dataset.tokenizer, 'eos_token_id', None) if hasattr(dataset, 'tokenizer') else None,
                 }
                 
                 self.logger.debug(f"Calling model.generate with input_ids shape {input_ids.shape} and args: {generation_kwargs}")
