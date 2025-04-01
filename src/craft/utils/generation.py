@@ -146,9 +146,13 @@ def top_k_top_p_filtering(
     
     # Apply top-k filtering
     if top_k > 0:
-        # Remove all tokens with a probability less than the last token of the top-k
-        indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-        logits[indices_to_remove] = filter_value
+        vocab_size = logits.size(-1)
+        # Clamp top_k to vocab size to prevent errors
+        actual_top_k = min(top_k, vocab_size)
+        if actual_top_k < vocab_size: # Only filter if top_k is less than vocab size
+            # Remove all tokens with a probability less than the last token of the top-k
+            indices_to_remove = logits < torch.topk(logits, actual_top_k)[0][..., -1, None]
+            logits[indices_to_remove] = filter_value
     
     # Apply top-p (nucleus) filtering
     if top_p < 1.0:

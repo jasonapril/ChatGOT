@@ -254,7 +254,10 @@ def prepare_json_data(
     # Create output filename
     output_filename = os.path.splitext(os.path.basename(input_file))[0]
     output_path = os.path.join(output_dir, f"{output_filename}_processed.pkl")
-    
+
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
     # Save processed data
     with open(output_path, "wb") as f:
         pickle.dump(items, f)

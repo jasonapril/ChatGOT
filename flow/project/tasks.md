@@ -159,7 +159,12 @@ This file serves as the working memory for all active tasks in the project. It's
       - 🔍 Identified during code review 2025-03-28
     - ⏳ Fix Test Import Handling (Remove `try-except-mock`)
       - 🔍 Identified during code review 2025-03-28
-    - ⏳ Improve Generation Test Coverage (`GenerationTests`)
+    - ⏳ **Improve Generation Test Coverage** (`GenerationTests`)
+      - **Status**: 🟡 Active (Focusing on increasing coverage)
+      - **Updates**:
+        - Fixed several persistent test failures in `test_generation.py` and `test_standalone_generation.py` (vocab issues, test expectations). (Apr 1)
+        - Added edge case tests for `batch_generate` (empty prompt, max_length=0). (Apr 1)
+        - **Next**: Add tests for `src/craft/utils/generation.py` (currently 0% coverage).
       - 🔍 Identified during code review 2025-03-28
     - ⏳ Refactor Data Test Configuration (`DataTests`)
       - 🔍 Identified during code review 2025-03-28

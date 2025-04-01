@@ -134,32 +134,32 @@ def test_batch_generate_basic(mock_model, standalone_mock_vocab):
 def test_batch_generate_different_lengths(mock_model, request):
     """Test batch generation with prompts of different lengths."""
     # Explicitly get the fixture value by name - REMOVED
-    # standalone_mock_vocab = request.getfixturevalue("standalone_mock_vocab")
+    # standalone_mock_vocab = request.getfixturevalue("standalone_mock_vocab") 
     
-    # --- Hardcode the correct vocabulary for this specific test --- 
-    # chars = "<pad><eos> abcdefghijklmnopqrstuvwxyz" # PAD=0, EOS=1, space=2, a=3 ...
-    # char_to_idx = {ch: i for i, ch in enumerate(chars)} # Faulty comprehension
-    # idx_to_char = {i: ch for i, ch in enumerate(chars)} # Faulty comprehension
-    
-    # Manually construct the vocabulary to ensure correctness
+    # --- WORKAROUND: Hardcode vocabulary due to persistent fixture resolution issue --- 
+    # Using the standalone_mock_vocab fixture consistently fails here, injecting
+    # the vocabulary from test_generation.py::generation_mock_vocab instead.
+    # Hardcoding ensures the correct vocabulary with <pad> at index 0 is used.
     vocab_list = ["<pad>", "<eos>", " "] + list("abcdefghijklmnopqrstuvwxyz")
     char_to_idx = {token: i for i, token in enumerate(vocab_list)}
     idx_to_char = {i: token for i, token in enumerate(vocab_list)}
-    # print(f"\n[DEBUG] char_to_idx IMMEDIATELY AFTER DEFINITION:\n{char_to_idx}\n") # Removed print
-    # --- End Hardcoding / Manual Construction ---
-    
-    prompts = ["a", "bc"] # Indices [3], [4, 5] in the manually constructed vocab
+    # --- End Workaround ---
+        
+    # Use the fixture again - REMOVED
+    # char_to_idx, idx_to_char = standalone_mock_vocab 
+        
+    prompts = ["a", "bc"] # Indices [3], [4, 5] in the hardcoded vocab
     max_tokens_to_generate = 3 # Variable for clarity
     
     # Generate first to see if it modifies the vocab 
     generated_list = batch_generate(mock_model, char_to_idx, idx_to_char, prompts, max_length=max_tokens_to_generate, temperature=0.1, device='cpu') # Corrected max_length
 
     # Ensure <pad> exists and has index 0 as assumed by test logic
-    # print(f"\n[DEBUG] char_to_idx IMMEDIATELY BEFORE ASSERTION:\n{char_to_idx}\n") # Removed print
-    assert "<pad>" in char_to_idx, "'<pad>' token missing in manually constructed vocab"
+    assert "<pad>" in char_to_idx, "'<pad>' token missing in hardcoded vocab (WORKAROUND)"
     pad_id = char_to_idx['<pad>']
-    assert pad_id == 0, f"Test assumes pad_id is 0, but got {pad_id}"
-    max_tokens_to_generate = 3
+    assert pad_id == 0, f"Test assumes pad_id is 0, but got {pad_id} (WORKAROUND)"
+    # Remove unnecessary redefinition of max_tokens_to_generate 
+    # max_tokens_to_generate = 3 
     # Expected: a(3)->b(4)c(5)d(6), bc(4,5)->d(6)e(7)f(8)
     # This expectation assumes batch_generate handles padding correctly
     # and the mock model's simple logic doesn't break things.
@@ -179,4 +179,22 @@ def test_batch_generate_params_smoke(mock_model, standalone_mock_vocab):
     generated_list = batch_generate(mock_model, char_to_idx, idx_to_char, prompts, max_new, temperature=0.7, top_p=0.9, device='cpu')
     assert isinstance(generated_list, list)
     assert len(generated_list) == len(prompts)
+    assert generated_list == expected
+
+def test_batch_generate_empty_prompt(mock_model, standalone_mock_vocab):
+    """Test batch_generate with an empty list of prompts."""
+    char_to_idx, idx_to_char = standalone_mock_vocab
+    prompts = []
+    max_length = 5
+    generated_list = batch_generate(mock_model, char_to_idx, idx_to_char, prompts, max_length, temperature=0.1, device='cpu')
+    assert generated_list == []
+
+def test_batch_generate_zero_max_length(mock_model, standalone_mock_vocab):
+    """Test batch_generate with max_length=0."""
+    char_to_idx, idx_to_char = standalone_mock_vocab
+    prompts = ["a", "b"]
+    max_length = 0
+    # Expect only the original prompts back
+    expected = ["a", "b"] 
+    generated_list = batch_generate(mock_model, char_to_idx, idx_to_char, prompts, max_length, temperature=0.1, device='cpu')
     assert generated_list == expected
