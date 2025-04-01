@@ -8,7 +8,7 @@ defaults:
   # We only override specific sections below.
 
 # Configuration for the experiment run
-experiment_name: "chatgot_95m_char" # Reflects model size and level
+experiment_name: "chatgot_95m_char"
 experiment_id: ${experiment_name}_${now:%Y%m%d_%H%M%S} # Unique ID for the run
 resume_from: latest # Attempt to resume from latest checkpoint matching filters
 
@@ -35,8 +35,8 @@ system:
 # Training configuration (Overrides general training params)
 training:
   num_epochs: 10
-  learning_rate: 5e-4 # Define the base LR for this experiment HERE
-  gradient_accumulation_steps: 1
+  learning_rate: 3e-4 # Reduced from 5e-4 for larger context
+  gradient_accumulation_steps: 2 # Added to compensate for smaller batch size
   max_grad_norm: 1.0
   use_amp: true
   gradient_checkpointing: false
@@ -46,16 +46,25 @@ training:
   # torch_compile: false # Inherit from default
   # checkpoint_subdir: 'checkpoints' # Inherit from default
 
+  # Generation configuration for sample generation
+  generation:
+    start_prompt: "The night is dark and"
+    max_new_tokens: 100
+    temperature: 0.8
+    top_k: 50
+    top_p: 0.9
+    do_sample: true
+
 # Optimizer configuration (Overrides optimizer group)
 optimizer:
   # type: adamw # Inherited from config.yaml default
-  learning_rate: 5e-4 # Set directly, remove interpolation
+  learning_rate: 3e-4 # Set directly, remove interpolation
   weight_decay: 0.01 # Specify override if different from default adamw config
 
 # Scheduler configuration (Overrides scheduler group)
 scheduler:
   # type: cosine # Inherited from config.yaml default
-  num_warmup_steps: 1000
+  num_warmup_steps: 500 # Reduced from 1000 for faster convergence
 
 # Callbacks configuration (Overrides callbacks group)
 callbacks:
@@ -67,7 +76,7 @@ callbacks:
       max_length: 400
       temperature: 0.8
       num_samples: 2
-      prompt: 'The night is dark and full of terrors'
+      prompt: 'The night is dark and'
 
 # Configuration for the tokenizer path
 # tokenizer_path: gpt2 # REMOVED - Not used by CharDataset

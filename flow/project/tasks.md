@@ -33,6 +33,93 @@ This file serves as the working memory for all active tasks in the project. It's
 
 *These tasks represent major foundational refactoring.*
 
+- **Restructure Source Code Organization**: 🟡 ⏳
+  - **Goal**: Implement a flatter, more maintainable source code structure following industry standards
+  - **Current Structure**:
+    ```
+    src/
+    ├── cli/
+    ├── data/
+    ├── models/
+    ├── training/
+    ├── performance/
+    ├── utils/
+    └── __init__.py
+    ```
+  - **Proposed Structure**:
+    ```
+    src/
+    ├── __init__.py
+    ├── models/
+    │   ├── __init__.py
+    │   ├── base.py
+    │   └── transformer.py
+    ├── data/
+    │   ├── __init__.py
+    │   ├── processors.py
+    │   └── tokenizers.py
+    ├── training.py
+    ├── utils.py
+    └── cli.py
+    ```
+  - **Implementation Plan**:
+    1. **Preparation Phase**:
+       - [ ] Review all existing tests and their coverage
+       - [ ] Document current import dependencies
+       - [ ] Create test suite for new structure
+       - [ ] Set up CI to run tests on each change
+    
+    2. **Code Migration Phase** (for each module):
+       - [ ] Create new file structure
+       - [ ] Move code piece by piece
+       - [ ] Update imports
+       - [ ] Run tests
+       - [ ] Fix any issues
+       - [ ] Only remove old code after tests pass
+    
+    3. **Module-Specific Tasks**:
+       - **Models Module**:
+         - [ ] Move `base.py` and `transformer.py`
+         - [ ] Update model factory
+         - [ ] Test model creation and initialization
+       
+       - **Data Module**:
+         - [ ] Move processors and tokenizers
+         - [ ] Update dataset loading
+         - [ ] Test data pipeline end-to-end
+       
+       - **Training Module**:
+         - [ ] Move core training logic
+         - [ ] Update training callbacks
+         - [ ] Test training loop
+       
+       - **Utils Module**:
+         - [ ] Move common utilities
+         - [ ] Update logging
+         - [ ] Test utility functions
+       
+       - **CLI Module**:
+         - [ ] Move command handlers
+         - [ ] Update command registration
+         - [ ] Test CLI commands
+    
+    4. **Final Steps**:
+       - [ ] Run full test suite
+       - [ ] Update documentation
+       - [ ] Clean up old files
+       - [ ] Verify all functionality works
+    
+  - **Testing Strategy**:
+    - Unit tests for each module
+    - Integration tests for module interactions
+    - End-to-end tests for complete workflows
+    - Performance tests for critical paths
+    
+  - **Priority**: High (Foundational)
+  - **Status**: In Progress
+  - 🔍 Identified during code review 2025-03-31
+  - 📝 Updated with detailed implementation plan 2025-03-31
+
 ### 🟠 Medium Priority
 
 *These tasks improve existing components or address known gaps.*

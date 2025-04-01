@@ -51,30 +51,78 @@ hydra:
     # Use original CWD as the base for relative paths in config
     dir: outputs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
   job:
-    chdir: True # Change CWD to the output directory for the run
-  # Explicitly configure job logging to ensure console output
+    chdir: true # Change back to true as it was in the working config
   job_logging:
-    # Define formatters (using a simple one for now)
+    version: 1
     formatters:
       simple:
+        format: '%(message)s'
+      detailed:
         format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-    # Define handlers
     handlers:
       console:
         class: logging.StreamHandler
         formatter: simple
-        level: INFO 
+        stream: ext://sys.stdout
+        level: INFO
       file:
         class: logging.FileHandler
-        formatter: simple
-        filename: ${hydra.job.name}.log # Use default log file name pattern
+        formatter: detailed
+        filename: train_runner.log
+        mode: w
         level: INFO
-    # Configure the root logger
     root:
       level: INFO
-      handlers: [console, file] # Make sure console is included
-    # Disable Hydra's default logger configs if they conflict
-    disable_existing_loggers: false 
+      handlers:
+      - console
+      - file
+    disable_existing_loggers: false
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+
+# Single, unified logging configuration
+logging:
+  version: 1
+  disable_existing_loggers: false
+  formatters:
+    simple:
+      format: '%(message)s'
+    detailed:
+      format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+  handlers:
+    console:
+      class: logging.StreamHandler
+      level: INFO
+      formatter: simple
+      stream: ext://sys.stdout
+    file:
+      class: logging.FileHandler
+      level: INFO
+      formatter: detailed
+      filename: train_runner.log
+      mode: w
+  loggers:
+    root:
+      level: INFO
+      handlers: [console, file]
+      propagate: true
+    src:
+      level: INFO
+      handlers: [console, file]
+      propagate: true
+    src.training:
+      level: INFO
+      handlers: [console, file]
+      propagate: true
+    src.models:
+      level: INFO
+      handlers: [console, file]
+      propagate: true
+    src.data:
+      level: INFO
+      handlers: [console, file]
+      propagate: true
 
 # Add a new group for generation parameters
 generation:

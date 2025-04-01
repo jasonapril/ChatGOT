@@ -1,0 +1,25 @@
+# conf/data/char.yaml
+# Remove top-level _target_ as it's now specified per-split
+
+# Data settings
+batch_size: 32 # This might be overridden in config.yaml
+num_workers: 0
+block_size: 1024 # Increased from 256 to 1024 for better context learning
+
+# Removed vocab_path - info is in the pickle file
+
+# Split configurations
+train:
+  _target_: src.data.dataset.PickledDataset # Changed from CharDataset
+  file_path: data/processed/got/game_of_thrones_train.pkl # Changed path
+  block_size: ${data.block_size}
+
+val:
+  _target_: src.data.dataset.PickledDataset # Changed from CharDataset
+  file_path: data/processed/got/game_of_thrones_val.pkl # Changed path
+  block_size: ${data.block_size}
+
+# test: # Optional test split
+#   _target_: src.data.dataset.PickledDataset
+#   file_path: data/processed/got/game_of_thrones_test.pkl
+#   block_size: ${data.block_size} 

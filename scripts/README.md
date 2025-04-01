@@ -1,18 +1,19 @@
 # Scripts (`scripts/`)
 
-This directory contains standalone utility scripts that support development, analysis, or interaction with the Craft project, but are not part of the core library (`src/`) code.
+## Purpose
 
-## Contents:
+This directory contains standalone scripts for various operational tasks related to the project, such as data preparation, running training jobs, evaluation, and potentially deployment or utility tasks. It often serves as the entry point for command-line operations.
 
-*   `get_latest_checkpoint.py`: Finds the latest checkpoint file across multiple Hydra run directories based on specified criteria (model, dataset, experiment name) and step count.
-*   `check_model_params.py`: Analyzes and compares expected vs. actual parameter counts for a model configuration, useful for verification and debugging.
+## Structure
 
-(Note: This directory was significantly cleaned, removing legacy pipeline scripts, redundant CLI entry points, and utilities whose functionality is now covered by the main `src/cli/run.py` interface or integrated experiment tracking.)
+-   `scripts/`
+    -   `train.py`: Script to initiate model training.
+    -   `generate.py`: Script to generate samples from a trained model.
+    -   `evaluate.py`: Script to run model evaluation.
+    -   `prepare_data.py`: Example script for data processing.
 
-## Usage:
+## Guidelines
 
-These scripts are typically run directly from the command line, e.g.:
-```bash
-python scripts/get_latest_checkpoint.py --experiment-name chatgot_25m
-python scripts/check_model_params.py --config conf/experiment/chatgot_25m.yaml
-``` 
+- Scripts should be executable and ideally accept command-line arguments for flexibility.
+- Leverage functions and classes defined in `src/` where appropriate.
+- Include argument parsing (`argparse`) and clear usage instructions (e.g., via `--help` or comments).

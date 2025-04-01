@@ -1,0 +1,22 @@
+# Training settings
+batch_size: 32
+gradient_accumulation_steps: 2
+learning_rate: 3e-4
+max_steps: 1000
+warmup_steps: 100
+weight_decay: 0.1
+max_grad_norm: 1.0
+use_amp: true
+
+# Checkpointing and logging
+time_save_interval_seconds: 300  # 5 minutes
+log_interval: 1  # Log every batch
+
+# Generation settings
+generation:
+  prompt: "The night is dark and full of"
+  max_new_tokens: 200
+  temperature: 0.8
+  top_k: 50
+  top_p: 0.9
+  repetition_penalty: 1.1 

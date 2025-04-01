@@ -1,0 +1,65 @@
+# Inherit from base config
+defaults:
+  - _self_
+  - ../data/got_subword_level
+  - ../model/transformer_95m
+  - training/default
+
+data:
+  # Data paths
+  train_path: data/raw/got/game_of_thrones.txt
+  val_path: data/raw/got/game_of_thrones.txt
+  processed_dir: data/processed/got
+
+  # Processing settings
+  block_size: 256
+  train_split: 0.9
+  val_split: 0.1
+  num_workers: 4
+  batch_size: 32
+
+  # Tokenizer settings
+  tokenizer:
+    type: subword
+    vocab_size: 32000
+    pad_token: "<pad>"
+    unk_token: "<unk>"
+    bos_token: "<s>"
+    eos_token: "</s>"
+
+  # Dataset settings
+  dataset:
+    type: pickled
+    train_file: game_of_thrones_train.pkl
+    val_file: game_of_thrones_val.pkl
+    block_size: 256
+    num_workers: 4
+    batch_size: 32
+
+model:
+  vocab_size: 32000  # Match tokenizer vocab size
+  block_size: 256
+  n_layer: 12
+  n_head: 12
+  n_embd: 768
+  dropout: 0.1
+  bias: true
+
+training:
+  batch_size: 32
+  gradient_accumulation_steps: 2
+  learning_rate: 3e-4
+  max_steps: 1000
+  warmup_steps: 100
+  weight_decay: 0.1
+  max_grad_norm: 1.0
+  use_amp: true
+  time_save_interval_seconds: 300  # 5 minutes
+  log_interval: 1  # Log every batch
+  generation:
+    prompt: "The night is dark and full of"
+    max_new_tokens: 200
+    temperature: 0.8
+    top_k: 50
+    top_p: 0.9
+    repetition_penalty: 1.1 

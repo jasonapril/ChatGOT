@@ -35,20 +35,27 @@ ENV/
 .cursor/
 
 # Project specific
-data/
-!src/data/
-checkpoints/
-models/
-!conf/models/
-!src/models/
-logs/
-*.pth
-*.pt
-*.ckpt
-*.bin
-*.log
-mlruns/
-outputs/
+
+# Ignore generated artifacts and large data directories
+/outputs/*
+!/outputs/README.md
+/data/raw/*
+/data/processed/*
+# Consider Git LFS for large data/model files you DO want to track
+
+# Ignore specific artifact file types (if not exclusively in outputs/)
+# *.pth
+# *.pt
+# *.ckpt
+# *.bin
+# *.log
+
+# Ignore MLFlow tracking directory
+/mlruns/
+
+# Ignore coverage data file (if not already covered by .cache/)
+/.coverage
+/.cache/ # Add this if not present elsewhere
 
 # OS
 .DS_Store

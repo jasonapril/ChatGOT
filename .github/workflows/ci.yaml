@@ -1,0 +1,39 @@
+# .github/workflows/ci.yaml
+
+name: Python CI
+
+on:
+  push:
+    branches: [ "main" ] # Adjust branch name if needed
+  pull_request:
+    branches: [ "main" ] # Adjust branch name if needed
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"] # Specify desired Python versions
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install the package itself in editable mode, including test dependencies
+        # Assuming test dependencies are defined in pyproject.toml under [project.optional-dependencies.test]
+        pip install -e ".[test]"
+        # If test dependencies are separate, install them here:
+        # pip install pytest pytest-cov etc.
+
+    - name: Test with pytest
+      run: |
+        # Run pytest, collecting coverage if configured
+        # Add --cov=src/craft --cov-report=xml if using pytest-cov and want coverage reports
+        pytest tests/ 

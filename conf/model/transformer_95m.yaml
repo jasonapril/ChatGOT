@@ -1,0 +1,8 @@
+# Model architecture configuration for ~95M parameter transformer
+vocab_size: 32000  # Will be overridden by tokenizer vocab size
+block_size: 256
+n_layer: 12
+n_head: 12
+n_embd: 768
+dropout: 0.1
+bias: true 

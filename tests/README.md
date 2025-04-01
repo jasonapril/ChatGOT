@@ -1,35 +1,24 @@
 # Tests (`tests/`)
 
-This directory contains automated tests for the Craft project.
+## Purpose
 
-## Structure:
+This directory contains all automated tests for the source code located in `src/`. This includes unit tests, integration tests, and potentially end-to-end tests.
 
-*   `unit/`: Contains unit tests that focus on testing individual components (functions, classes) in isolation. Mocking is often used here to isolate the unit under test.
-*   `integration/`: (If present) Contains integration tests that verify the interaction between multiple components.
-*   Other test files (e.g., `test_models.py`, `test_data.py`): May contain tests that span multiple units or test specific high-level functionalities.
-*   `fixtures/` or `data/`: (If present) May contain test data or fixture files used by the tests.
+## Structure
 
-## Framework:
+The structure of `tests/` should mirror the structure of `src/` to make it easy to find tests corresponding to specific modules.
+-   `tests/`
+    -   `unit/`: Tests for individual components in isolation. (Optional subdivision)
+        - `test_utils.py`
+        - `models/test_model_a.py`
+    -   `integration/`: Tests for interactions between components. (Optional subdivision)
+    -   `conftest.py`: Fixtures and configuration for `pytest`.
 
-Tests primarily use the standard Python `unittest` framework. Consider migrating to or integrating with `pytest` for enhanced features if needed.
+## Guidelines
 
-## Running Tests:
-
-Tests can typically be run using a test runner. From the project root directory:
-
-*   **Using `unittest` discovery:**
-    ```bash
-    python -m unittest discover tests
-    ```
-*   **Running a specific file:**
-    ```bash
-    python -m unittest tests/unit/test_optimizations.py
-    ```
-*   **If `pytest` is installed:**
-    ```bash
-    pytest
-    ```
-    or
-    ```bash
-    pytest tests/
-    ``` 
+- Use `pytest` as the testing framework.
+- Test filenames should start with `test_` (e.g., `test_module.py`).
+- Test function names should start with `test_` (e.g., `test_functionality`).
+- Write clear, focused tests.
+- Aim for high test coverage of the `src/` codebase.
+- Ensure tests can be run easily (e.g., via a `pytest` command from the root).

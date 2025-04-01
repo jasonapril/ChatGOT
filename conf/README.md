@@ -1,21 +1,27 @@
 # Configuration (`conf/`)
 
-This directory contains configuration files for the Craft project, primarily managed by [Hydra](https://hydra.cc/).
+## Purpose
 
-## Structure:
+This directory stores all configuration files for the project, primarily using YAML format managed by [Hydra](https://hydra.cc/) / [OmegaConf](https://omegaconf.readthedocs.io/). It allows for flexible and reproducible experiment setup. This structure follows standard Hydra conventions, promoting modularity, reusability, and reproducibility in configurations.
 
-*   `config.yaml`: The main Hydra configuration file. It defines the default composition of configuration groups and may contain top-level settings or Hydra-specific configurations (like logging and output directories).
-*   Subdirectories (Configuration Groups): Each subdirectory typically represents a configurable component of the application (e.g., `model`, `data`, `training`). These directories contain YAML files that define specific options for that component (e.g., `conf/model/gpt_decoder.yaml`).
-    *   `callbacks/`: Configurations for training callbacks.
-    *   `data/`: Dataset configurations.
-    *   `experiment/`: Pre-defined, complete experiment configurations that compose settings from various groups for specific runs (e.g., `chatgot_25m.yaml`). These are often selected via the command line (`python -m src.cli.run experiment=some_experiment`).
-    *   `model/`: Model architecture configurations.
-    *   `optimizer/`: Optimizer configurations.
-    *   `scheduler/`: Learning rate scheduler configurations.
-    *   `training/`: Training loop configurations.
-    *   `tokenizer/`: (Potentially used, currently seems integrated elsewhere).
-*   Other `.yaml` files: Standalone configuration files (e.g., `test_minimal.yaml` potentially for testing).
+## Structure
 
-## Usage:
+Configurations are organized into groups based on their function:
+-   `conf/`
+    -   `config.yaml`: Main configuration file, often used as the entry point for Hydra. Defines defaults and structure.
+    -   `experiment/`: Complete experiment configurations. These files compose settings from other groups.
+    -   `data/`: Configurations related to datasets, preprocessing, and data loading.
+    -   `model/`: Configurations defining model architectures and hyperparameters.
+    -   `training/`: Configurations for the main training loop (epochs, batch size, validation, etc.).
+    -   `optimizer/`: Configurations for different optimizers (e.g., AdamW, SGD) and their parameters.
+    -   `scheduler/`: Configurations for learning rate schedulers.
+    -   `callbacks/`: Configurations for training callbacks (e.g., checkpointing, early stopping).
+    -   `tokenizer/`: Configurations related to tokenizers (if applicable and managed separately).
+    -   `README.md`: This file.
 
-Configurations are typically loaded and merged by Hydra when running scripts like `src/cli/run.py`. Defaults are set in `config.yaml`, and specific settings can be chosen or overridden via the command line (e.g., `python -m src.cli.run model=gpt_decoder data=my_dataset training.epochs=5`). Experiment files provide convenient presets for common runs. 
+## Guidelines
+
+- Define reusable configuration defaults or options within the specific group directories (e.g., `conf/optimizer/adamw.yaml`).
+- Use `experiment/` files to combine configurations from different groups for specific runs.
+- Leverage Hydra's composition (`defaults` list) and override capabilities.
+- The `config.yaml` often sets the default choices for each group.

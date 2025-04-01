@@ -1,11 +1,11 @@
 # conf/training/default.yaml
 epochs: 5 # Set to 5 epochs
 use_amp: True
-gradient_accumulation_steps: 1 # Match previous high-performance run
+gradient_accumulation_steps: 2
 max_grad_norm: 1.0
-log_interval: 50 # Log every 50 steps
+log_interval: 1 # Log every batch
 save_interval: 1 # Save checkpoint every N epochs
-time_save_interval_minutes: 5 # Save checkpoint every N minutes (0 or null to disable)
+time_save_interval_seconds: 300 # 5 minutes
 compile_model: False
 activation_checkpointing: False
 torch_compile: False # Add default for torch.compile flag
@@ -17,8 +17,19 @@ sample_start_text: "The meaning of life is"
 
 # REMOVE Redundant generation block (already defined in config.yaml)
 # Generation config used by Trainer._generate_sample_and_log
-# generation:
-#   start_prompt: "The night is dark and "
-#   max_new_tokens: 150
-#   temperature: 0.8
-#   top_k: null 
+generation:
+  prompt: "The night is dark and full of"
+  max_new_tokens: 200
+  temperature: 0.8
+  top_k: 50
+  top_p: 0.9
+  repetition_penalty: 1.1
+
+# Default training configuration
+training:
+  # Training settings
+  batch_size: 32
+  learning_rate: 3e-4
+  max_steps: 1000
+  warmup_steps: 100
+  weight_decay: 0.1 

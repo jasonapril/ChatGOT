@@ -1,15 +1,27 @@
 # Source Code (`src/`)
 
-This directory contains the core Python source code for the project.
+## Purpose
+
+This directory contains the Python source code for the project, structured as an installable package named `craft`.
+
+## Rationale for `src/craft/` Layout ("src layout")
+
+Placing the main package code (`craft`) inside the `src/` directory is a standard Python best practice with several advantages:
+
+- **Clear Installability:** Makes it explicit that `craft` is the installable package.
+- **Prevents Accidental Imports:** Avoids issues where Python might import the package directly from the root directory during development, ensuring tests run against the installed version.
+- **Clean Namespace:** Clearly separates the package code from other project files (like tests, scripts, documentation).
+- **Tooling Compatibility:** Works well with standard Python build and testing tools.
 
 ## Structure
 
-*   `cli/`: Command-line interface entry points (using Typer/Click).
-*   `config/`: Configuration loading and management (using OmegaConf/Hydra helpers).
-*   `data/`: Modules related to dataset loading, processing, and management (e.g., `PickledDataset`, `base.py`, `processors.py`).
-*   `models/`: Model definitions (e.g., `TransformerModel`) and related utilities.
-*   `training/`: Training loop logic (`Trainer`), callbacks, and related utilities.
-*   `utils/`: General utility functions (logging, I/O, etc.).
-*   `__init__.py`: Package initializer.
+- `src/`
+  - `craft/`: Contains the actual Python package source code. See `src/craft/README.md` for its internal structure.
+  - `README.md`: This file.
 
-Consult `README.md` files within subdirectories for more details. 
+## Guidelines
+
+- All core library/framework code belongs inside the `src/craft/` directory.
+- Follow PEP 8 style guidelines within the package.
+- Ensure code is installable (e.g., via `pip install -e .` using `pyproject.toml`).
+- Tests for the code in `src/craft/` should reside in the top-level `tests/` directory, mirroring the package structure.
