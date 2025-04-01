@@ -1,24 +1,32 @@
-# Tests (`tests/`)
+# Craft Tests
 
-## Purpose
-
-This directory contains all automated tests for the source code located in `src/`. This includes unit tests, integration tests, and potentially end-to-end tests.
+This directory contains tests for the Craft project.
 
 ## Structure
 
-The structure of `tests/` should mirror the structure of `src/` to make it easy to find tests corresponding to specific modules.
--   `tests/`
-    -   `unit/`: Tests for individual components in isolation. (Optional subdivision)
-        - `test_utils.py`
-        - `models/test_model_a.py`
-    -   `integration/`: Tests for interactions between components. (Optional subdivision)
-    -   `conftest.py`: Fixtures and configuration for `pytest`.
+Tests are organized mirroring the `src/craft` directory structure:
 
-## Guidelines
+*   `tests/data/`: Tests for data loading (`PickledDataset`, `create_data_loaders_from_config`), processing (`process_char_level_data`), and related utilities.
+*   `tests/models/`: Tests for model architectures (e.g., `TransformerModel`) and base classes.
+*   `tests/training/`: Tests for training loop components (`Trainer`, `TrainingLoop`), generation (`generate_text`), etc.
+*   `tests/integration/`: End-to-end integration tests (Planned).
+*   `tests/`: Contains shared configuration (`conftest.py`).
 
-- Use `pytest` as the testing framework.
-- Test filenames should start with `test_` (e.g., `test_module.py`).
-- Test function names should start with `test_` (e.g., `test_functionality`).
-- Write clear, focused tests.
-- Aim for high test coverage of the `src/` codebase.
-- Ensure tests can be run easily (e.g., via a `pytest` command from the root).
+## Running Tests
+
+Tests are written using `pytest` (and `unittest` for some older files).
+
+To run all tests from the root directory:
+
+```bash
+pytest
+```
+
+To run tests in a specific file or directory:
+
+```bash
+pytest tests/data/test_datasets.py
+pytest tests/models/
+```
+
+Coverage information is automatically generated if `pytest-cov` is installed.

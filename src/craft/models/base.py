@@ -14,7 +14,7 @@ import torch.nn as nn
 from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
 import torch.nn.functional as F
 
-from src.utils.checkpoint import save_checkpoint, load_checkpoint
+from craft.utils.checkpoint import save_checkpoint, load_checkpoint
 
 
 # Pydantic ModelConfig Base

@@ -272,37 +272,47 @@ def split_data(
     seed: int = 42
 ) -> Tuple[List[Any], List[Any], List[Any]]:
     """
-    Split data into train, validation, and test sets.
-    
+    Split data into training, validation, and test sets.
+
     Args:
-        data: List of data items
-        train_ratio: Ratio of data for training
-        val_ratio: Ratio of data for validation
-        test_ratio: Ratio of data for testing
-        seed: Random seed for reproducibility
-        
+        data: Input data (list or numpy array)
+        train_ratio: Ratio of data for training set
+        val_ratio: Ratio of data for validation set
+        test_ratio: Ratio of data for test set
+        seed: Random seed for shuffling
+
     Returns:
-        Tuple of (train_data, val_data, test_data)
+        Tuple containing train, validation, and test sets
     """
-    # Check ratios
-    assert 0 <= train_ratio <= 1, "train_ratio must be between 0 and 1"
-    assert 0 <= val_ratio <= 1, "val_ratio must be between 0 and 1"
-    assert 0 <= test_ratio <= 1, "test_ratio must be between 0 and 1"
-    assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, "Ratios must sum to 1"
-    
-    # Set random seed
+    # Set random seed for reproducibility
     np.random.seed(seed)
-    
-    # Shuffle data
-    indices = np.random.permutation(len(data))
-    
+
+    # Ensure ratios sum to 1
+    if not np.isclose(train_ratio + val_ratio + test_ratio, 1.0):
+        raise ValueError("Split ratios must sum to 1.0")
+
+    # Shuffle indices
+    indices = np.arange(len(data))
+    np.random.shuffle(indices)
+
     # Calculate split indices
-    train_end = int(len(data) * train_ratio)
-    val_end = train_end + int(len(data) * val_ratio)
-    
-    # Split data
-    train_data = [data[i] for i in indices[:train_end]]
-    val_data = [data[i] for i in indices[train_end:val_end]]
-    test_data = [data[i] for i in indices[val_end:]]
-    
+    train_end = int(train_ratio * len(data))
+    val_end = train_end + int(val_ratio * len(data))
+
+    # Split data using shuffled indices
+    train_indices = indices[:train_end]
+    val_indices = indices[train_end:val_end]
+    test_indices = indices[val_end:]
+
+    # Handle numpy array input efficiently
+    if isinstance(data, np.ndarray):
+        train_data = data[train_indices]
+        val_data = data[val_indices]
+        test_data = data[test_indices]
+    else:
+        # Handle list input
+        train_data = [data[i] for i in train_indices]
+        val_data = [data[i] for i in val_indices]
+        test_data = [data[i] for i in test_indices]
+
     return train_data, val_data, test_data 

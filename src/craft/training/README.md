@@ -1,78 +1,41 @@
-# Training Module
+# Training Subsystem
 
-This directory contains the training framework, designed to provide a modular and efficient system for model training, evaluation, and text generation.
+## Purpose
+
+This directory contains the core components for training models within the `craft` framework. The training subsystem is designed to be modular and flexible, allowing for easy configuration and extension of the training process through configuration files (Hydra) and a callback system.
 
 ## Structure
 
-The training module is organized into the following components:
+The subsystem is composed of the following key modules:
 
-* `trainer.py`: Main coordinator class that integrates all training components
-* `training_loop.py`: Core training loop logic with optimizations for efficiency
-* `evaluation.py`: Model evaluation functionality
-* `checkpointing.py`: Checkpoint management and state persistence
-* `callbacks.py`: Flexible callback system for extending training behavior
-* `generation.py`: Text generation capabilities with various sampling strategies
-* `progress.py`: Progress tracking and logging utilities
-* `optimizations.py`: Training optimizations like mixed precision and gradient accumulation
-* `utils.py`: Common utility functions
-* `amp.py`: Automatic Mixed Precision (AMP) support
+*   **`trainer.py`:** Contains the `Trainer` class, which orchestrates the overall training process, including epoch management, evaluation, checkpointing, and callbacks.
+*   **`training_loop.py`:** Contains the `TrainingLoop` class, encapsulating the logic for a single training epoch: batch iteration, forward/backward passes, gradient accumulation, and optimizer steps.
+*   **`optimizers.py`:** Provides the `create_optimizer` factory function to instantiate optimizers (e.g., AdamW) based on configuration.
+*   **`schedulers.py`:** Provides the `create_scheduler` factory function to instantiate learning rate schedulers (e.g., CosineAnnealingLR) based on configuration.
+*   **`callbacks.py`:** Defines the `Callback` base class and provides a `CallbackList` container, along with implementations of common callbacks (e.g., Logging, EarlyStopping - *to be added*).
+*   **`checkpointing.py`:** Contains the `CheckpointManager` class for saving and loading model states, optimizer states, and training progress.
+*   **`evaluation.py`:** Contains the `Evaluator` class for evaluating model performance on validation or test datasets.
+*   **`progress.py`:** Provides the `ProgressTracker` class for tracking and displaying training progress (e.g., loss, throughput, ETA).
+*   **`generation.py`:** Contains the `TextGenerator` class, a wrapper for models with a built-in `.generate()` method (e.g., from Hugging Face).
+*   **`sampling.py`:** Contains standalone functions (`generate_text_sampling`, `sample_text`) for text generation using various sampling strategies (temperature, top-k, top-p).
+*   **`beam_search.py`:** Contains the standalone `beam_search_generate` function.
+*   **`batch_generation.py`:** Contains the standalone `batch_generate` function for parallel generation from multiple prompts.
+*   **`amp.py`:** Contains helpers related to automatic mixed precision (AMP) training.
+*   **`utils.py`:** General helper functions used specifically within the training subsystem.
+*   **`__init__.py`:** Makes key components importable from `craft.training`.
 
-## Features
+*(Potentially outdated/refactor candidates):*
+*   `train_config.py`: Defines Pydantic models for configurations, largely superseded by Hydra.
+*   `train_runner.py`: Older script for running training, likely superseded by `scripts/train.py`.
+*   `optimizations.py`: Contains older optimization techniques, may be integrated elsewhere or removed.
 
-* **Modular Design**: Each component has a single responsibility and clear interfaces
-* **Flexible Training**: Support for various training configurations and optimizations
-* **Robust Checkpointing**: Save and resume training state with comprehensive error handling
-* **Extensible Callbacks**: Easy to add custom behaviors during training
-* **Multiple Generation Methods**: Support for different text generation strategies
-* **Progress Tracking**: Detailed logging and metrics with fallback options
-* **Memory Efficient**: Optimized for handling large models and datasets
+## Guidelines
 
-## Usage
-
-Basic usage example:
-
-```python
-from training.trainer import Trainer
-
-trainer = Trainer(
-    model=model,
-    train_dataloader=train_dataloader,
-    val_dataloader=val_dataloader,
-    optimizer=optimizer,
-    scheduler=scheduler,
-    config=config,
-    checkpoint_dir="checkpoints",
-    use_amp=True
-)
-
-# Train the model
-trainer.train()
-
-# Generate text
-generated_text = trainer.generate_text(
-    prompt="Once upon a time",
-    max_new_tokens=100,
-    temperature=0.8
-)
-```
-
-See individual module docstrings for detailed API documentation.
-
-## Core Principles
-
-* **Single Responsibility**: Each module handles one aspect of training
-* **Error Handling**: Comprehensive error handling and logging
-* **Type Safety**: Type hints throughout for better IDE support
-* **Memory Optimization**: Efficient handling of large models/datasets
-* **Flexibility**: Easy to extend and customize behavior
-
-## Development Guidelines
-
-When modifying or extending this module:
-
-1. Follow the single responsibility principle
-2. Add appropriate type hints
-3. Include comprehensive error handling
-4. Add docstrings and comments for complex logic
-5. Write unit tests for new functionality
-6. Update this README when adding new features 
+*   **Trainer Interaction:** Most interactions with this subsystem should happen via the main `scripts/train.py` script, which configures and runs the `Trainer`.
+*   **Configuration:** Use Hydra configuration files (`conf/`) to set parameters for the trainer, optimizer, scheduler, and callbacks.
+*   **Factories:** Use the `create_optimizer` and `create_scheduler` functions to instantiate these components based on the config.
+*   **Generation:** 
+    *   For models with a `.generate()` method (like Hugging Face models), use the `TextGenerator` class (configured and potentially used within the `Trainer` or standalone).
+    *   For custom models or direct control over sampling/beam search, use the standalone functions imported from `sampling`, `beam_search`, or `batch_generation`.
+*   **Callbacks:** To add custom logic during training (e.g., custom logging, metric calculation, model manipulation), create a new class inheriting from `Callback` in `callbacks.py` and implement the desired `on_...` methods (e.g., `on_epoch_end`, `on_step_begin`). Register the new callback in your Hydra config under the `callbacks` list.
+*   **Adding Schedulers/Optimizers:** To support new types, update the respective factory functions in `optimizers.py` or `schedulers.py` with the necessary logic and validation. 

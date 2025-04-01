@@ -1,53 +1,81 @@
 import argparse
 import logging
 import os
+import sys
+
+# Add project root to path to allow importing 'craft'
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
+# Import the processor function
+try:
+    # from craft.data.processors import process_char_level_data # Old location
+    from craft.data.char_processor import process_char_level_data # New location
+except ImportError as e:
+    print(f"Error: Could not import processing functions. {e}")
+    print("Ensure the 'craft' package is installed correctly (e.g., pip install -e .)")
+    sys.exit(1)
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def parse_args():
     """Parses command-line arguments."""
     parser = argparse.ArgumentParser(description="Prepare raw data for use with the Craft framework.")
-    parser.add_argument('--input_path', type=str, required=True, help="Path to the raw input data file or directory.")
-    parser.add_argument('--output_dir', type=str, required=True, help="Directory to save the processed data.")
-    parser.add_argument('--config', type=str, help="Path to a data processing configuration file (optional).")
-    # Add other relevant arguments like tokenizer type, vocabulary size, split ratios, etc.
-    # parser.add_argument('--tokenizer_type', type=str, default='char', help="Type of tokenizer ('char', 'subword', etc.)")
-    # parser.add_argument('--vocab_size', type=int, default=10000, help="Vocabulary size for subword tokenizers.")
+    parser.add_argument('--input-path', type=str, required=True, help="Path to the raw input data file or directory.")
+    parser.add_argument('--output-dir', type=str, required=True, help="Directory to save the processed data.")
+    parser.add_argument('--type', type=str, default='char', choices=['char', 'subword'], help="Type of processing to perform (default: char).")
+    # parser.add_argument('--config', type=str, help="Path to a data processing configuration file (optional).") # Keep for future use?
+
+    # Arguments specific to char-level processing
+    parser.add_argument('--split-ratios', type=float, nargs=3, default=[0.9, 0.05, 0.05], help="Train/Val/Test split ratios (e.g., 0.9 0.05 0.05).")
+
+    # Arguments specific to subword processing (add later)
+    # parser.add_argument('--vocab-size', type=int, default=10000, help="Vocabulary size for subword tokenizers.")
+    # parser.add_argument('--tokenizer-type', type=str, default='bpe', choices=['bpe', 'wordpiece'], help="Subword tokenizer type.")
+
     return parser.parse_args()
 
 def main():
     """Main data preparation script execution."""
     args = parse_args()
-    logging.info(f"Starting data preparation from: {args.input_path}")
-    logging.info(f"Processed data will be saved to: {args.output_dir}")
+    logger.info(f"Starting data preparation script:")
+    logger.info(f"  Input path: {args.input_path}")
+    logger.info(f"  Output dir: {args.output_dir}")
+    logger.info(f"  Processing type: {args.type}")
 
     try:
-        # Ensure output directory exists
-        os.makedirs(args.output_dir, exist_ok=True)
+        if args.type == 'char':
+            logger.info("Performing character-level processing...")
+            logger.info(f"  Split ratios: {args.split_ratios}")
+            # Validate splits sum to 1
+            if not abs(sum(args.split_ratios) - 1.0) < 1e-6:
+                 parser.error(f"Split ratios must sum to 1.0. Got: {args.split_ratios}")
 
-        # --- Integration with src ---
-        # 1. Load configuration if provided (e.g., using src.config)
-        # data_config = load_data_config(args.config) if args.config else {}
-        logging.info("Data processing configuration loaded (placeholder).")
+            process_char_level_data(
+                input_path=args.input_path,
+                output_dir=args.output_dir,
+                splits=tuple(args.split_ratios)
+            )
+            logger.info("Character-level processing finished successfully.")
 
-        # 2. Instantiate data processing components (e.g., from src.data or dedicated processing modules)
-        # processor = DataProcessor(config=data_config, **vars(args))
-        logging.info("Data processor initialized (placeholder).")
+        elif args.type == 'subword':
+            logger.warning("Subword processing not yet implemented in this script.")
+            # Add logic here later, potentially calling a different function
+            # from craft.data.processors or using the config argument.
+            pass
 
-        # 3. Run the data preparation process
-        # processor.process(args.input_path, args.output_dir)
-        logging.info(f"Data processing started for {args.input_path} (placeholder)...")
-        # Simulate creating output files
-        placeholder_file = os.path.join(args.output_dir, "processed_data.pkl")
-        with open(placeholder_file, 'w') as f:
-            f.write("Placeholder for processed data.")
-        logging.info(f"Processed data saved to {placeholder_file} (placeholder).")
-
-        logging.info("Data preparation script finished successfully.")
-
+    except ValueError as ve:
+        logger.error(f"Configuration error: {ve}")
+        sys.exit(1)
+    except IOError as ioe:
+        logger.error(f"File I/O error: {ioe}")
+        sys.exit(1)
     except Exception as e:
-        logging.error(f"An error occurred during data preparation: {e}", exc_info=True)
+        logger.error(f"An unexpected error occurred during data preparation: {e}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main() 

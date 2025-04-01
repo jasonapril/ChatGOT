@@ -12,13 +12,13 @@ from pydantic import ValidationError, ConfigDict
 
 # Import components directly from their specific modules
 # Import Model (the nn.Module base), not BaseModel (the Pydantic one by mistake)
-from src.models.base import (
+from craft.models.base import (
     Model, # Import the actual base nn.Module class
     GenerativeModel, LanguageModel, 
     BaseModelConfig, GenerativeModelConfig, LanguageModelConfig
 )
-from src.models.factory import create_model_from_config
-from src.models.transformer import TransformerModel
+from craft.models.factory import create_model_from_config
+from craft.models.transformer import TransformerModel
 
 
 # --- Mock Classes --- #
@@ -508,6 +508,70 @@ class TestTransformerModel(unittest.TestCase):
         # Check output shape
         expected_shape = (batch_size, seq_len, self.config.vocab_size)
         self.assertEqual(logits.shape, expected_shape)
+
+
+# --- New Pytest-style Tests for TransformerModel (from craft_test_cases.py) ---
+
+def test_transformer_creation():
+    """Test creating a transformer model with default parameters."""
+    # Create config for a small model
+    config = LanguageModelConfig(
+        vocab_size=100, 
+        max_seq_length=128,
+        d_model=256, 
+        n_head=4, 
+        d_hid=512, # Explicitly set d_hid for clarity in test
+        n_layers=2,
+        dropout=0.1
+    )
+    # Instantiate the model directly
+    model = TransformerModel(config=config)
+    
+    # Test that the model is a nn.Module
+    assert isinstance(model, nn.Module)
+    
+    # Test that the model has the correct attributes from config
+    assert model.d_model == 256
+    assert model.n_head == 4
+    assert model.n_layers == 2
+    assert model.vocab_size == 100
+    
+    # Test model output with a sample input
+    batch_size = 2
+    seq_len = 128
+    
+    # Generate sample input
+    x = torch.randint(0, 100, (batch_size, seq_len))
+    
+    # Forward pass
+    with torch.no_grad():
+        output = model(x)
+    
+    # Check output shape
+    assert output.shape == (batch_size, seq_len, 100)
+
+def test_transformer_parameter_count():
+    """Test that the transformer model has a reasonable number of parameters."""
+    # Create a small model config
+    config = LanguageModelConfig(
+        vocab_size=100, 
+        max_seq_length=128,
+        d_model=256, 
+        n_head=4, 
+        d_hid=512, 
+        n_layers=2,
+        dropout=0.1
+    )
+    # Instantiate the model
+    model = TransformerModel(config=config)
+    
+    # Count parameters
+    param_count = sum(p.numel() for p in model.parameters())
+    
+    # The actual count will vary, but should be in a reasonable range
+    # This test is just to catch major changes that affect parameter count
+    assert param_count > 100000  # At least 100K parameters
+    assert param_count < 5000000   # Less than 5M parameters
 
 
 if __name__ == "__main__":

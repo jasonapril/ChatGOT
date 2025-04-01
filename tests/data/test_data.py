@@ -16,10 +16,11 @@ import logging
 import pickle
 import numpy as np
 import shutil
+from torch.utils.data import DataLoader
 
-# Modules to test
-from src.data.base import BaseDataset, create_dataset_from_config
-from src.data.dataset import PickledDataset
+# Corrected import
+from craft.data.base import BaseDataset, create_dataset_from_config
+from craft.data.dataset import PickledDataset
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -219,7 +220,7 @@ class TestDatasetFactory(unittest.TestCase):
         """Test creating a dataset using Hydra's _target_."""
         # Add _target_ for direct instantiation
         split_config_with_target = OmegaConf.merge(self.split_config, {
-            '_target_': 'src.data.dataset.PickledDataset',
+            '_target_': 'craft.data.dataset.PickledDataset',
             'file_path': self.file_path,
             'block_size': self.block_size,
             'vocab_path': self.vocab_path
@@ -243,7 +244,7 @@ class TestDatasetFactory(unittest.TestCase):
     def test_factory_invalid_target(self):
         """Test error when _target_ points to a non-existent class."""
         split_config_invalid_target = OmegaConf.merge(self.split_config, {
-            '_target_': 'src.data.non_existent.NonExistentDataset'
+            '_target_': 'craft.data.non_existent.NonExistentDataset'
         })
         with self.assertRaises(Exception): # Expect some form of import or instantiation error
             create_dataset_from_config(self.base_data_config, split_config_invalid_target, self.cwd)
