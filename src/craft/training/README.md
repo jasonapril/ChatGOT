@@ -8,6 +8,7 @@ This directory contains the core components for training models within the `craf
 
 The subsystem is composed of the following key modules:
 
+*   **`__init__.py`:** Makes key components importable from `craft.training`.
 *   **`trainer.py`:** Contains the `Trainer` class, which orchestrates the overall training process, including epoch management, evaluation, checkpointing, and callbacks.
 *   **`training_loop.py`:** Contains the `TrainingLoop` class, encapsulating the logic for a single training epoch: batch iteration, forward/backward passes, gradient accumulation, and optimizer steps.
 *   **`optimizers.py`:** Provides the `create_optimizer` factory function to instantiate optimizers (e.g., AdamW) based on configuration.
@@ -21,13 +22,8 @@ The subsystem is composed of the following key modules:
 *   **`beam_search.py`:** Contains the standalone `beam_search_generate` function.
 *   **`batch_generation.py`:** Contains the standalone `batch_generate` function for parallel generation from multiple prompts.
 *   **`amp.py`:** Contains helpers related to automatic mixed precision (AMP) training.
-*   **`utils.py`:** General helper functions used specifically within the training subsystem.
-*   **`__init__.py`:** Makes key components importable from `craft.training`.
-
-*(Potentially outdated/refactor candidates):*
-*   `train_config.py`: Defines Pydantic models for configurations, largely superseded by Hydra.
-*   `train_runner.py`: Older script for running training, likely superseded by `scripts/train.py`.
-*   `optimizations.py`: Contains older optimization techniques, may be integrated elsewhere or removed.
+*   **`checkpoint_utils.py`:** Utilities for applying gradient checkpointing to models.
+*   **`optimizations.py`:** Contains specific optimization utilities (e.g., mixed precision, torch.compile, activation checkpointing) which are used and tested.
 
 ## Guidelines
 
@@ -38,4 +34,4 @@ The subsystem is composed of the following key modules:
     *   For models with a `.generate()` method (like Hugging Face models), use the `TextGenerator` class (configured and potentially used within the `Trainer` or standalone).
     *   For custom models or direct control over sampling/beam search, use the standalone functions imported from `sampling`, `beam_search`, or `batch_generation`.
 *   **Callbacks:** To add custom logic during training (e.g., custom logging, metric calculation, model manipulation), create a new class inheriting from `Callback` in `callbacks.py` and implement the desired `on_...` methods (e.g., `on_epoch_end`, `on_step_begin`). Register the new callback in your Hydra config under the `callbacks` list.
-*   **Adding Schedulers/Optimizers:** To support new types, update the respective factory functions in `optimizers.py` or `schedulers.py` with the necessary logic and validation. 
+*   **Adding Schedulers/Optimizers:** To support new types, update the respective factory functions in `optimizers.py` or `schedulers.py` with the necessary logic and validation.

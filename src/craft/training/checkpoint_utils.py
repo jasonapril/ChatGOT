@@ -1,5 +1,7 @@
 """
-Training utilities, including gradient checkpointing.
+Gradient Checkpointing Utilities.
+
+Functions to dynamically enable/disable gradient checkpointing on model layers.
 """
 
 import logging
@@ -63,25 +65,22 @@ def enable_gradient_checkpointing(model: torch.nn.Module):
 
                 # Create a wrapper for checkpointing
                 def checkpoint_wrapper(original_forward, *args, **kwargs):
-                    # Filter out kwargs not accepted by torch.utils.checkpoint if necessary
-                    # Depending on the PyTorch version, non-tensor kwargs might cause issues.
-                    # For simplicity now, assume args are positional tensors and kwargs are compatible.
+                    """Wrapper to apply torch.checkpoint, handling args/kwargs correctly."""
                     try:
-                        # Ensure use_reentrant=False for better memory efficiency in newer PyTorch
-                        # This might require PyTorch >= 1.10 or later. Adjust based on target env.
-                        kwargs_for_checkpoint = {'use_reentrant': False}
-                        # If use_reentrant=False is not available or causes issues, remove it
-                        # return torch_checkpoint(original_forward, *args, **kwargs) # Older way
-                        return torch_checkpoint(original_forward, *args, **kwargs_for_checkpoint)
+                        # Pass only the original args and kwargs to the function being checkpointed.
+                        # Pass specific kwargs like use_reentrant directly to torch_checkpoint.
+                        return torch_checkpoint(original_forward, *args, use_reentrant=False, **kwargs) # Pass kwargs to original_forward too
                     except TypeError as te:
                         if 'use_reentrant' in str(te):
-                             logger.warning("`use_reentrant=False` not supported or caused error. Falling back.")
-                             return torch_checkpoint(original_forward, *args, **kwargs)
+                            # Fallback if use_reentrant=False is not supported
+                            logging.getLogger(__name__).warning("`use_reentrant=False` not supported or caused error. Falling back.")
+                            return torch_checkpoint(original_forward, *args, **kwargs)
                         else:
-                             raise # Re-raise other TypeErrors
+                            raise # Re-raise other TypeErrors
                     except Exception as e:
+                        # Handle other potential errors during checkpointing
                         inner_logger = logging.getLogger(__name__)
-                        inner_logger.error(f"Error during checkpointed forward pass in layer {i}: {e}", exc_info=True)
+                        inner_logger.error(f"Error during checkpointed forward pass: {e}", exc_info=True)
                         # Fall back to original forward pass if checkpointing fails at runtime
                         return original_forward(*args, **kwargs)
 
@@ -99,7 +98,7 @@ def enable_gradient_checkpointing(model: torch.nn.Module):
     except Exception as e:
         logger.error(f"Failed to enable gradient checkpointing: {e}", exc_info=True)
         # Attempt to disable if setup failed midway
-        disable_gradient_checkpointing(model)
+        disable_gradient_checkpointing(model) # Call self from this module now
         return False
 
 def disable_gradient_checkpointing(model: torch.nn.Module):

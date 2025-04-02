@@ -8,6 +8,9 @@ This module provides a flexible callback system for training events.
 import logging
 from typing import Dict, Any, Optional, List
 from abc import ABC, abstractmethod
+import numpy as np
+import torch
+from torch.utils.tensorboard import SummaryWriter
 
 class Callback(ABC):
     """Base class for all callbacks."""
@@ -144,30 +147,38 @@ class ReduceLROnPlateauOrInstability(Callback):
         # Internal state
         self.wait = 0           # Steps waited for improvement/stability
         self.cooldown_counter = 0 # Steps remaining in cooldown
-        self.best_loss = np.inf # Best loss observed so far (or lowest avg)
+        self.best_loss = float('inf') # Best loss observed so far (or lowest avg)
         self.recent_losses = [] # Track recent losses for moving average
+
+    def set_trainer(self, trainer):
+        """Set the trainer instance for this callback."""
+        super().set_trainer(trainer)
+        if hasattr(trainer, 'optimizer'):
+            self.optimizer = trainer.optimizer
+        else:
+            self.logger.error("Trainer does not have an optimizer attribute")
 
     def _get_lr(self):
         """Get current learning rate from the optimizer."""
-        if self.trainer and hasattr(self.trainer, 'optimizer'):
-            # Assuming optimizer has param_groups[0]
-            return self.trainer.optimizer.param_groups[0]['lr']
+        if hasattr(self, 'optimizer'):
+            return self.optimizer.param_groups[0]['lr']
         return None
 
     def _set_lr(self, new_lr):
         """Set new learning rate for the optimizer."""
-        if self.trainer and hasattr(self.trainer, 'optimizer'):
-            old_lr = self.trainer.optimizer.param_groups[0]['lr']
+        if hasattr(self, 'optimizer'):
+            old_lr = self.optimizer.param_groups[0]['lr']
             if new_lr < old_lr:
-                self.trainer.optimizer.param_groups[0]['lr'] = new_lr
+                self.optimizer.param_groups[0]['lr'] = new_lr
                 if self.verbose:
                     self.logger.warning(f"Learning rate reduced from {old_lr:.2e} to {new_lr:.2e}")
             else:
-                 self.logger.debug(f"Attempted to set LR to {new_lr:.2e}, but it's not lower than current {old_lr:.2e}")
+                self.logger.debug(f"Attempted to set LR to {new_lr:.2e}, but it's not lower than current {old_lr:.2e}")
         else:
             self.logger.error("Optimizer not set in ReduceLROnPlateauOrInstability callback.")
 
     def on_step_end(self, step, logs=None):
+        """Called at the end of each training step."""
         logs = logs or {}
         current_loss = logs.get(self.monitor)
         current_lr = self._get_lr()
@@ -193,25 +204,20 @@ class ReduceLROnPlateauOrInstability(Callback):
         if moving_avg_loss is not None:
             # Update best loss if moving average improves
             if moving_avg_loss < self.best_loss:
-                 self.best_loss = moving_avg_loss
-                 self.logger.debug(f"New best average loss: {self.best_loss:.4f}")
+                self.best_loss = moving_avg_loss
+                self.logger.debug(f"New best average loss: {self.best_loss:.4f}")
 
             # Check for instability spike against the *best* loss average seen so far
             if current_loss > self.best_loss * self.threshold:
                 is_spike = True
                 self.wait += 1
                 self.logger.debug(f"Loss spike detected ({current_loss:.4f} > {self.best_loss:.4f} * {self.threshold:.2f}). Wait: {self.wait}/{self.patience}")
-            # else: # Don't reset wait just because this single step isn't a spike
-            #     pass # Keep wait counter unless loss improves significantly
 
         # Reset wait counter only if loss is NOT spiking relative to best loss
         if not is_spike:
-            # Add a small tolerance? Or check if loss < best_loss?
-            # Resetting if simply not a spike seems reasonable for now.
             if self.wait > 0:
-                 self.logger.debug(f"Loss stabilized ({current_loss:.4f} <= {self.best_loss:.4f} * {self.threshold:.2f}). Resetting wait counter.")
+                self.logger.debug(f"Loss stabilized ({current_loss:.4f} <= {self.best_loss:.4f} * {self.threshold:.2f}). Resetting wait counter.")
             self.wait = 0
-        # --- End Refined Instability Check --- #
 
         # Check if patience is exceeded
         if self.wait >= self.patience:
@@ -221,11 +227,40 @@ class ReduceLROnPlateauOrInstability(Callback):
                 self.cooldown_counter = self.cooldown # Start cooldown
                 self.wait = 0 # Reset wait counter
                 self.recent_losses = [] # Reset loss history after LR change
-                self.best_loss = np.inf # Reset best loss
+                self.best_loss = float('inf') # Reset best loss
             else:
                 # LR already at minimum, reset wait
                 self.wait = 0
                 self.logger.info(f"Patience exceeded ({self.wait}/{self.patience}), but LR already at minimum ({current_lr:.2e}).")
+
+    def on_train_begin(self, logs=None):
+        """Called when training begins."""
+        logs = logs or {}
+        self.wait = 0
+        self.cooldown_counter = 0
+        self.best_loss = float('inf') # Reset best loss to infinity
+        self.recent_losses = []
+        self.initial_lr = self._get_lr()
+
+    def on_train_end(self, logs=None):
+        """Called when training ends."""
+        logs = logs or {}
+        # No cleanup needed
+
+    def on_epoch_begin(self, epoch, logs=None):
+        """Called at the beginning of each epoch."""
+        logs = logs or {}
+        # No action needed at epoch start
+
+    def on_epoch_end(self, epoch, logs=None):
+        """Called at the end of each epoch."""
+        logs = logs or {}
+        # No action needed at epoch end
+
+    def on_step_begin(self, step, logs=None):
+        """Called at the beginning of each training step."""
+        logs = logs or {}
+        # No action needed at step start
 
 class SampleGenerationCallback(Callback):
     """
@@ -282,8 +317,9 @@ class SampleGenerationCallback(Callback):
             # Assuming tokenizer returns a dict with 'input_ids' and works like HF tokenizers
             # Add batch dimension and move to device
             inputs = self.tokenizer(self.prompt, return_tensors="pt")
-            input_ids = inputs.input_ids.to(self.device)
-            attention_mask = inputs.attention_mask.to(self.device)
+            # Use dictionary access for tokenizer output
+            input_ids = inputs['input_ids'].to(self.device)
+            attention_mask = inputs['attention_mask'].to(self.device)
 
             self.logger.info(f"Prompt: \"{self.prompt}\"...")
 
@@ -324,6 +360,19 @@ class SampleGenerationCallback(Callback):
     def on_epoch_end(self, epoch, logs=None):
         if self.sample_on_epoch_end:
             self._generate_samples(f"Epoch {epoch + 1} End")
+
+    # --- Add required abstract methods (even if empty) ---
+    def on_train_begin(self, logs=None):
+        pass # No action needed
+
+    def on_train_end(self, logs=None):
+        pass # No action needed
+
+    def on_epoch_begin(self, epoch, logs=None):
+        pass # No action needed
+
+    def on_step_begin(self, step, logs=None):
+        pass # No action needed
 
 class TensorBoardLogger(Callback):
     """
@@ -380,6 +429,15 @@ class TensorBoardLogger(Callback):
         if self.writer:
             self.writer.close()
             self.logger.info("TensorBoard writer closed.")
+
+    # --- Add required abstract methods (even if empty) ---
+    def on_epoch_begin(self, epoch, logs=None):
+        """Called at the beginning of each epoch."""
+        pass # No action needed
+
+    def on_step_begin(self, step, logs=None):
+        """Called at the beginning of each training step."""
+        pass # No action needed
 
 # Example of another callback:
 # class TensorBoardLogger(TrainerCallback):

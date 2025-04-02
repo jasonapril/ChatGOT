@@ -81,6 +81,7 @@ class SentencePieceTokenizer(BaseTokenizer):
     
     def save(self, output_dir: str) -> None:
         """Save the tokenizer configuration."""
+        os.makedirs(output_dir, exist_ok=True)
         if self.model_path is None:
             raise RuntimeError("No model to save. Call train() first.")
         # The model files (.model and .vocab) are already saved during training
