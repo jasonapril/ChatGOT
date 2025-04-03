@@ -1,11 +1,13 @@
 # conf/model/transformer_model.yaml
 _target_: src.models.transformer.TransformerModel
-# architecture: transformer # Moved inside config
+model_type: language # Corrected: Should be the general type
+# architecture field is defined within config below
 
 # Instantiate the config object first
 config:
   _target_: src.models.base.LanguageModelConfig
-  architecture: transformer # Added here
+  architecture: transformer # This defines the specific architecture
+  model_type: ${model.model_type} # Propagate top-level type into config object
   # --- Model Architecture Parameters --- #
   # These parameters now belong under the 'config:' key
   d_model: 768

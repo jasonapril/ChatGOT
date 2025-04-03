@@ -4,8 +4,8 @@ use_amp: True
 gradient_accumulation_steps: 2
 max_grad_norm: 1.0
 log_interval: 1 # Log every batch
-save_interval: 1 # Save checkpoint every N epochs
-time_save_interval_seconds: 300 # 5 minutes
+save_steps_interval: 1000 # Save checkpoint every N steps (0 or less to disable step-based saving)
+time_save_interval_seconds: 300 # 5 minutes (Handled by callback)
 compile_model: False
 activation_checkpointing: False
 torch_compile: False # Add default for torch.compile flag
@@ -25,11 +25,10 @@ generation:
   top_p: 0.9
   repetition_penalty: 1.1
 
-# Default training configuration
-training:
-  # Training settings
-  batch_size: 32
-  learning_rate: 3e-4
-  max_steps: 1000
-  warmup_steps: 100
-  weight_decay: 0.1 
+# Default training configuration - REMOVED nested 'training:' key
+# Training settings - these are now top-level within this file
+batch_size: 32
+learning_rate: 3e-4
+max_steps: 1000
+warmup_steps: 100
+weight_decay: 0.1 

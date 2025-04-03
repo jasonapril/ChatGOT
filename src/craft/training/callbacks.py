@@ -13,94 +13,109 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 import warnings
 from torch.optim.lr_scheduler import ReduceLROnPlateau, _LRScheduler # Assuming it's used elsewhere or will be
+import os
+from hydra.core.hydra_config import HydraConfig # Import HydraConfig
+import datetime # Import datetime
 
 logger = logging.getLogger(__name__)
 
 class Callback(ABC):
-    """Base class for all callbacks."""
-    
+    """Abstract base class for callbacks."""
     def __init__(self):
+        self.trainer = None # Initialize trainer attribute
+        # Get a logger specific to the callback subclass
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.trainer = None
 
     def set_trainer(self, trainer):
         """Set the trainer instance for this callback."""
         self.trainer = trainer
 
     @abstractmethod
-    def on_train_begin(self, logs: Optional[Dict[str, Any]] = None):
-        """Called when training begins."""
+    def on_train_begin(self, trainer, logs=None):
         pass
 
     @abstractmethod
-    def on_train_end(self, logs: Optional[Dict[str, Any]] = None):
-        """Called when training ends."""
+    def on_train_end(self, trainer, logs=None):
         pass
 
     @abstractmethod
-    def on_epoch_begin(self, epoch: int, logs: Optional[Dict[str, Any]] = None):
-        """Called at the beginning of each epoch."""
+    def on_epoch_begin(self, trainer, epoch, logs=None):
         pass
 
     @abstractmethod
-    def on_epoch_end(self, epoch: int, logs: Optional[Dict[str, Any]] = None):
-        """Called at the end of each epoch."""
+    def on_epoch_end(self, trainer, epoch, logs=None):
         pass
 
     @abstractmethod
-    def on_step_begin(self, step: int, logs: Optional[Dict[str, Any]] = None):
-        """Called at the beginning of each training step."""
+    def on_step_begin(self, step: int, logs=None):
         pass
 
     @abstractmethod
-    def on_step_end(self, step: int, logs: Optional[Dict[str, Any]] = None):
-        """Called at the end of each training step."""
+    def on_step_end(self, step: int, logs=None):
         pass
 
 class CallbackList:
-    """Manages a list of callbacks and their execution."""
-    
+    """Container for managing a list of callbacks."""
     def __init__(self, callbacks: Optional[List[Callback]] = None):
         self.callbacks = callbacks if callbacks is not None else []
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.trainer = None # Add trainer attribute
 
     def set_trainer(self, trainer):
-        """Set the trainer instance for all callbacks."""
+        """Set the trainer instance for this list and all contained callbacks."""
+        self.trainer = trainer
         for callback in self.callbacks:
             callback.set_trainer(trainer)
 
     def on_train_begin(self, logs: Optional[Dict[str, Any]] = None):
         """Called when training begins."""
+        if not self.trainer:
+            logger.warning("CallbackList.on_train_begin called before trainer was set.")
+            return # Or raise error
         logs = logs or {}
         for callback in self.callbacks:
-            callback.on_train_begin(logs=logs)
+            callback.on_train_begin(self.trainer, logs=logs)
 
     def on_train_end(self, logs: Optional[Dict[str, Any]] = None):
         """Called when training ends."""
+        if not self.trainer:
+            logger.warning("CallbackList.on_train_end called before trainer was set.")
+            return
         logs = logs or {}
         for callback in self.callbacks:
-            callback.on_train_end(logs=logs)
+            callback.on_train_end(self.trainer, logs=logs)
 
     def on_epoch_begin(self, epoch: int, logs: Optional[Dict[str, Any]] = None):
         """Called at the beginning of each epoch."""
+        if not self.trainer:
+            logger.warning("CallbackList.on_epoch_begin called before trainer was set.")
+            return
         logs = logs or {}
         for callback in self.callbacks:
-            callback.on_epoch_begin(epoch, logs=logs)
+            callback.on_epoch_begin(self.trainer, epoch, logs=logs)
 
     def on_epoch_end(self, epoch: int, logs: Optional[Dict[str, Any]] = None):
         """Called at the end of each epoch."""
+        if not self.trainer:
+            logger.warning("CallbackList.on_epoch_end called before trainer was set.")
+            return
         logs = logs or {}
         for callback in self.callbacks:
-            callback.on_epoch_end(epoch, logs=logs)
+            callback.on_epoch_end(self.trainer, epoch, logs=logs)
 
     def on_step_begin(self, step: int, logs: Optional[Dict[str, Any]] = None):
         """Called at the beginning of each training step."""
+        if not self.trainer:
+            logger.warning("CallbackList.on_step_begin called before trainer was set.")
+            return
         logs = logs or {}
         for callback in self.callbacks:
             callback.on_step_begin(step, logs=logs)
 
     def on_step_end(self, step: int, logs: Optional[Dict[str, Any]] = None):
         """Called at the end of each training step."""
+        if not self.trainer:
+            logger.warning("CallbackList.on_step_end called before trainer was set.")
+            return
         logs = logs or {}
         for callback in self.callbacks:
             callback.on_step_end(step, logs=logs)
@@ -384,69 +399,128 @@ class SampleGenerationCallback(Callback):
         pass # No action needed
 
 class TensorBoardLogger(Callback):
-    """
-    Logs metrics to TensorBoard.
-    """
-    def __init__(self, log_dir="runs/experiment"):
-        """
-        Args:
-            log_dir (str): Directory where TensorBoard logs will be saved.
-                           Consider making this dynamic based on run timestamp/name.
-        """
-        super().__init__()
-        self.log_dir = log_dir
+    """Logs training metrics to TensorBoard."""
+    def __init__(self, log_dir: Optional[str] = None, experiment_id: Optional[str] = None, create_dirs: bool = True):
+        self.log_dir_base = log_dir
+        self.experiment_id = experiment_id
+        self.create_dirs = create_dirs
         self.writer = None
+        self.log_dir_absolute = None
+        self.logger = logging.getLogger(self.__class__.__name__)
+        # Initialize rank (default to 0 for non-distributed)
+        self._rank = int(os.environ.get("RANK", "0"))
 
-    def on_train_begin(self, logs=None):
-        """Initialize the SummaryWriter at the start of training."""
-        try:
-            self.writer = SummaryWriter(self.log_dir)
-            self.logger.info(f"TensorBoard logging initialized. Log directory: {self.log_dir}")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize TensorBoard SummaryWriter: {e}", exc_info=True)
-            self.writer = None # Ensure writer is None if init fails
+    def _initialize_writer(self):
+        """Initializes the TensorBoard SummaryWriter."""
+        if self._rank == 0:
+            try:
+                if not hasattr(self, 'log_dir_absolute') or not self.log_dir_absolute:
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    # Use base dir and experiment ID if provided
+                    if self.log_dir_base and self.experiment_id:
+                        log_dir_relative = os.path.join(self.log_dir_base, self.experiment_id)
+                    elif self.log_dir_base:
+                        log_dir_relative = os.path.join(self.log_dir_base, timestamp)
+                    else: # Default if nothing provided
+                        log_dir_relative = os.path.join("outputs", "tensorboard", timestamp)
 
-    def on_step_end(self, step, logs=None):
-        """Log step-level metrics like loss and learning rate."""
-        if self.writer and logs:
-            # Log scalar values passed in logs
+                    self.log_dir_absolute = os.path.abspath(log_dir_relative)
+                    self.logger.info(f"Generated new TensorBoard log directory: {self.log_dir_absolute}")
+
+                if self.create_dirs:
+                    os.makedirs(self.log_dir_absolute, exist_ok=True)
+                
+                self.writer = SummaryWriter(log_dir=self.log_dir_absolute)
+                self.logger.info(f"TensorBoardLogger initialized. Logging to: {self.log_dir_absolute}")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize TensorBoard SummaryWriter in {getattr(self, 'log_dir_absolute', 'unknown_path')}: {e}", exc_info=True)
+                self.writer = None
+
+    def set_log_dir_absolute(self, path: str):
+        """Allows setting the absolute log directory externally, e.g., during resume."""
+        if self._rank == 0:
+            self.log_dir_absolute = path
+            self.log_dir_pattern = None # Indicate that a specific path was set
+            self.logger.info(f"TensorBoard log directory explicitly set to: {path}")
+
+    def on_train_begin(self, trainer, logs=None):
+        """Initialize the SummaryWriter at the beginning of training."""
+        if self._rank == 0:
+            try:
+                # If an absolute path wasn't already set (e.g., by resume), create one.
+                if not hasattr(self, 'log_dir_absolute') or not self.log_dir_absolute:
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    # Use base dir and experiment ID if provided
+                    if self.log_dir_base and self.experiment_id:
+                        log_dir_relative = os.path.join(self.log_dir_base, self.experiment_id)
+                    elif self.log_dir_base:
+                        log_dir_relative = os.path.join(self.log_dir_base, timestamp)
+                    else: # Default if nothing provided
+                        log_dir_relative = os.path.join("outputs", "tensorboard", timestamp)
+
+                    self.log_dir_absolute = os.path.abspath(log_dir_relative)
+                    self.logger.info(f"Generated new TensorBoard log directory: {self.log_dir_absolute}")
+                # else: log_dir_absolute was set by set_log_dir_absolute
+
+                if self.create_dirs:
+                     os.makedirs(self.log_dir_absolute, exist_ok=True)
+                
+                self.writer = SummaryWriter(log_dir=self.log_dir_absolute)
+                self.logger.info(f"TensorBoardLogger initialized. Logging to: {self.log_dir_absolute}")
+            except Exception as e:
+                # Use self.logger for error logging
+                self.logger.error(f"Failed to initialize TensorBoard SummaryWriter in {getattr(self, 'log_dir_absolute', 'unknown_path')}: {e}", exc_info=True)
+                self.writer = None # Ensure writer is None if init fails
+
+    def on_step_end(self, step: int, logs=None):
+        """Log step-level metrics."""
+        if self.writer and self._rank == 0 and logs:
             loss = logs.get('loss')
-            lr = logs.get('lr')
+            lr = logs.get('lr') # Assuming TrainingLoop adds LR to logs
             if loss is not None:
                 self.writer.add_scalar('Loss/train_step', loss, step)
             if lr is not None:
-                self.writer.add_scalar('LearningRate/step', lr, step)
-            # Add any other step-level metrics if available in logs
+                 self.writer.add_scalar('LearningRate', lr, step)
+            # Add logging for other potential items in logs if needed
+            # for key, value in logs.items():
+            #     if key not in ['loss', 'lr'] and isinstance(value, (int, float)):
+            #         self.writer.add_scalar(f'Step/{key}', value, step)
 
-    def on_epoch_end(self, epoch, logs=None):
-        """Log epoch-level metrics like train and validation loss."""
-        if self.writer and logs:
-            # Naming convention might need adjustment based on keys in logs
-            train_loss = logs.get('loss') # train_epoch returns {'loss': avg_loss}
-            val_loss = logs.get('val_loss') # evaluate returns {'loss': avg_loss}
+    def on_epoch_end(self, trainer, epoch, train_metrics, val_metrics, logs=None):
+        """Log epoch-level metrics."""
+        if self.writer and self._rank == 0:
+            if train_metrics:
+                for key, value in train_metrics.items():
+                     if isinstance(value, (int, float)):
+                         self.writer.add_scalar(f'Epoch/{key}_train', value, trainer.state.epoch)
+            if val_metrics:
+                for key, value in val_metrics.items():
+                     if isinstance(value, (int, float)):
+                         self.writer.add_scalar(f'Epoch/{key}_val', value, trainer.state.epoch)
+            # Optionally log histograms of weights/gradients here
 
-            if train_loss is not None:
-                self.writer.add_scalar('Loss/train_epoch', train_loss, epoch + 1) # Use epoch number (1-based)
-
-            if val_loss is not None:
-                self.writer.add_scalar('Loss/validation_epoch', val_loss, epoch + 1)
-
-            # Add any other epoch-level metrics (e.g., perplexity if calculated)
-
-    def on_train_end(self, logs=None):
+    def on_train_end(self, trainer, logs=None):
         """Close the SummaryWriter at the end of training."""
-        if self.writer:
+        if self.writer and self._rank == 0:
             self.writer.close()
-            self.logger.info("TensorBoard writer closed.")
+            logger.info("TensorBoardLogger writer closed.")
 
-    # --- Add required abstract methods (even if empty) ---
-    def on_epoch_begin(self, epoch, logs=None):
+    def on_epoch_begin(self, trainer, epoch, logs=None):
         """Called at the beginning of each epoch."""
-        pass # No action needed
+        pass # No action needed for TensorBoardLogger
 
-    def on_step_begin(self, step, logs=None):
+    def on_step_begin(self, step: int, logs=None):
         """Called at the beginning of each training step."""
-        pass # No action needed
+        pass # No action needed for TensorBoardLogger
+    
+    def __del__(self):
+        """Ensure writer is closed if object is deleted unexpectedly."""
+        if hasattr(self, 'writer') and self.writer:
+            try:
+                self.writer.close()
+            except Exception as e:
+                # Log error during cleanup if necessary
+                pass # Avoid errors during garbage collection
 
 class EarlyStopping(Callback):
     """
@@ -549,6 +623,7 @@ class EarlyStopping(Callback):
 
                 if self.verbose > 0:
                     logger.info(f"Epoch {self.stopped_epoch + 1}: early stopping")
+
 
     def on_epoch_begin(self, trainer, epoch, logs=None):
         # No action needed on epoch begin for EarlyStopping

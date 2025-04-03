@@ -305,8 +305,8 @@ def test_trainer_train_flow(MockProgressTracker, MockCallbackList, MockCheckpoin
     
     # Mock necessary return values
     mock_checkpoint_manager_instance.load_checkpoint.return_value = None
-    mock_evaluator_instance.evaluate.return_value = {"loss": 0.5} # Trainer looks for 'loss'
-    mock_training_loop_instance.train_epoch.return_value = {'loss': 1.0} 
+    mock_evaluator_instance.evaluate.side_effect = [{"loss": 0.5}, {"loss": 0.4}]
+    mock_training_loop_instance.train_epoch.return_value = {'loss': 1.0}
 
     trainer = Trainer(
         model=model,

@@ -63,13 +63,22 @@ class Trainer:
         
         # Initialize components
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        # Initialize scaler for mixed precision *before* CheckpointManager
+        self.scaler = torch.amp.GradScaler(enabled=self.use_amp)
+
+        # Initialize components
         self.callbacks = CallbackList(callbacks or [])
+        self.callbacks.set_trainer(self)
         self.checkpoint_manager = CheckpointManager(
             model=self.model,
             optimizer=self.optimizer,
             scheduler=self.scheduler,
+            scaler=self.scaler,
             config=self.config,
-            checkpoint_dir=self.checkpoint_dir
+            checkpoint_dir=self.checkpoint_dir,
+            callbacks=self.callbacks,
+            device=self.device
         )
         
         # Training state
@@ -77,28 +86,55 @@ class Trainer:
         self.global_step = 0
         self.best_val_metric = float('inf')
         self.metrics = {}
+        self.loaded_tb_log_dir = None
         
         # Move model to device
         self.model.to(self.device)
         
-        # Initialize scaler for mixed precision
-        self.scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
-        
         # Resume from checkpoint if specified
         if self.resume_from_checkpoint:
+            self.logger.info(f"Attempting to resume from checkpoint: {self.resume_from_checkpoint}")
             self._resume_from_checkpoint()
+        
+        # === Set TensorBoard log dir *after* potential resume ===
+        # Find the TB logger instance again (might be cleaner ways)
+        tb_logger = None
+        for cb in self.callbacks.callbacks: # Iterate through the list
+            if cb.__class__.__name__ == 'TensorBoardLogger':
+                tb_logger = cb
+                break
+        
+        if tb_logger:
+            if self.loaded_tb_log_dir:
+                # If we loaded a path, tell the logger to use it
+                # (Requires TensorBoardLogger to have a method like set_log_dir_absolute)
+                tb_logger.set_log_dir_absolute(self.loaded_tb_log_dir)
+                self.logger.info(f"Resuming TensorBoard logging to: {self.loaded_tb_log_dir}")
+            # else: Logger will create a new timestamped dir in on_train_begin
 
     def _resume_from_checkpoint(self):
         """Resume training from a checkpoint."""
         try:
             state = self.checkpoint_manager.load_checkpoint(self.resume_from_checkpoint)
-            self.epoch = state['epoch']
-            self.global_step = state['global_step']
-            self.best_val_metric = state['best_val_metric']
-            self.metrics = state['metrics']
-            self.logger.info(f"Resumed from checkpoint at epoch {self.epoch}, step {self.global_step}")
+            if state:
+                self.epoch = state.get('epoch', 0)
+                self.global_step = state.get('global_step', 0)
+                self.best_val_metric = state.get('best_val_metric', float('inf'))
+                self.metrics = state.get('metrics', {})
+                # Store the loaded TensorBoard path
+                self.loaded_tb_log_dir = state.get('tensorboard_log_dir') 
+                self.logger.info(f"Resumed trainer state from checkpoint at epoch {self.epoch}, step {self.global_step}")
+                if self.loaded_tb_log_dir:
+                    self.logger.info(f"Loaded TensorBoard log directory: {self.loaded_tb_log_dir}")
+            else:
+                 self.logger.error(f"Checkpoint load returned None state. Cannot resume state.")
+                 # Decide how to handle: raise error, start fresh?
+                 # Starting fresh for now
+                 self.resume_from_checkpoint = None # Clear flag
+
         except Exception as e:
             self.logger.error(f"Failed to resume from checkpoint: {e}")
+            # Optionally re-raise or handle more gracefully
             raise
 
     def train(self):
@@ -123,25 +159,49 @@ class Trainer:
                     gradient_accumulation_steps=self.gradient_accumulation_steps,
                     max_grad_norm=self.max_grad_norm,
                     log_interval=self.log_interval,
-                    callbacks=self.callbacks.callbacks
+                    callbacks=self.callbacks, # Pass the CallbackList instance
+                    checkpoint_manager=self.checkpoint_manager, # Pass the manager
+                    save_steps_interval=self.save_interval # Pass the interval
                 )
                 
-                # Create progress tracker
+                # Create progress tracker, considering max_steps for display
+                max_steps = self.config.get('training', {}).get('max_steps') # Get from training config
+                steps_in_epoch = len(self.train_dataloader) # Full steps in this epoch
+                
+                # Calculate the number of steps remaining in the *entire run*
+                # This assumes training starts from global_step 0 or a loaded step
+                remaining_run_steps = float('inf') # Default to infinite if max_steps is None
+                if max_steps is not None:
+                    remaining_run_steps = max(0, max_steps - self.global_step)
+                    
+                # Determine the number of steps to actually run *in this specific epoch*
+                # It's the minimum of steps left in the epoch vs steps left in the run
+                steps_this_epoch = min(steps_in_epoch, remaining_run_steps)
+
                 progress = ProgressTracker(
-                    total_steps=len(self.train_dataloader),
+                    total_steps=steps_this_epoch, # Display total for *this epoch*
                     log_interval=self.log_interval,
                     desc=f"Epoch {epoch + 1}/{self.num_epochs}"
                 )
                 
-                # Training epoch
+                # Training epoch - Pass the correct number of steps to run *in this epoch*
+                # The loop inside train_epoch should handle the max_steps termination correctly
                 train_metrics = training_loop.train_epoch(
                     current_epoch=epoch,
                     progress=progress,
-                    global_step=self.global_step
+                    global_step=self.global_step,
+                    # Pass max_steps for internal loop break, TrainingLoop needs update
+                    # max_steps_override=max_steps 
                 )
                 
-                # Update global step
-                self.global_step += len(self.train_dataloader)
+                # Update global step based on the final step reached in train_epoch
+                final_step_in_epoch = train_metrics.get('final_global_step', self.global_step) # Default to current if key missing
+                self.global_step = final_step_in_epoch
+
+                # Check if max_steps reached after the epoch completed
+                if max_steps is not None and self.global_step >= max_steps:
+                     self.logger.info(f"Reached max_steps ({max_steps}) after epoch {epoch+1}. Stopping training.")
+                     break # Exit the epoch loop
                 
                 # Evaluation
                 if self.val_dataloader is not None and (epoch + 1) % self.eval_interval == 0:
@@ -159,22 +219,18 @@ class Trainer:
                     if val_metrics['loss'] < self.best_val_metric:
                         self.best_val_metric = val_metrics['loss']
                         if self.checkpoint_dir:
+                            # Construct path for the checkpoint based on step
+                            save_path = os.path.join(self.checkpoint_dir, f"checkpoint_step_{self.global_step}.pt")
+                            self.logger.info(f"New best validation metric: {self.best_val_metric:.4f}. Saving checkpoint to {save_path}")
                             self.checkpoint_manager.save_checkpoint(
-                                epoch=self.epoch,
+                                path=save_path, # Pass the constructed path
+                                current_epoch=self.epoch, # Use current_epoch naming convention
                                 global_step=self.global_step,
                                 best_val_metric=self.best_val_metric,
-                                metrics={**train_metrics, **val_metrics}
+                                metrics={**train_metrics, **val_metrics},
+                                is_best=True # Let manager handle best_model.pt copy
                             )
-                
-                # Save checkpoint
-                if self.checkpoint_dir and (epoch + 1) % self.save_interval == 0:
-                    self.checkpoint_manager.save_checkpoint(
-                        epoch=self.epoch,
-                        global_step=self.global_step,
-                        best_val_metric=self.best_val_metric,
-                        metrics=train_metrics
-                    )
-                
+
                 self.callbacks.on_epoch_end(epoch=epoch)
                 
         except Exception as e:

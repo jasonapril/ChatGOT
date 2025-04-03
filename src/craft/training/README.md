@@ -13,5 +13,9 @@ The subsystem is composed of the following key modules:
 *   **`training_loop.py`:** Contains the `TrainingLoop` class, encapsulating the logic for a single training epoch: batch iteration, forward/backward passes, gradient accumulation, and optimizer steps.
 *   **`optimizers.py`:** Provides the `create_optimizer` factory function to instantiate optimizers (e.g., AdamW) based on configuration.
 *   **`schedulers.py`:** Provides the `create_scheduler` factory function to instantiate learning rate schedulers (e.g., CosineAnnealingLR) based on configuration.
-*   **`callbacks.py`:** Defines the `Callback` base class and provides a `CallbackList` container, along with implementations of common callbacks (e.g., Logging, EarlyStopping).
-*   **`checkpointing.py`:** Contains the `
+*   **`callbacks.py`:** Implements the callback system and various callbacks like `ReduceLROnPlateauOrInstability`, `EarlyStopping`, `SampleGenerationCallback`, and `TensorBoardLogger`.
+*   **`checkpointing.py`:** Manages saving and loading model/optimizer/scheduler states.
+
+## Guidelines
+
+*(Specific guidelines for using or extending the training subsystem can be added here.)*

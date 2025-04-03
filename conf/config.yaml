@@ -54,42 +54,9 @@ hydra:
     dir: outputs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
   job:
     chdir: true # Change back to true as it was in the working config
-  job_logging:
-    custom:
-      handlers:
-        console:
-          class: logging.StreamHandler
-          formatter: minimal
-          level: INFO
-        file:
-          class: logging.FileHandler
-          formatter: standard
-          filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log
-          level: DEBUG
-      loggers:
-        root:
-          level: DEBUG
-          handlers: [console, file]
   sweep:
     dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
-  hydra_logging:
-    custom:
-      handlers:
-        console:
-          class: logging.StreamHandler
-          formatter: minimal
-          level: INFO
-        file:
-          class: logging.FileHandler
-          formatter: standard
-          filename: ${hydra.runtime.output_dir}/hydra.log
-          level: DEBUG
-      loggers:
-        hydra:
-          level: DEBUG
-          handlers: [console, file]
-          propagate: false
 
 # Single, unified logging configuration
 logging:
@@ -157,31 +124,8 @@ scheduler: # Set to null or omit if no scheduler is desired
   T_max: 100000 # Example: Total number of steps or epochs
   eta_min: 0.00001
 
-# Callbacks Configuration (List)
-callbacks: [] # Placeholder list - add specific callbacks here later
-# Example:
-# callbacks:
-#   - _target_: craft.training.callbacks.LoggingCallback
-#     log_interval: 10 # Specific args for LoggingCallback
-#   - _target_: craft.training.callbacks.EarlyStoppingCallback
-#     monitor: 'val_loss'
-#     patience: 5
-
-# Training Process Configuration
-training:
-  epochs: 10
-  max_steps: null # Set to an integer to limit training steps
-  gradient_accumulation_steps: 1
-  max_grad_norm: 1.0 # Set to null to disable gradient clipping
-  use_amp: true # Use Automatic Mixed Precision
-  log_interval: 100 # Log metrics every N steps
-  eval_interval: 1000 # Evaluate on validation set every N steps
-
-  checkpoints:
-    # checkpoint_dir is determined by Hydra output directory
-    save_interval: 1000 # Save checkpoint every N steps
-    keep_last: 2 # Keep only the last N checkpoints
-    resume: null # Path to a specific checkpoint to resume from (e.g., 'outputs/YYYY-MM-DD/HH-MM-SS/checkpoints/last.pt')
+# Callbacks Configuration - Let the defaults/overrides handle this
+# callbacks: []
 
 # Custom Log Formatters
 formatters:

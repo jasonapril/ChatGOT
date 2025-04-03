@@ -78,6 +78,7 @@ class TestCallbackList:
 
         # Get the method on CallbackList and call it
         list_method = getattr(cb_list, method_name)
+        cb_list.trainer = MagicMock() # Set a mock trainer to satisfy checks
         list_method(**method_args)
 
         # Assert the corresponding method was called on each mock callback
@@ -93,8 +94,10 @@ class TestCallbackList:
         # Ensure logs dict is passed, even if originally None/empty
         kw_args["logs"] = method_args.get("logs", {})
 
-        cb1_method.assert_called_once_with(*pos_args, **kw_args)
-        cb2_method.assert_called_once_with(*pos_args, **kw_args)
+        # Only expect trainer arg for non-step methods
+        expected_args = [cb_list.trainer] + pos_args if "step" not in method_name else pos_args
+        cb1_method.assert_called_once_with(*expected_args, **kw_args)
+        cb2_method.assert_called_once_with(*expected_args, **kw_args)
 
 
 # --- Tests for ReduceLROnPlateauOrInstability --- #

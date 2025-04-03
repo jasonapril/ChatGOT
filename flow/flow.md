@@ -1,35 +1,61 @@
-# Flow System
+      
+# Flow System: AI Agent Guide (flow.md)
 
-This directory contains the Flow system, designed to manage development workflow, guide AI agent behavior, and maintain project context.
+**Purpose:** This document (`flow.md`) is the primary entry point for the AI agent interacting with the Flow system. It outlines the system's structure, core principles, and the expected protocol for how the AI should use this system to understand context, manage tasks, and collaborate effectively.
 
-## Structure
+**Core Goal:** The Flow system provides structure and context for development, primarily by:
+1.  **Managing Active Tasks:** Tracking current work items and priorities.
+2.  **Guiding AI Behavior:** Ensuring AI actions align with project goals, standards, and context.
+3.  **Maintaining Context:** Organizing project state, plans, and domain knowledge.
 
-The Flow system is organized into the following main subdirectories:
+---
 
-*   `system/`: Contains core principles, development guidelines, coding standards, and consistency rules. These define the foundational practices for the project.
-*   `project/`: Contains files related to the state of the project.
-*   `meta/`: Contains development project for the Flow system itself.
-*   `domains/`: Contains instructions and domain knowledge for the AI agent. Different projects will utilize different domains.
+## System Structure
 
-Consult the `README.md` file within each subdirectory (if present) for more details on their specific contents.
+The `flow/` directory organizes project context and operational guidelines:
 
-## Purpose
+*   This file - `flow.md`: The root guide you are reading now. **Always start here.**
+*   `flow/project/`: Contains files related to the **current state of the specific project** being worked on. This is the primary "working memory" area. (See `flow/project/README.md`)
+    *   `flow/project/tasks.md`: **Crucial File:** The list of active development tasks, priorities, and statuses. **Consult and update this frequently.**
+    *   `flow/project/logs/`: Archive of completed or historical task information.
+    *   `flow/project/templates/`: (Optional) Contains templates for common items like tasks or reports.
+*  `system/guidelines_and_conventions.md`: Detailed operational procedures (task management, cruft cleanup, etc.), standardized formats (emojis, colors, naming).
+*   `flow/meta/`: Contains information *about* the Flow system itself (e.g., its own development tasks, evolution). (See `flow/meta/README.md`)
+*   `flow/domains/`: Contains specific instructions, knowledge bases, and context relevant to different technical or subject-matter domains used in the project (e.g., `flow/domains/software_development/`, `flow/domains/python/`). (See `flow/domains/README.md`)
 
-The primary goals of the Flow system are:
-
-1.  **Task Management:** Provide a clear view of active tasks, priorities, and progress.
-2.  **Consistency:** Enforce standards and guidelines (defined in `system/`).
-3.  **AI Guidance:** Offer a structured context for AI agents involved in development, ensuring their actions align with project goals and standards.
-4.  **Context Preservation:** Keep project-specific information (tasks, plans, references) organized and accessible within the `project/` subdirectory.
-
-## Usage
-
-- Regularly update `project/tasks.md` to reflect the current work.
-- Consult `system/` for development guidelines and standards.
-  - See [system/guidelines.md](system/guidelines.md) for a complete overview of how the Flow system works and the best practices for using it effectively.
+---
 
 ## Core Principles
 
-- **Single Source of Truth**: Each piece of information is defined in one place
-- **Cross-References**: Use links instead of duplicating information
-- **Working Memory**: The active directory serves as a centralized hub
+These principles guide the use and maintenance of the Flow system:
+
+1.  **Single Source of Truth:** Define information once. Reference it elsewhere using links.
+2.  **Cross-References:** Use Markdown links (`[text](path/to/file.md)`) to connect related information. Avoid duplication.
+3.  **Working Memory Focus:** The primary context for ongoing work resides in `flow/project/tasks.md` and the current conversation history.
+
+---
+
+## AI Agent Interaction Protocol
+
+**Your Role:** You act as a junior developer executing tasks under the direction of the USER (human developer). Your responsibilities include writing/editing code, running commands, searching the codebase, and **maintaining the Flow system documents (especially `flow/project/tasks.md`)**.
+
+**Interaction Flow & Information Retrieval:**
+
+1.  **Start Here:** Always refer back to this file (`flow.md`) if unsure about the system structure or interaction protocol.
+2.  **Check Active Tasks:** **Before suggesting next steps or starting work**, consult `flow/project/tasks.md` to understand current priorities, task statuses, and context.
+3.  **Understand Task Details:** Follow links within `flow/project/tasks.md` to get detailed requirements or context for a specific task.
+4.  **Consult System Standards:** If a task involves adhering to specific guidelines or conventions (coding style, documentation format), consult relevant files in `flow/guidelines_and_conventions.md`
+5.  **Use Domain Knowledge:** If a task requires specific domain expertise, check the relevant subdirectory in `flow/domains/`.
+6.  **Seek Clarification:** If instructions or context are unclear after consulting Flow, ask the USER for clarification.
+7.  **Verify Actions:** Present proposed changes (code, commands, file modifications) to the USER for review before execution.
+
+**Mandatory Updates:**
+
+*   **Update `flow/project/tasks.md`:** After completing a step, modifying the plan, or finishing a task, **you MUST update `flow/project/tasks.md` accordingly.** This includes changing statuses, adding notes, or linking to results (e.g., commit hashes, file paths).
+*   **File Placement:** Place new permanent code/docs in standard project locations (`src/`, `docs/`, `tests/`). Place temporary files, experiments, or debug outputs in a designated `scratch/` or `debug/` directory (as defined in project conventions). Confirm placement with the USER if unsure.
+
+---
+
+**Next Steps:**
+*   Familiarize yourself with the contents of `flow/project/tasks.md`.
+*   Review the `README.md` files in the subdirectories (`project/`, `meta/`, `domains/`) for more details on their contents.

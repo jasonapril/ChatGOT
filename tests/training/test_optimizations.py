@@ -5,6 +5,7 @@ import pytest
 import argparse
 import logging # Import logging for caplog
 from unittest.mock import patch, MagicMock, PropertyMock
+import torch # Add this import
 
 # Functions to test
 from craft.training.optimizations import (
@@ -19,7 +20,7 @@ def mock_torch():
     """Mocks the torch module and its relevant sub-components."""
     mock_torch_module = MagicMock(name="torch")
     mock_torch_module.device = MagicMock(return_value=MagicMock(type='cuda')) # Mock device object
-    mock_torch_module.nn.Module = MagicMock # Mock base class
+    mock_torch_module.nn.Module = MagicMock(spec=type)
     
     # CUDA related mocks
     mock_torch_module.cuda.is_available.return_value = True
@@ -113,7 +114,7 @@ def test_setup_mixed_precision_enabled_no_cuda(mock_is_available, mock_torch):
 def test_setup_torch_compile_disabled(mock_torch):
     """Test torch.compile is not called when args.torch_compile is False."""
     args = argparse.Namespace(torch_compile=False)
-    mock_model = MagicMock(spec=mock_torch.nn.Module)
+    mock_model = MagicMock(spec=torch.nn.Module)
     
     compiled_model = setup_torch_compile(args, mock_model)
     
@@ -124,8 +125,8 @@ def test_setup_torch_compile_disabled(mock_torch):
 def test_setup_torch_compile_enabled_available(mock_compile, mock_torch):
     """Test torch.compile is called when enabled and available."""
     args = argparse.Namespace(torch_compile=True, compile_mode='default')
-    mock_model = MagicMock(spec=mock_torch.nn.Module, name="OriginalModel")
-    mock_compiled_model = MagicMock(spec=mock_torch.nn.Module, name="CompiledModel")
+    mock_model = MagicMock(spec=torch.nn.Module, name="OriginalModel")
+    mock_compiled_model = MagicMock(spec=torch.nn.Module, name="CompiledModel")
     mock_compile.return_value = mock_compiled_model
     
     compiled_model = setup_torch_compile(args, mock_model)
@@ -138,44 +139,40 @@ def test_setup_torch_compile_enabled_not_available(mock_hasattr, mock_torch):
     """Test returns original model if compile requested but not available."""
     # Simulate torch.compile not existing via hasattr returning False
     args = argparse.Namespace(torch_compile=True)
-    mock_model = MagicMock(spec=mock_torch.nn.Module)
+    mock_model = MagicMock(spec=torch.nn.Module)
 
     compiled_model = setup_torch_compile(args, mock_model)
 
     assert compiled_model == mock_model
-    # mock_hasattr.assert_called_once_with(mock_torch, 'compile') # Unreliable assertion
-    # Should ideally check logs for warning
+    mock_torch.compile.assert_not_called()
 
 @patch('craft.training.optimizations.torch.compile') # Patch where it's used
 def test_setup_torch_compile_compilation_fails(mock_compile, mock_torch):
     """Test returns original model if torch.compile raises an exception."""
     args = argparse.Namespace(torch_compile=True, compile_mode='reduce-overhead')
-    mock_model = MagicMock(spec=mock_torch.nn.Module)
-    mock_compile.side_effect = Exception("Compilation Error!") # Simulate failure
+    mock_model = MagicMock(spec=torch.nn.Module)
+    mock_compile.side_effect = RuntimeError("Compilation failed")
     
-    compiled_model = setup_torch_compile(args, mock_model)
-    
-    mock_compile.assert_called_once_with(mock_model, mode='reduce-overhead')
+    with patch('craft.training.optimizations.logging.warning') as mock_warning:
+        compiled_model = setup_torch_compile(args, mock_model)
+
     assert compiled_model == mock_model # Should fall back to original model
-    # Should ideally check logs for warning 
+    mock_compile.assert_called_once_with(mock_model, mode='reduce-overhead')
+    mock_warning.assert_called_once()
 
 # --- Tests for configure_activation_checkpointing ---
 
 def test_configure_activation_checkpointing_disabled(mock_torch):
     """Test no changes are made if use_activation_checkpointing is False."""
     args = argparse.Namespace(use_activation_checkpointing=False)
-    mock_model = MagicMock(spec=mock_torch.nn.Module)
-    mock_layer = MagicMock()
-    # Ensure the attribute doesn't exist beforehand due to mocking behavior
-    if hasattr(mock_layer, 'use_checkpoint'):
-        del mock_layer.use_checkpoint
-    mock_model.transformer_layers = [mock_layer]
-    
+    mock_model = MagicMock(spec=torch.nn.Module)
+    mock_model.modules.return_value = [MagicMock()]
+
     configure_activation_checkpointing(args, mock_model)
     
-    # Check that use_checkpoint was not set (or doesn't exist if not set)
-    assert not hasattr(mock_layer, 'use_checkpoint') or \
-           not mock_layer.use_checkpoint
+    # Check that use_checkpoint was not set on any module
+    for module in mock_model.modules():
+        assert not hasattr(module, 'use_checkpoint') or not module.use_checkpoint.called
 
 @patch('craft.training.optimizations.checkpoint', create=True) # Mock the potential import
 def test_configure_activation_checkpointing_enabled_success(mock_checkpoint_util, mock_torch):
@@ -183,53 +180,50 @@ def test_configure_activation_checkpointing_enabled_success(mock_checkpoint_util
     args = argparse.Namespace(use_activation_checkpointing=True)
     mock_layer1 = MagicMock(name="Layer1")
     mock_layer2 = MagicMock(name="Layer2")
-    mock_model = MagicMock(spec=mock_torch.nn.Module)
+    mock_model = MagicMock(spec=torch.nn.Module)
     mock_model.transformer_layers = [mock_layer1, mock_layer2]
-    
+
     configure_activation_checkpointing(args, mock_model)
     
-    assert mock_layer1.use_checkpoint is True
-    assert mock_layer2.use_checkpoint is True
+    assert mock_layer1.use_checkpoint == True
+    assert mock_layer2.use_checkpoint == True
 
 def test_configure_activation_checkpointing_enabled_no_layers(mock_torch):
     """Test it warns but doesn't fail if enabled but model lacks expected structure."""
     args = argparse.Namespace(use_activation_checkpointing=True)
-    mock_model = MagicMock(spec=mock_torch.nn.Module)
-    # Model *doesn't* have transformer_layers
-    
-    configure_activation_checkpointing(args, mock_model)
-    
-    # No crash, verify no attribute was attempted to be set
-    assert not hasattr(mock_model, 'use_checkpoint') 
-    # Should ideally check logs for warning
+    mock_model = MagicMock(spec=torch.nn.Module)
+    del mock_model.transformer_layers
+
+    with patch('craft.training.optimizations.logging.warning') as mock_warning:
+        configure_activation_checkpointing(args, mock_model)
+
+    mock_warning.assert_called_once()
+    assert "Model doesn't have expected structure for activation checkpointing" in mock_warning.call_args[0][0]
 
 @patch('craft.training.optimizations.checkpoint', create=True)
-def test_configure_activation_checkpointing_exception(mock_checkpoint_util, mock_torch):
+@patch('craft.training.optimizations.logging.warning')
+def test_configure_activation_checkpointing_exception(mock_warning, mock_checkpoint_util):
     """Test it warns but doesn't fail if setting use_checkpoint raises an error."""
     args = argparse.Namespace(use_activation_checkpointing=True)
     mock_layer = MagicMock(name="Layer1", spec=True)
-    mock_model = MagicMock(spec=mock_torch.nn.Module)
-    mock_model.transformer_layers = [mock_layer]
-    
-    # Patch the 'use_checkpoint' property on the mock_layer to raise error on set
-    def property_side_effect(*args):
-        if len(args) == 1: # Called as a setter (layer.use_checkpoint = True)
-            raise TypeError("Cannot set attribute simulation")
-        # Called as a getter (e.g., by hasattr), return a default or mock value
-        # Return MagicMock to avoid errors if the getter value is used
-        return MagicMock()
+    mock_torch_module = MagicMock(name="torch")
+    mock_torch_module.nn.Module = MagicMock(spec=type)
 
-    use_checkpoint_mock = PropertyMock(side_effect=property_side_effect)
-    type(mock_layer).use_checkpoint = use_checkpoint_mock # Patch on the type
+    # Configure the mock's 'use_checkpoint' property to raise TypeError when set
+    mock_prop = PropertyMock(side_effect=TypeError("Simulated attribute setting error"))
+    type(mock_layer).use_checkpoint = mock_prop # Patch the property on the type
+
+    mock_model = MagicMock(spec=torch.nn.Module)
+    mock_model.transformer_layers = [mock_layer]
 
     configure_activation_checkpointing(args, mock_model)
 
-    # Verify the attempt to set the property was made
-    # use_checkpoint_mock.assert_called_once_with(True) # Not directly possible with property setter mock
+    # Check that the patched logging.warning (mock_warning) was called
+    mock_warning.assert_called_once_with(
+        "Failed to apply activation checkpointing: Simulated attribute setting error"
+    )
+    # Cleanup the property patch
+    del type(mock_layer).use_checkpoint
 
-    # Check attribute wasn't actually set due to the error
-    # The property mock itself prevents the attribute from being set
-    # assert not hasattr(mock_layer, 'use_checkpoint') # This check fails due to PropertyMock getter
-    # We rely on the function not crashing and logging the warning
-    pass # Test passes if no exception is raised by configure_activation_checkpointing
-    # Should ideally check logs for warning
+# --- Tests for optimize_memory_usage ---
+# ... existing tests ...

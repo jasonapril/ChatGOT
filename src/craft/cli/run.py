@@ -10,6 +10,10 @@ import typer
 from typing import Optional
 from rich.console import Console
 from rich.logging import RichHandler
+import sys
+import os
+
+# Temporarily add the project root to the Python path
 
 # Import command modules
 from .train_commands import train_app

@@ -23,10 +23,14 @@ def get_resource_metrics(include_gpu: bool = True) -> Dict:
     import psutil
     import torch
     
+    # Call virtual_memory once and store the result
+    vmem = psutil.virtual_memory()
+
     metrics = {
         'cpu_percent': psutil.cpu_percent(),
-        'memory_percent': psutil.virtual_memory().percent,
-        'memory_used_gb': psutil.virtual_memory().used / (1024**3),
+        # Use the stored result
+        'memory_percent': vmem.percent,
+        'memory_used_gb': vmem.used / (1024**3),
     }
     
     if include_gpu and torch.cuda.is_available():

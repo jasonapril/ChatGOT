@@ -1,0 +1,22 @@
+# conf/hydra/hydra_logging/custom.yaml
+# Extracted from main config.yaml
+
+version: 1
+disable_existing_loggers: false
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: minimal
+    level: INFO
+  file:
+    class: logging.FileHandler
+    formatter: standard
+    filename: ${hydra.runtime.output_dir}/hydra.log
+    level: DEBUG
+
+loggers:
+  hydra:
+    level: DEBUG
+    handlers: [console, file]
+    propagate: false 

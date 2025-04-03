@@ -1,12 +1,16 @@
 # conf/callbacks/default.yaml
 # Default configuration for callbacks.
-# Add specific callback configurations here later.
-
-# Example (commented out):
-# early_stopping:
-#   _target_: src.callbacks.EarlyStopping
-#   monitor: val_loss
-#   patience: 5
+# This file being empty or containing only comments means that by default,
+# no callbacks are loaded unless overridden.
+#
+# Example of adding a callback here:
+# my_callback_name:
+#   _target_: src.callbacks.MyCallback
+#   some_param: value
 
 # For now, keep it empty or add basic settings if needed
-callbacks_list: [] 
+# callbacks_list: [] # REMOVED 
+
+tensorboard:
+  _target_: craft.training.callbacks.TensorBoardLogger
+  # log_dir is now set dynamically in train_commands.py relative to Hydra output 

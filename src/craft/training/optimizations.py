@@ -60,7 +60,7 @@ def optimize_memory_usage(args: argparse.Namespace, device: torch.device) -> Non
     if not torch.cuda.is_available() or device.type != 'cuda':
         return
         
-    from src.memory_management import preallocate_gpu_memory, get_memory_optimized_settings
+    from craft.utils.memory import preallocate_gpu_memory, get_memory_optimized_settings
     
     # Get GPU info
     gpu_name = torch.cuda.get_device_name(0)
@@ -69,10 +69,7 @@ def optimize_memory_usage(args: argparse.Namespace, device: torch.device) -> Non
     logging.info(f"GPU: {gpu_name} with {total_memory:.2f}GB total memory")
     
     # Get memory optimized settings
-    mem_settings = get_memory_optimized_settings(
-        gpu_name=gpu_name, 
-        force_aggressive=args.force_aggressive_memory
-    )
+    mem_settings = get_memory_optimized_settings()
     
     # Apply memory settings
     if mem_settings.get('preallocate', False):

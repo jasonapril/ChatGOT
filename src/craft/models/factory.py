@@ -53,7 +53,11 @@ def create_model_from_config(config_dict: Dict[str, Any]) -> Model:
         raise ValueError("Configuration must include a 'model_type' field.")
 
     # Architecture can be specified to select among models of the same type
-    architecture = config_dict.get("architecture") # e.g., "gpt_decoder", "transformer"
+    # Look for architecture first at the top level, then inside nested 'config' if present
+    architecture = config_dict.get("architecture")
+    if not architecture and isinstance(config_dict.get("config"), dict):
+        architecture = config_dict["config"].get("architecture")
+    # e.g., "gpt_decoder", "transformer"
 
     # Determine the appropriate Pydantic config class based *only* on model_type
     config_cls: Type[BaseModelConfig]
@@ -72,19 +76,25 @@ def create_model_from_config(config_dict: Dict[str, Any]) -> Model:
 
     # Validate and create the specific Pydantic config object
     try:
+        # We primarily validate the structure here. The architecture variable extracted
+        # earlier (from the raw dict) is used for registry lookup.
         model_config = config_cls(**config_dict)
-        # Ensure architecture from dict matches config if both exist
+        
+        # Optional: Log a warning if the architecture extracted from the dict differs
+        # from what might be in the validated Pydantic object (if it exists there).
         if architecture and hasattr(model_config, 'architecture') and model_config.architecture != architecture:
-             logging.warning(f"Architecture mismatch: dict specified '{architecture}', "
-                             f"but config resolved to '{model_config.architecture}'. Using config value.")
-             architecture = model_config.architecture # Prefer validated config value
+             logging.warning(f"Architecture mismatch: Dict specified '{architecture}', "
+                             f"but Pydantic config resolved to '{model_config.architecture}'. "
+                             f"Using '{architecture}' for model registry lookup.")
+        # DO NOT reset the 'architecture' variable here: 
+        # architecture = model_config.architecture 
 
     except Exception as e: # Catch Pydantic validation errors
         logging.error(f"Configuration validation failed for model type '{model_type}': {e}")
-        # Re-raise the validation error immediately
         raise # **EXIT POINT FOR VALIDATION ERRORS**
 
     # --- Model Class Lookup using Registry ---
+    # Uses the 'architecture' variable determined from the input dictionary
     model_cls: Type[Model] | None = None
     
     # Try lookup with specific architecture first

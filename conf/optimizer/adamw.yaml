@@ -1,6 +1,6 @@
 # conf/optimizer/adamw.yaml
-type: adamw
-learning_rate: 1e-4
+# type: adamw # REMOVED - Redundant with _target_ in main config
+# learning_rate: 1e-4 # REMOVED - Use 'lr' defined in main config or overrides
 weight_decay: 0.01
 # Other AdamW params like betas, eps can be added here if needed
 # betas: [0.9, 0.999]

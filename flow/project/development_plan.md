@@ -1,4 +1,4 @@
-# Development Plan (Created: 2025-04-01)
+`# Development Plan (Created: 2025-04-01)
 
 # Initial Development Plan for Craft Framework
 
@@ -87,4 +87,8 @@ We will build and test features incrementally, focusing first on the smaller Gam
 *   Explore larger models (1B+ params, potentially requiring distributed training).
 *   Implement more advanced evaluation metrics or generation techniques.
 *   Refactor and optimize framework based on findings.
-*   Explore fine-tuning, RL, tool use as separate future phases. 
+*   Explore fine-tuning, RL, tool use as separate future phases.
+
+## Testing Strategy (Moved from tasks.md)
+
+🟡 ⏳ Throughout the refactoring process, ensure comprehensive test coverage is maintained and improved. This includes unit tests for individual components, integration tests for interactions between components, and end-to-end (feature) tests for verifying complete workflows (e.g., training, generation). Add specific testing sub-tasks to relevant refactoring items. 
