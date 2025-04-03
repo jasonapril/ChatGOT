@@ -1,6 +1,6 @@
 # Tasks
 
-*Part of the Flow System. See also: [Development Plan](development_plan.md), [Guidelines](../system/guidelines.md), [Improvements](../planning/improvements.md).*
+*Part of the Flow System. See also: [Vision and Plan](vision_and_plan.md), [Guidelines](../system/guidelines.md), [Improvements](../planning/improvements.md).*
 
 This file serves as the working memory for all active tasks in the project. It's designed to provide at-a-glance visibility into what's currently being worked on, what's coming up next, and what has recently been completed.
 
@@ -41,8 +41,8 @@ This file serves as the working memory for all active tasks in the project. It's
     ```
   - **Implementation Plan**:
     1. **Preparation Phase**:
-       - [ ] Review all existing tests and their coverage
-       - [ ] Document current import dependencies
+       - [x] Review all existing tests and their coverage ✅ <# Done Apr 04 #>
+       - [ ] Document current import dependencies 🟡 <# In Progress #>
        - [ ] Create test suite for new structure
        - [ ] Set up CI to run tests on each change
     
@@ -157,7 +157,24 @@ This file serves as the working memory for all active tasks in the project. It's
         - ⏳ Set up CI/CD pipeline (GitHub Actions)
         - 🔍 Planned
 
+- ### 🟡 Review Craft Directory READMEs
+  - **Goal**: Ensure key directories within the Craft project (`src/`, `tests/`, `docs/`, `conf/`, etc.) have shallow README.md files serving as descriptive indexes, following Flow principles.
+  - **Status**: 🟡 To Do
+  - **Priority**: Low
+
 ## Upcoming Tasks
+
+- ### 🟠 Review Flow Alignment & Identify System Improvements
+  - **Goal**: Ensure development practices align with Flow principles and improve the Flow system's effectiveness based on recent work.
+  - **Sub-tasks**:
+    - [x] Review recent debugging work (test fixing) against Flow principles (`flow/flow.md`). ✅
+    - [ ] Review recent debugging work against Flow protocol (`flow/flow.md`, `flow/gemini-2.5-pro-exp-03-25.md`), especially `tasks.md` update adherence. ⏳
+    - [ ] Review `flow/meta/` contents for relevance, cruft, and potential refinements.
+    - [ ] Review `system/guidelines_and_conventions.md` for any necessary updates discovered during the review.
+    - [ ] Brainstorm and document specific improvements for the Flow system (e.g., `tasks.md` update triggers, definition of "significant step", logging integration, periodic checks).
+    - [ ] Check `flow/domains/` for potential additions based on recent work (e.g., `pytest_debugging.md`?).
+  - **Status**: 🟡 To Do
+  - **Priority**: Medium
 
 - ### 🟠 Refactor Data Pipeline for Tokenizer Flexibility
   - **Goal**: Modify the data pipeline to support different tokenizers (character, subword, etc.) configured via Hydra, following the strategy outlined in `src/data/base.py`.

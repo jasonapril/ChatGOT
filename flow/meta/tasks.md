@@ -84,22 +84,53 @@ This document tracks tasks related to the development and improvement of the Flo
 
 ## User-Added Tasks to Review
 
+### Review Current Practices & Flow Alignment (Context: Recent Debugging) ✅
+- **Sub-tasks**:
+  - [x] Review recent debugging work (test fixing) against Flow principles (`flow/flow.md`). ✅
+  - [x] Review recent debugging work against Flow protocol (`flow/flow.md`), especially `tasks.md` update adherence. ✅
+  - [x] Review `flow/meta/` contents for relevance, cruft, and potential refinements. ✅
+  - [x] Review `system/guidelines_and_conventions.md` for any necessary updates discovered during the review. ✅
+  - [x] Brainstorm and document specific improvements for the Flow system (e.g., assisted logging, definition of "significant step", goal linking, periodic checks). ✅
+  - [x] Check `flow/domains/` for potential additions based on recent work (e.g., `pytest_debugging.md`?). ✅
+
 ### Technical Solutions for Consistency
 
-    Linters/Validators: Consider simple scripts to check for valid internal links or consistent use of status markers.
-
+    Linters/Validators: Consider simple scripts to check for valid internal links or consistent use of status markers. (From improvements.md)
+    Git hooks: Consider simple scripts/hooks to enforce style or check links. (From improvements.md)
     Templates: Use and maintain standardized templates (like those above) for recurring elements.
 
 ### Automation Considerations
 
 To streamline Flow system usage:
 
-    Lightweight Scripting: Consider simple scripts or Git hooks to automate parts of the task update/archival process (e.g., a script to move ✅ tasks from project/tasks.md to project/logs/).
-
+    Lightweight Scripting: Consider simple scripts or Git hooks to automate parts of the task update/archival process (e.g., a script to move ✅ tasks from project/tasks.md to project/logs/). (Task rotation script from improvements.md)
+    Integration: Consider automatic task updates based on commit messages or PR status. (From improvements.md)
     Automated Reminders: Set up reminders for periodic reviews or consistency checks.
-
     Minimize Manual Work: The goal of automation should be to reduce repetitive manual effort in maintaining the Flow system, allowing more focus on the actual project tasks.
 
+### Visualization Enhancements
+- Create compact dashboard view for task overview. (From improvements.md)
+- Implement progress tracking for multi-step tasks. (From improvements.md)
+- Create timeline visualization for tasks/dependencies. (From improvements.md)
+
+### Integration Improvements
+- Link Flow tasks more directly to specific code files/modules. (From improvements.md)
+- Implement GitHub issue integration. (From improvements.md)
+
+### Knowledge Management Improvements
+- Implement a `decisions` log/section for architectural choices. (From improvements.md)
+- Create a `lessons learned` repository/section. (From improvements.md, relates to Learn from Mistakes task)
+- Explore themed collections of related tasks for context. (From improvements.md)
+
+### Process Refinements
+- Add explicit "review checkpoints" for long-running tasks. (From improvements.md)
+- Implement a simple task estimation system. (From improvements.md)
+- Create a retrospective template/process for Flow effectiveness. (From improvements.md)
+
+### Expansion to Team Use (Lower Priority)
+- Define lightweight role assignments for tasks. (From improvements.md)
+- Develop conflict resolution guidelines for collaborative editing. (From improvements.md)
+- Create onboarding documentation specifically for Flow. (From improvements.md)
 
 ### Simplify Flow Goals
 - Flow gives AI agents memory and executive functioning.
@@ -107,6 +138,7 @@ To streamline Flow system usage:
 ### Generalize Project Details Mentioned Outside the Project
 - Standardize top-level files and folders
 - Consider templates for different types of projects (see domains)
+- Consider configuration profiles for different project types/domains. (From config_implementation.md)
 
 ### Add Scripts to Keep Flow's Data Standardized, Organized, Updated, and Integrous
 - Functional Alignment: Ensure that all tasks/plans/projects/roadmaps are aligned with stated goals/principles.
@@ -139,6 +171,26 @@ To streamline Flow system usage:
 
 ### Find Way to Get Time of Day
 - This is critical for time management and logs. Timestamps are generally useful properties.
+
+### Consider GUI Editor for Flow (Low Priority)
+- Explore potential for a GUI-based editor for managing Flow files. (From config_implementation.md)
+
+### Consider VCS Integration for Flow Changes (Low Priority)
+- Explore integrating Flow state/config changes with version control. (From config_implementation.md)
+
+### Brainstormed Improvements (Apr 2025 Review)
+- **Goal:** Document specific improvement ideas identified during the Flow system review.
+- **Items:**
+  - **Assisted Logging:** AI proposes concise, datestamped log entries for `tasks.md` after significant actions to capture volatile context.
+  - **Goal Linking:** Add explicit `Related Goals:` field to task templates linking tasks to high-level goals (defined elsewhere).
+  - **Define "Significant Step":** Clarify the threshold/criteria for when an AI agent MUST update `tasks.md` (e.g., after each file edit? After a command runs? After a sub-task is complete?). Add to `guidelines_and_conventions.md`.
+  - **Periodic Flow Checks/Audits:** Formalize triggers or schedule for reviewing Flow system health, consistency, and alignment (perhaps as a recurring meta-task).
+  - **Refine Core Analogy:** Update `model.md` and potentially `flow.md` to reflect the broader "Memory & Executive Function Aid" concept.
+  - **Define Context Loading Strategy:** Address how/when Flow files are loaded into AI context. 
+    - *Problem:* Relying on manual attachment or agent protocol adherence is fragile/inefficient.
+    - *Short-Term Proposal:* Define "Core Context" files (`flow.md`, relevant `tasks.md`), strengthen agent protocol for proactive reads, improve internal linking, use assisted logging.
+    - *Long-Term Goal:* Explore dynamic/triggered context loading (likely requires external tool support).
+  - **Review Terminology:** Ensure clarity and consistent use of terms defined in `glossary.md` (overlaps with existing task). 
 
 ## Completed Tasks
 

@@ -5,6 +5,7 @@ Tests for src.craft.utils.generation
 import torch
 import pytest
 from unittest.mock import MagicMock, ANY
+from unittest.mock import patch
 
 # Function to test
 from craft.utils.generation import top_k_top_p_filtering
@@ -112,6 +113,108 @@ def test_combined_top_k_top_p():
     filtered_logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
     expected_logits = torch.tensor([[-float('Inf'), -float('Inf'), -float('Inf'), 3.5, 4.5, 4.2]])
     assert torch.equal(filtered_logits, expected_logits) 
+
+def test_top_k_top_p_no_filtering():
+    """Test that no filtering occurs when top_k=0 and top_p=1.0"""
+    logits = torch.tensor([[1.0, 2.0, 3.0]])
+    filtered_logits = top_k_top_p_filtering(logits.clone(), top_k=0, top_p=1.0)
+    assert torch.equal(logits, filtered_logits)
+
+def test_top_k_filtering_only():
+    """Test basic top-k filtering"""
+    logits = torch.tensor([[1.0, 3.0, 2.0, 0.0]])
+    expected_logits = torch.tensor([[-float('Inf'), 3.0, 2.0, -float('Inf')]])
+    filtered_logits = top_k_top_p_filtering(logits.clone(), top_k=2, top_p=1.0)
+    assert torch.equal(filtered_logits, expected_logits)
+
+def test_top_k_less_than_vocab():
+    """Test top-k when k is less than vocab size"""
+    logits = torch.tensor([[1.0, 3.0, 2.0]])
+    expected_logits = torch.tensor([[-float('Inf'), 3.0, 2.0]])
+    filtered_logits = top_k_top_p_filtering(logits.clone(), top_k=2, top_p=1.0)
+    assert torch.equal(filtered_logits, expected_logits)
+
+def test_top_k_greater_than_vocab():
+    """Test top-k when k is greater than or equal to vocab size (should be no-op)"""
+    logits = torch.tensor([[1.0, 3.0, 2.0]])
+    expected_logits = torch.tensor([[1.0, 3.0, 2.0]])
+    filtered_logits = top_k_top_p_filtering(logits.clone(), top_k=3, top_p=1.0)
+    assert torch.equal(filtered_logits, expected_logits)
+    filtered_logits_k4 = top_k_top_p_filtering(logits.clone(), top_k=4, top_p=1.0)
+    assert torch.equal(filtered_logits_k4, expected_logits)
+
+def test_top_p_filtering_only():
+    """Test basic top-p (nucleus) filtering"""
+    # Probabilities: [0.024, 0.643, 0.088, 0.244] -> Sorted: [0.643, 0.244, 0.088, 0.024]
+    # Cumulative: [0.643, 0.887, 0.975, 1.0]
+    logits = torch.tensor([[1.0, 4.0, 2.0, 3.0]])
+    # With p=0.9, keep tokens with cumulative prob <= 0.9.
+    # Indices kept: 1 (0.643), 3 (0.887), 2 (0.975 - this one is kept because it pushes over 0.9)
+    # Indices removed: 0
+    expected_logits = torch.tensor([[-float('Inf'), 4.0, 2.0, 3.0]]) # Updated expectation
+    filtered_logits = top_k_top_p_filtering(logits.clone(), top_k=0, top_p=0.9)
+    assert torch.equal(filtered_logits, expected_logits)
+
+def test_top_p_filtering_edge_cases():
+    """Test top-p with p=0.0 (keep only highest) and p=1.0 (keep all)"""
+    logits = torch.tensor([[1.0, 4.0, 2.0, 3.0]])
+    # p=0.0 should effectively keep only the top token
+    expected_logits_p0 = torch.tensor([[-float('Inf'), 4.0, -float('Inf'), -float('Inf')]])
+    filtered_logits_p0 = top_k_top_p_filtering(logits.clone(), top_k=0, top_p=0.0)
+    assert torch.equal(filtered_logits_p0, expected_logits_p0)
+
+    # p=1.0 should keep all tokens
+    expected_logits_p1 = logits.clone()
+    filtered_logits_p1 = top_k_top_p_filtering(logits.clone(), top_k=0, top_p=1.0)
+    assert torch.equal(filtered_logits_p1, expected_logits_p1)
+
+def test_combined_filtering():
+    """Test interaction of top-k and top-p filtering"""
+    # Probabilities: [0.01, 0.2, 0.5, 0.09, 0.2] -> Sorted: [0.5, 0.2, 0.2, 0.09, 0.01]
+    # Cumulative: [0.5, 0.7, 0.9, 0.99, 1.0]
+    logits = torch.tensor([[1.0, 3.0, 4.0, 2.0, 3.0]])
+
+    # top_k=3: keeps indices 1, 2, 4 (logits 3.0, 4.0, 3.0)
+    # top_p=0.8: keeps indices 2, 1, 4 (logits 4.0, 3.0, 3.0, cumulative 0.5, 0.7, 0.9)
+    # Combined: Intersection should keep indices 1, 2, 4
+    # After top_k=3: [[-inf, 3.0, 4.0, -inf, 3.0]] -> Softmax -> Probs [~0, 0.26, 0.7, ~0, 0.26]
+    # After top_p=0.8 on top_k results: Cumulative [0.7, 0.96, 0.99], keeps index 2
+    # Correction: top_p applies first on full logits conceptually, then top_k
+    # top_p=0.8 keeps indices 2, 1, 4 (logits 4.0, 3.0, 3.0)
+    # top_k=3 applied to these results: Keeps all three (4.0, 3.0, 3.0)
+    # Expected: keep indices 1, 2, 4
+
+    expected_logits = torch.tensor([[-float('Inf'), 3.0, 4.0, -float('Inf'), 3.0]])
+    filtered_logits = top_k_top_p_filtering(logits.clone(), top_k=3, top_p=0.8)
+    # print(f"\nCombined Filter Logits: {filtered_logits}") # Debug print
+    assert torch.equal(filtered_logits, expected_logits)
+
+def test_batch_filtering():
+    """Test filtering with batch_size > 1"""
+    logits = torch.tensor([
+        [1.0, 3.0, 2.0], # top_k=1 -> [-inf, 3.0, -inf]
+        [4.0, 0.0, 2.0]  # top_k=1 -> [4.0, -inf, -inf]
+    ])
+    expected_logits = torch.tensor([
+        [-float('Inf'), 3.0, -float('Inf')],
+        [4.0, -float('Inf'), -float('Inf')]
+    ])
+    filtered_logits = top_k_top_p_filtering(logits.clone(), top_k=1, top_p=1.0)
+    assert torch.equal(filtered_logits, expected_logits)
+
+    # Test top_p with batch
+    # Batch 1 probs: [0.09, 0.66, 0.24] -> Cum: [0.66, 0.90, 1.0] -> p=0.7 -> keep idx 1 (0.66), idx 2 (0.90)
+    # Batch 2 probs: [0.84, 0.02, 0.14] -> Cum: [0.84, 0.98, 1.0] -> p=0.7 -> keep idx 0 (0.84)
+    logits_p = torch.tensor([
+        [1.0, 3.0, 2.0],
+        [4.0, 0.0, 2.0]
+    ])
+    expected_logits_p = torch.tensor([
+        [-float('Inf'), 3.0, 2.0],             # Updated expectation for batch 1
+        [4.0, -float('Inf'), -float('Inf')]
+    ])
+    filtered_logits_p = top_k_top_p_filtering(logits_p.clone(), top_k=0, top_p=0.7)
+    assert torch.equal(filtered_logits_p, expected_logits_p)
 
 # --- Tests for generate_sample_text --- 
 
@@ -225,4 +328,57 @@ def test_sample_text_empty_prompt():
     assert call_kwargs['max_new_tokens'] == 3
     
     mock_tokenizer.decode.assert_called_once_with(generated_ids[0].tolist())
-    assert result == "abc" 
+    assert result == "abc"
+
+def test_sample_text_device_auto_detection():
+    """Test that sample_text auto-detects the correct device (cuda if available, else cpu)"""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    # Ensure it doesn't accidentally have char_to_idx to avoid the wrong code path
+    if hasattr(mock_tokenizer, 'char_to_idx'):
+        delattr(mock_tokenizer, 'char_to_idx')
+    # Simulate tokenizer returning tensor on CPU initially
+    encoded_tensor_cpu = torch.tensor([[1, 2, 3]], device='cpu')
+    mock_tokenizer.encode.return_value = encoded_tensor_cpu
+    mock_tokenizer.decode.return_value = "Generated text"
+    # Simulate model generating tensor on CPU initially
+    generated_tensor_cpu = torch.tensor([[1, 2, 3, 4]], device='cpu')
+    mock_model.generate.return_value = generated_tensor_cpu
+
+    # Test with CUDA available
+    # Use 'cuda' for model.to check, but check type for tensor device
+    expected_cuda_device = torch.device('cuda')
+    with patch('src.craft.utils.generation.torch.cuda.is_available', return_value=True):
+        sample_text(mock_model, "test prompt", tokenizer=mock_tokenizer)
+
+        # Assert model was moved to CUDA (without index)
+        mock_model.to.assert_called_with(expected_cuda_device)
+
+        # Assert input tensor passed to generate is on a CUDA device (ignore index)
+        generate_call_args, generate_call_kwargs = mock_model.generate.call_args
+        input_ids_tensor = generate_call_kwargs.get('input_ids')
+        assert input_ids_tensor is not None, "input_ids not found in generate kwargs"
+        assert input_ids_tensor.device.type == expected_cuda_device.type, \
+               f"Input tensor device type should be {expected_cuda_device.type}, but was {input_ids_tensor.device.type} ({input_ids_tensor.device})"
+
+    mock_model.reset_mock()
+    mock_tokenizer.reset_mock()
+
+    # Test with CUDA not available
+    expected_cpu_device = torch.device('cpu')
+    with patch('src.craft.utils.generation.torch.cuda.is_available', return_value=False):
+        # Need to re-assign return value as the tensor might have been modified in place if .to() returned self
+        mock_tokenizer.encode.return_value = torch.tensor([[1, 2, 3]], device='cpu')
+        mock_model.generate.return_value = torch.tensor([[1, 2, 3, 4]], device='cpu')
+
+        sample_text(mock_model, "test prompt", tokenizer=mock_tokenizer)
+
+        # Assert model was moved to CPU
+        mock_model.to.assert_called_with(expected_cpu_device)
+
+        # Assert input tensor passed to generate is on CPU
+        generate_call_args, generate_call_kwargs = mock_model.generate.call_args
+        input_ids_tensor = generate_call_kwargs.get('input_ids')
+        assert input_ids_tensor is not None, "input_ids not found in generate kwargs"
+        assert input_ids_tensor.device.type == expected_cpu_device.type, \
+               f"Input tensor device type should be {expected_cpu_device.type}, but was {input_ids_tensor.device.type} ({input_ids_tensor.device})"

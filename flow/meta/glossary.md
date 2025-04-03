@@ -38,23 +38,20 @@ A temporary storage area for capturing thoughts, ideas, or information before pr
 
 ## Directory Structure
 
-### Active Directory
-Contains currently relevant tasks and priorities, functioning as Flow's working memory.
+### Project Directory (`flow/project/`)
+Contains currently relevant tasks (`tasks.md`) and logs (`logs/`) for the specific project being worked on.
 
-### System Directory
-Houses foundational documents that define Flow's operation and guidelines.
+### Guidelines & Conventions (`flow/guidelines_and_conventions.md`)
+Provides detailed operational rules, formats, templates, and procedures.
 
-### Planning Directory
-Contains future-oriented documents, strategic priorities, and improvement plans.
+### Meta Directory (`flow/meta/`)
+Contains Flow's self-documentation (model, principles, evolution, etc.) and improvement tasks (`tasks.md`).
 
-### Reference Directory
-Stores implementation details and technical information for reference purposes.
+### Domains Directory (`flow/domains/`)
+Stores domain-specific knowledge bases relevant to the project (e.g., `python/`, `software_development/`).
 
-### Meta Directory
-Contains Flow's self-documentation and improvement plans.
-
-### Logs Directory
-Archives historical records of completed tasks and past decisions.
+### Logs Directory (`flow/project/logs/`)
+Archives historical records of completed tasks and past decisions for a specific project.
 
 ## Document Types
 

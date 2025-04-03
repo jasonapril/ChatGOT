@@ -48,10 +48,7 @@ def generate_sample_text(
         )
     
     # Decode the generated tokens
-    if hasattr(tokenizer, 'decode'):
-        sample_text = tokenizer.decode(output_ids[0].tolist())
-    else:
-        sample_text = tokenizer.decode(output_ids[0])
+    sample_text = tokenizer.decode(output_ids[0].tolist())
     
     return sample_text
 
@@ -115,10 +112,7 @@ def sample_text(
         )
     
     # Decode the generated tokens
-    if hasattr(tokenizer, 'decode'):
-        output_text = tokenizer.decode(output_ids[0].tolist())
-    else:
-        output_text = tokenizer.decode(output_ids[0])
+    output_text = tokenizer.decode(output_ids[0].tolist())
     
     return output_text
 

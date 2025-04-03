@@ -1,6 +1,6 @@
-# Flow Principles
+# Flow Principles: Design Philosophy & Rationale
 
-This document outlines the core philosophy and guiding principles behind Flow's design and operation.
+This document outlines the core philosophy behind Flow's design and the rationale for its structure and processes. *(For the specific operational principles guiding day-to-day use, see the "Core Principles" section in `../flow.md`)*.
 
 ## Core Philosophy
 
@@ -16,43 +16,26 @@ Flow is built on the premise that documentation should serve as an externalized 
 
 5. **Self-Improvement**: The system should reflect on and improve its own processes through metacognitive documentation.
 
-## Design Principles
+## Design Rationale
 
-### Structural Principles
+This section explains the reasoning behind Flow's structure and processes, linking them to the operational principles defined in `../flow.md`.
 
-1. **Clear Separation of Concerns**: Different types of information belong in different directories, reflecting their distinct cognitive roles.
+### Structural Rationale
+*   **Separation of Concerns:** Different directories (`project/`, `meta/`, `system/`, `domains/`) house distinct types of information (project state, meta-system info, guidelines, domain knowledge) to maintain clarity and focus.
+*   **Progressive Disclosure:** READMEs and high-level files provide summaries, linking to more detailed information (e.g., specific tasks, guidelines) to avoid overwhelming users initially.
+*   **Single Source of Truth (SSoT) & Cross-References:** Defining information canonically in one place and linking to it (Operational Principle #1) prevents conflicts and ensures consistency.
+*   **Consistency & Discoverability:** Using standardized structures and formats (Operational Principle #4) makes information easier to find and parse, supporting both human users and potential automation.
 
-2. **Progressive Disclosure**: Details are revealed progressively, with high-level summaries linking to more detailed information.
+### Process Rationale
+*   **Active Task Management:** Requiring tasks to be actively managed and updated in `tasks.md` (Operational Principle #2) ensures the system reflects the current state of work and priorities, enabling focus and continuity.
+*   **Explicit Transitions & Status:** Clearly marking task status changes (part of Operational Principle #2) provides immediate visibility into progress.
+*   **Archival for History:** Archiving completed work in `logs/` preserves valuable historical context without cluttering active task lists.
+*   **Regular Reflection:** Periodically reviewing Flow's effectiveness (like the task we are doing now) ensures the system adapts and improves.
 
-3. **Single Source of Truth**: Each piece of information should exist in exactly one canonical location.
-
-4. **Consistency**: Similar information should be formatted and organized similarly throughout the system.
-
-5. **Discoverability**: Critical information should be easy to find through intuitive organization and cross-referencing.
-
-### Process Principles
-
-1. **Active Management**: Tasks require regular review and updating to remain useful.
-
-2. **Priority Focus**: Clear visual indicators direct attention to high-priority items.
-
-3. **Explicit Transitions**: Changes in status or priority should be clearly documented.
-
-4. **Archival not Deletion**: Completed or outdated information is archived rather than deleted, preserving historical context.
-
-5. **Regular Reflection**: Periodic reviews ensure the system remains effective and adapts to changing needs.
-
-### Content Principles
-
-1. **Clarity Over Brevity**: While conciseness is valued, clarity must never be sacrificed for brevity.
-
-2. **Contextual Information**: Tasks and documentation include sufficient context to understand their purpose and importance.
-
-3. **Standardized Formatting**: Consistent formatting enhances readability and comprehension.
-
-4. **Appropriate Detail**: Level of detail matches the importance and complexity of the information.
-
-5. **Cross-Referencing**: Related information is linked to provide context and enable discovery.
+### Content Rationale
+*   **Clarity, Context & Resumption:** Emphasizing clear documentation with sufficient context (Operational Principle #3 & #5) is crucial for reducing ambiguity, enabling effective collaboration (human-human and human-AI), and allowing work to be resumed efficiently after interruptions.
+*   **Standardized Formatting:** Consistent formatting (part of Operational Principle #4) enhances readability and predictability.
+*   **Cross-Referencing:** Linking related information (part of Operational Principle #1) builds a connected knowledge base and aids discovery.
 
 ## Application Guidelines
 
@@ -92,19 +75,11 @@ Flow's success is measured by:
 
 5. **User Satisfaction**: Those using the system find it intuitive, helpful, and worth the investment of time.
 
-## Additional Principles
+## Additional Foundational Concepts
 
-- **Adaptability:** The system should be flexible enough to adapt to changing project needs, team sizes, and development methodologies.
-
-- **AI Agent Resumption:** Design the project state (code, configuration, documentation, tasks, logs) to be sufficiently clear, structured, and self-contained so that an AI assistant can effectively understand the current status and resume work after interruptions, context switches, or system restarts.
-
-- **Proactive Organization:** Structure and organize work from the start to avoid later confusion and facilitate easier tracking and handoffs.
-
-- **Maintainability:** Document major changes thoroughly. Consider backward compatibility where feasible during refactoring or updates.
-
-- **Performance Awareness:** Keep performance implications (e.g., resource utilization, latency) in mind during development and refactoring.
-
-## Core Components
+*   **Adaptability:** The system should be flexible enough to adapt to changing project needs, team sizes, and development methodologies.
+*   **Maintainability:** Document major changes thoroughly. Consider backward compatibility where feasible during refactoring or updates.
+*   **Performance Awareness:** Keep performance implications (e.g., resource utilization, latency) in mind during development and refactoring.
 
 ---
 

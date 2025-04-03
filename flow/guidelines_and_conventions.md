@@ -43,20 +43,28 @@ This section defines standard conventions and configuration preferences used wit
     -   Weekly review of the entire task list and backlog (if maintained separately).
     -   Periodic consistency audits of the Flow system documentation itself.
 
-*Note: Project-specific overrides or additions to these conventions can be documented in `flow/project/conventions.md`.*
+*Note: Project-specific overrides or additions to these conventions can be documented in `flow/project/conventions.md` (if such a file is created).*
 
 ## Active Task Management Procedures
 
-Detailed procedures for managing tasks within `project/tasks.md`.
+Detailed procedures for managing tasks within `../project/tasks.md`.
 
--   **Primary Hub:** `project/tasks.md` is the central list for *active* tasks. Each task should include a brief description, status/priority indicators (see Conventions), and ideally a link to more detailed documentation if needed (e.g., a specific plan, issue tracker link, or design document).
+-   **Primary Hub:** `../project/tasks.md` is the central list for *active* tasks. Each task should include a brief description, status/priority indicators (see Conventions), and ideally a link to more detailed documentation if needed (e.g., a specific plan, issue tracker link, or design document).
 -   **Task Status:** Use the defined status indicators consistently.
 -   **Task Priority:** Use priority colors where appropriate to guide focus.
 -   **Granularity:** Keep the `project/tasks.md` list focused on actionable, current work items. Detailed sub-tasks or long-term planning should reside in linked documents to keep the main list concise.
 -   **Updates:** `project/tasks.md` should be updated continuously as work progresses. Add new tasks, update statuses, and archive completed items promptly.
 -   **Timestamps & Context:** When adding tasks or significant updates, consider adding a timestamp or linking back to the originating discussion/commit for context.
--   **Archival Process:** Once a task is completed (✅) or deemed no longer active, remove it from `project/tasks.md` and log its completion/archival in the `flow/project/logs/` directory, typically with a timestamp and outcome summary. Maintain only recent history (e.g., last 5-10 completed items) directly in `tasks.md` if desired for quick reference before full archival.
+-   **Archival Process:** Once a task is completed (✅) or deemed no longer active, remove it from `../project/tasks.md` and log its completion/archival in the `../project/logs/` directory, typically with a timestamp and outcome summary. Maintain only recent history (e.g., last 5-10 completed items) directly in `tasks.md` if desired for quick reference before full archival.
 -   **Scheduled Reviews & Retrospectives:** Implement regular reviews (daily/weekly) to reconcile the active task list, ensure consistency, identify blockers, and capture key decisions. Consider brief retrospectives after major milestones or complex tasks to capture lessons learned.
+
+## AI Agent Interaction Patterns
+
+### Interpreting User Requests to "Remember"
+- When the user asks the AI agent (you) to "remember" specific information, decisions, plans, or context, this should be interpreted as a directive to **record that information explicitly within the appropriate file(s) in the Flow system**.
+- The goal is to persist the information beyond the immediate conversation context, ensuring it becomes part of the documented project/system state.
+- Choose the most logical location (e.g., update a task in `tasks.md`, add to `glossary.md`, log a decision in `evolution.md` or a dedicated log, update `guidelines_and_conventions.md` itself, etc.). If unsure, propose a location to the user.
+- This ensures that "remembering" translates into durable, accessible knowledge within Flow, aligning with the system's memory-aid goals.
 
 ## Task Templates
 
@@ -106,20 +114,12 @@ To prevent the accumulation of unused or temporary files ("cruft"), especially w
 
 Strategies to prevent inconsistencies within the Flow documentation system itself:
 
-### Key Consistency Principles (Reiteration)
-
-    Single Source of Truth: Define information once. Core definitions often reside here or in system/conventions.md.
-
-    Cross-References: Use links ([link text](path/to/file.md)) to reference canonical definitions instead of duplicating.
-
-    Standardized Formats: Use the conventions defined in this document consistently.
-
-    Explicit Ownership: Adhere to the responsibilities outlined in the various README.md files.
+*Refer to the Core Principles defined in `flow.md` for operational guidelines.*
 
 ### Consistency Maintenance Practices
 
     Regular Audits: Periodically review Flow documents for consistency, broken links, and duplicated information.
 
-    Change Management: Update authoritative sources first (like this file), then propagate changes or update references in other documents. Document significant changes (perhaps in meta/CHANGELOG.md).
+    Change Management: Update authoritative sources first (like this file), then propagate changes or update references in other documents. Document significant changes (perhaps in `../meta/evolution.md` or a dedicated `../meta/CHANGELOG.md`).
 
     Refactoring Sessions: Occasionally review the Flow system structure itself for potential improvements or simplification. Remove outdated documents or sections.

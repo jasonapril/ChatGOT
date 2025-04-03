@@ -12,8 +12,6 @@ This directory contains the following files and subdirectories related to Flow's
 - `evolution.md`: Tracks the development history and future directions of Flow.
 - `tasks.md`: Tasks specifically for improving the Flow system itself.
 - `glossary.md`: Definitions of key terms used within the Flow system.
-- `improvements.md`: Suggestions for enhancing the Flow system (potentially related to `tasks.md`).
-- `config_implementation.md`: Details on how configuration is implemented within the Flow system.
 
 ## Purpose
 
@@ -25,9 +23,3 @@ The meta directory serves a special purpose in the Flow system by providing:
 4. **Improvement Planning** - Tasks and priorities for enhancing Flow itself
 
 Think of meta as "Flow thinking about Flow" - a layer of metacognition that helps Flow improve itself over time.
-
-## Related Resources
-
-- [System Guidelines](../system/guidelines.md) - Operational rules for using Flow
-- [Configuration](../system/configuration.md) - Current system configuration
-- [Improvements](../planning/improvements.md) - General improvement suggestions

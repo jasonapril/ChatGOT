@@ -1,10 +1,15 @@
-`# Development Plan (Created: 2025-04-01)
+# Vision & Development Plan (Created: 2025-04-01)
 
 # Initial Development Plan for Craft Framework
 
-## Goal
+## Overall Goals
 
-Establish the core functionality of the Craft framework required to train baseline language models (character-level and subword-level) of varying sizes (e.g., 1M, 10M params) on initial datasets (Game of Thrones, Wikipedia subset), enabling logging, checkpointing, sample generation, and basic evaluation.
+Establish the core functionality of the Craft framework to support the end-to-end lifecycle for training and experimenting with language models, focusing initially on:
+1.  **Data Preprocessing & Tokenization:** Implement robust pipelines for processing diverse datasets and training/applying various tokenization strategies (e.g., character-level, subword).
+2.  **Model Architecture & Configuration:** Define flexible model architectures (initially Transformer-based) and manage their configuration effectively.
+3.  **Training Pipeline:** Develop a unified training framework encompassing distinct phases like pretraining and fine-tuning (details for fine-tuning to be defined later), including robust logging, checkpointing, evaluation, and sample generation.
+
+*(Initial focus: Train baseline models (char/subword, ~1M-10M params) on GoT/Wikipedia subsets)*
 
 ## Development Phases (Iterative Approach)
 
@@ -12,26 +17,26 @@ We will build and test features incrementally, focusing first on the smaller Gam
 
 ### Phase 1: Core Infrastructure & Data Pipeline (GoT Focus)
 
-1.  **Configuration Handling (`src/craft/config`, `conf/`)**
+1.  **Configuration Handling (`src/craft/config`, `conf/`) - *Configuration Management***
     *   Implement robust loading and validation of Hydra configurations (`.yaml` files).
     *   Define base configuration structures (`conf/config.yaml`) and initial configs for data (`conf/data/got_char.yaml`), models (`conf/model/transformer_small.yaml`), training (`conf/training/default.yaml`), optimizers (`conf/optimizer/adamw.yaml`), etc.
     *   Ensure configurations are accessible within the framework code via `src/craft/config`.
 
-2.  **Data Processing & Loading (`src/craft/data`, `scripts/prepare_data.py`, `data/`)**
+2.  **Data Processing & Loading (`src/craft/data`, `scripts/prepare_data.py`, `data/`) - *Initial Preprocessing***
     *   Implement Character-level processing for GoT (logic within `src/craft/data/processors.py` or called by `scripts/prepare_data.py`).
         *   Input: `data/raw/got.txt` (or similar path)
         *   Output: Tokenized `train/val/test` splits in `data/processed/got/char_level/` (e.g., `.pkl` files containing token IDs, vocab info).
     *   Implement `Dataset` and `DataLoader` logic (`src/craft/data/datasets.py`, `src/craft/data/dataloaders.py`) capable of loading the processed character-level data based on configuration.
     *   Ensure `scripts/prepare_data.py` can be driven by configurations in `conf/data/`.
 
-3.  **Basic Model Definition (`src/craft/models`)**
+3.  **Basic Model Definition (`src/craft/models`) - *Model Architecture***
     *   Implement a basic Transformer architecture (`src/craft/models/transformer.py`).
     *   Parameterize the model (layers, heads, dimensions) so it can be configured via `conf/model/*.yaml`.
     *   Implement model creation based on config (`src/craft/models/factory.py` or similar, using `create_model_from_config`).
     *   Target initial small model sizes (e.g., ~1M params).
 
-4.  **Core Training Loop (`src/craft/training`, `scripts/train.py`)**
-    *   Implement a basic `Trainer` class (`src/craft/training/trainer.py` or `base.py`).
+4.  **Core Training Loop (`src/craft/training`, `scripts/train.py`) - *Unified Training Framework (Foundation)***
+    *   Implement a basic `Trainer` class (`src/craft/training/trainer.py` or `base.py`) establishing the foundation for a unified training process.
     *   Include essential steps: batch iteration, forward pass, loss calculation (CrossEntropy), backward pass, optimizer step.
     *   Integrate configuration for training parameters (learning rate, batch size, epochs) from `conf/training/` and `conf/optimizer/`.
     *   Ensure `scripts/train.py` can initiate training using an experiment config (`conf/experiment/got_char_small.yaml`).
@@ -60,7 +65,7 @@ We will build and test features incrementally, focusing first on the smaller Gam
 
 ### Phase 3: Scaling & Subword Tokenization (Wiki Prep)
 
-1.  **Subword Tokenization (`src/craft/data`, `conf/tokenizer`, `scripts/prepare_data.py`)**
+1.  **Subword Tokenization (`src/craft/data`, `conf/tokenizer`, `scripts/prepare_data.py`) - *Tokenizer Training***
     *   Integrate/implement subword tokenizer training (e.g., BPE using Hugging Face `tokenizers` library).
     *   Update data processing (`scripts/prepare_data.py`, `src/craft/data/processors.py`) to handle subword tokenization for GoT (`data/processed/got/subword_level/`).
     *   Update `Dataset/DataLoader` (`src/craft/data/`) to handle subword tokenized data.
@@ -87,7 +92,8 @@ We will build and test features incrementally, focusing first on the smaller Gam
 *   Explore larger models (1B+ params, potentially requiring distributed training).
 *   Implement more advanced evaluation metrics or generation techniques.
 *   Refactor and optimize framework based on findings.
-*   Explore fine-tuning, RL, tool use as separate future phases.
+*   **Fine-tuning Phase:** Define and implement strategies and tasks for fine-tuning pretrained models (Details TBD).
+*   Explore RL, tool use as separate future phases.
 
 ## Testing Strategy (Moved from tasks.md)
 

@@ -2,8 +2,7 @@
 
 ## Vision / Goals
 
-- Develop AI models for low-spec devices (performance critical)
-- Experiment with cutting edge architectures and methods (research)
+*(See [vision_and_plan.md](vision_and_plan.md) for detailed project goals and the development plan.)*
 
 ## Overview
 
@@ -27,6 +26,7 @@ The `project/` directory separates the dynamic, project-specific context (tasks,
 ## Structure
 
 *   **`tasks.md`**: Tracks active development tasks, priorities, and status.
+*   **`vision_and_plan.md`**: Outlines the project vision, high-level goals, and the phased development plan.
 *   **`conventions.md`**: Documents project-specific conventions (e.g., directory structures, naming).
 *   **`logs/`**: Archives historical records, such as completed task logs or event timelines.
 *   **`README.md`**: This file.
@@ -44,4 +44,18 @@ The `project/` directory separates the dynamic, project-specific context (tasks,
 
 Documents related to future work, such as roadmaps, specific feature plans, or improvement proposals.
 
-- **`vision.md`
+- **`vision_and_plan.md`**
+
+# Project Context (`flow/project/`)
+
+This directory holds the active context for the specific project being worked on (e.g., Craft).
+
+## Contents
+
+*   `README.md`: This overview file.
+*   `tasks.md`: The primary list of active project tasks, priorities, and statuses.
+*   `logs/`: Directory containing archived logs of completed project tasks.
+*   `templates/`: (Optional) Contains templates for project-specific items.
+*   `reference_minimal_test_run_gpu.md`: Notes documenting a known-good baseline configuration and environment for running a minimal training test on a specific GPU (GTX 1650 Ti), useful for debugging environment or basic configuration issues.
+
+*(Project-specific configuration files, detailed plans, or temporary notes may also reside here or be linked from `tasks.md`)*

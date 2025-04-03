@@ -5,19 +5,19 @@ The Flow System is designed as an externalized memory system to enhance producti
 ## Memory Systems
 
 ### Working Memory
-- **Active Tasks**: Current tasks in focus, managed in `active/tasks.md`
-- **Priorities**: Strategic focus areas that guide attention, documented in `planning/priorities.md`
+- **Active Tasks**: Current tasks in focus, managed in `../project/tasks.md` (or `tasks.md` for meta-tasks)
+- **Priorities**: Strategic focus areas that guide attention, often defined within `tasks.md` or linked documents.
 - **Context Retention**: Flow preserves context through consistent structure and cross-referencing
 
 ### Long-term Memory
-- **System Documentation**: Core principles and guidelines stored in the `system/` directory
-- **Reference Material**: Technical details and implementations in the `reference/` directory
-- **Historical Records**: Completed tasks and past decisions archived in `logs/`
+- **System Documentation**: Core principles and guidelines stored in the `../system/` directory (e.g., `../system/guidelines_and_conventions.md`)
+- **Reference Material**: Domain-specific knowledge bases (e.g., in `../domains/`) and project-specific details.
+- **Historical Records**: Completed tasks and past decisions archived in `../project/logs/`
 
 ### Prospective Memory
-- **Planned Enhancements**: Future improvements captured in `planning/improvements.md`
-- **Scheduled Tasks**: Upcoming work items with timing considerations
-- **Reminders**: System for bringing relevant information to attention at the right time
+- **Planned Enhancements**: Future improvements captured in `tasks.md`.
+- **Scheduled Tasks**: Upcoming work items with timing considerations (managed within `tasks.md`).
+- **Reminders**: System for bringing relevant information to attention at the right time (potential feature, see `tasks.md`).
 
 ### Short-term Buffers
 - **Task Notes**: Temporary workspace for capturing thoughts during task execution
@@ -61,9 +61,11 @@ The Flow System is designed as an externalized memory system to enhance producti
 
 ## Future Directions
 
-- Implementing automation for routine memory operations
-- Developing more sophisticated retrieval mechanisms
-- Creating adaptive structures that evolve based on usage patterns
+*These align with items tracked in `tasks.md`.*
+
+- Implementing automation for routine memory operations (See: "Automation Considerations" in `tasks.md`).
+- Developing more sophisticated retrieval mechanisms.
+- Creating adaptive structures that evolve based on usage patterns (See: "Learn from Mistakes" in `tasks.md`).
 
 ---
 
