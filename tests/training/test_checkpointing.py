@@ -4,6 +4,7 @@ import os
 from unittest.mock import MagicMock, patch
 import sys
 import shutil
+import logging
 
 # Module under test
 from craft.training.checkpointing import CheckpointManager

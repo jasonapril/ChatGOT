@@ -21,34 +21,77 @@ from craft.training.callbacks import Callback
 
 # --- Fixtures ---
 
-@pytest.fixture
-def mock_model():
-    """Fixture for a mock model."""
-    model = MagicMock(spec=torch.nn.Module)
-    # Simulate returning logits with shape [batch, seq_len, vocab_size]
-    batch_size = 2
-    seq_len = 5
-    vocab_size = 10
-    # Create a dummy output tensor with requires_grad=True
-    output_tensor = torch.randn(batch_size, seq_len, vocab_size, requires_grad=True)
-    model.return_value = output_tensor
-    # Mock parameters() for gradient clipping tests
-    mock_param = MagicMock(spec=torch.Tensor)
-    model.parameters.return_value = [mock_param]
-    # Mock train/eval modes
-    model.train = MagicMock()
-    model.eval = MagicMock()
-    return model
+@pytest.fixture(scope="session") # Scope session as device doesn't change
+def mock_device():
+    """Provides a mock device."""
+    return torch.device("cpu")
 
 @pytest.fixture
 def mock_optimizer():
-    """Fixture for a mock optimizer."""
-    optimizer = MagicMock(spec=torch.optim.AdamW)
-    optimizer.zero_grad = MagicMock()
-    optimizer.step = MagicMock()
-    # Mock param_groups for scheduler/logging if needed
-    optimizer.param_groups = [{'lr': 0.001}]
+    """Provides a mock optimizer with param_groups."""
+    optimizer = MagicMock()
+    optimizer.param_groups = [{'lr': 0.01}]
+    # Mock step/zero_grad if needed later by specific tests
+    # optimizer.step = MagicMock()
+    # optimizer.zero_grad = MagicMock()
     return optimizer
+
+@pytest.fixture
+def mock_model():
+    """Provides a basic mock model with eval/train methods."""
+    model = MagicMock(spec=["eval", "train", "parameters"])
+    model.eval = MagicMock()
+    model.train = MagicMock()
+    # Mock parameters to return an iterable (e.g., an empty list or a list with a mock parameter)
+    # This is needed for things like gradient clipping which iterate over model.parameters()
+    model.parameters = MagicMock(return_value=[torch.nn.Parameter(torch.tensor(1.0))])
+    return model
+
+@pytest.fixture
+def mock_model_with_generate(mock_model): # Can build upon the basic mock_model
+    """Provides a mock model with a callable generate method."""
+    # Simulate generate output (needs to include prompt tokens based on callback logic)
+    # Prompt: [101, 5141, 2747, 1037, 1994, 102] -> 6 tokens
+    # Generate 5 new tokens: [1, 2, 3, 4, 5]
+    generated_ids = torch.tensor([[101, 5141, 2747, 1037, 1994, 102, 1, 2, 3, 4, 5]])
+    mock_model.generate = MagicMock(return_value=generated_ids)
+    # Ensure eval/train still exist from the base mock_model fixture
+    return mock_model
+
+@pytest.fixture
+def mock_tokenizer():
+    """Provides a mock tokenizer with encode/decode methods."""
+    tokenizer = MagicMock()
+    # Simulate HF tokenizer __call__ behavior
+    def encode_side_effect(text, return_tensors=None):
+        # Dummy encoding, return simple tensor-like structure
+        if text == "Once upon a time":
+            input_ids = torch.tensor([[101, 5141, 2747, 1037, 1994, 102]])
+            attention_mask = torch.ones_like(input_ids)
+            return {'input_ids': input_ids, 'attention_mask': attention_mask}
+        return {'input_ids': torch.tensor([[0]]), 'attention_mask': torch.tensor([[1]])}
+    # Use side_effect to make the mock callable like a function that returns the dict
+    tokenizer.side_effect = encode_side_effect
+    tokenizer.decode.return_value = " generated sample text"
+    tokenizer.eos_token_id = 2 # Dummy EOS token id
+    tokenizer.pad_token_id = 0 # Add pad token id if needed
+    return tokenizer
+
+@pytest.fixture
+def mock_trainer(mock_model, mock_optimizer, mock_device):
+    """Provides a basic mock trainer instance with common attributes."""
+    trainer = MagicMock()
+    trainer.model = mock_model
+    trainer.optimizer = mock_optimizer
+    trainer.device = mock_device
+    trainer.logger = MagicMock(spec=logging.Logger)
+    trainer.state = MagicMock()
+    trainer.state.best_metric_value = float("-inf") # For EarlyStopping
+    trainer.state.early_stopping_counter = 0
+    trainer.state.stopped_training = False
+    trainer.current_epoch = 0
+    # Add other commonly used attributes here if needed
+    return trainer
 
 @pytest.fixture
 def mock_scheduler():
@@ -82,12 +125,6 @@ def mock_dataloader():
     # Set length for progress bar
     mock_loader.__len__.return_value = len(dataloader) 
     return mock_loader
-
-@pytest.fixture
-def mock_device():
-    """Fixture for a mock device."""
-    # Use a real CPU device for simplicity in type checking etc.
-    return torch.device("cpu")
 
 @pytest.fixture
 def mock_scaler():

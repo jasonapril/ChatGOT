@@ -104,19 +104,19 @@ def batch_generate(model, char_to_idx, idx_to_char, prompts, max_length=500, tem
             for i in range(batch_size):
                 if active[i]:
                     next_token = next_tokens[current_active_idx].item()
-                    
-                    # Check for end of generation 
+
+                    # Add the generated token to the text *first*
+                    generated[i] += idx_to_char.get(next_token, '<UNK>')
+
+                    # Check for end of generation AFTER adding the token
                     if next_token == eos_token_id:
                         active[i] = False
                     else:
-                        # Add to generated text
-                        generated[i] += idx_to_char.get(next_token, '<UNK>')
-                        
                         # Update context (append and potentially truncate)
                         # Note: Simple append without KV cache - becomes inefficient for long sequences
                         new_token_tensor = torch.tensor([[next_token]], dtype=torch.long, device=device)
                         contexts[i] = torch.cat((contexts[i:i+1, 1:], new_token_tensor), dim=1) # Shift and append
-                        
+
                     current_active_idx += 1
                     
             # Optionally truncate all contexts to save memory 

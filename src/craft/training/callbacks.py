@@ -6,11 +6,15 @@ This module provides a flexible callback system for training events.
 """
 
 import logging
+import numpy as np
 from typing import Dict, Any, Optional, List
 from abc import ABC, abstractmethod
-import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
+import warnings
+from torch.optim.lr_scheduler import ReduceLROnPlateau, _LRScheduler # Assuming it's used elsewhere or will be
+
+logger = logging.getLogger(__name__)
 
 class Callback(ABC):
     """Base class for all callbacks."""
@@ -305,6 +309,11 @@ class SampleGenerationCallback(Callback):
 
     def _generate_samples(self, step_or_epoch_info):
         """Internal method to perform sample generation and logging."""
+        # Check for missing trainer or tokenizer first
+        if not self.trainer or not self.tokenizer:
+            self.logger.error("Trainer or tokenizer not set properly.")
+            return
+
         if not hasattr(self.trainer.model, 'generate') or not callable(self.trainer.model.generate):
             self.logger.warning(f"Model {self.trainer.model.__class__.__name__} does not have a callable 'generate' method. Skipping sample generation.")
             return
@@ -438,6 +447,124 @@ class TensorBoardLogger(Callback):
     def on_step_begin(self, step, logs=None):
         """Called at the beginning of each training step."""
         pass # No action needed
+
+class EarlyStopping(Callback):
+    """
+    Stop training when a monitored metric has stopped improving.
+
+    Args:
+        monitor (str): Quantity to be monitored. Default: 'val_loss'.
+        min_delta (float): Minimum change in the monitored quantity to qualify as an improvement. Default: 0.
+        patience (int): Number of epochs with no improvement after which training will be stopped. Default: 10.
+        verbose (int): Verbosity mode, 0 or 1. Default: 0.
+        mode (str): One of {'auto', 'min', 'max'}. In 'min' mode, training will stop when the quantity
+            monitored has stopped decreasing; in 'max' mode it will stop when the quantity
+            monitored has stopped increasing; in 'auto' mode, the direction is automatically inferred
+            from the name of the monitored quantity. Default: 'auto'.
+        delta (float): Minimum change in the monitored quantity to qualify as an improvement. Default: 0.0.
+        restore_best_weights (bool): Whether to restore model weights from the epoch with the best
+                                     value of the monitored quantity. Default: False.
+    """
+    def __init__(self, monitor='val_loss', min_delta=0.0, patience=10, verbose=0, mode='auto', delta=0.0, restore_best_weights=False):
+        super().__init__()
+
+        self.monitor = monitor
+        self.patience = patience
+        self.verbose = verbose
+        # Use the 'delta' parameter name consistently, rename min_delta internally if needed
+        # Keep min_delta for backward compatibility? Or just use delta? Let's use delta.
+        self.delta = delta # Changed from min_delta
+        self.wait = 0
+        self.stopped_epoch = 0
+        self.restore_best_weights = restore_best_weights
+        self.best_weights = None
+
+        if mode not in ['auto', 'min', 'max']:
+            logger.warning(f"EarlyStopping mode {mode} is unknown, fallback to auto mode.")
+            mode = 'auto'
+
+        if mode == 'auto':
+            if 'acc' in self.monitor or self.monitor.startswith('fmeasure'):
+                self.mode = 'max'
+            else:
+                self.mode = 'min'
+        else:
+            self.mode = mode
+
+        if self.mode == 'min':
+            self.monitor_op = np.less
+            # Use np.inf instead of np.Inf
+            self.best = np.inf # Changed from np.Inf
+        else:
+            self.monitor_op = np.greater
+            # Use -np.inf instead of -np.Inf
+            self.best = -np.inf # Changed from -np.Inf
+
+        # Adjust comparison based on delta and mode
+        if self.mode == 'min':
+            self.monitor_op = lambda a, b: np.less(a, b - self.delta)
+        else: # mode == 'max'
+            self.monitor_op = lambda a, b: np.greater(a, b + self.delta)
+
+    def on_train_begin(self, trainer, logs=None):
+        # Allow instances to be re-used
+        self.wait = 0
+        self.stopped_epoch = 0
+        # Use np.inf/-np.inf consistently
+        self.best = np.inf if self.mode == "min" else -np.inf # Changed from np.Inf/-np.Inf
+        self.best_weights = None
+        self.best_epoch = 0
+
+    def on_epoch_end(self, trainer, epoch, logs=None):
+        current = logs.get(self.monitor)
+        if current is None:
+            logger.warning(f"Early stopping conditioned on metric `{self.monitor}` which is not available. Available metrics are: {','.join(list(logs.keys()))}")
+            return
+
+        if self.monitor_op(current, self.best):
+            self.best = current
+            self.wait = 0
+            self.best_epoch = epoch
+            if self.restore_best_weights:
+                # TODO: Implement weight saving/loading mechanism
+                # self.best_weights = self.model.get_weights()
+                logger.info("Saving best model weights...")
+                # Placeholder for actual weight saving
+                self.best_weights = {name: param.clone().detach().cpu() for name, param in trainer.model.named_parameters()}
+
+        else:
+            self.wait += 1
+            if self.wait >= self.patience:
+                self.stopped_epoch = epoch
+                trainer.stop_training = True
+                if self.restore_best_weights and self.best_weights is not None:
+                    if self.verbose > 0:
+                        logger.info(f"Restoring model weights from the end of the best epoch ({self.best_epoch+1}).")
+                    # Placeholder for actual weight loading
+                    state_dict = trainer.model.state_dict()
+                    state_dict.update(self.best_weights)
+                    trainer.model.load_state_dict(state_dict)
+                    logger.info("Restored best model weights.")
+
+
+                if self.verbose > 0:
+                    logger.info(f"Epoch {self.stopped_epoch + 1}: early stopping")
+
+    def on_epoch_begin(self, trainer, epoch, logs=None):
+        # No action needed on epoch begin for EarlyStopping
+        pass
+
+    def on_step_begin(self, trainer, batch_idx, logs=None):
+        # No action needed on step begin for EarlyStopping
+        pass
+
+    def on_step_end(self, trainer, batch_idx, logs=None):
+        # No action needed on step end for EarlyStopping
+        pass
+
+    def on_train_end(self, trainer, logs=None):
+        if self.stopped_epoch > 0 and self.verbose > 0:
+             logger.info(f"Epoch {self.stopped_epoch + 1}: early stopping")
 
 # Example of another callback:
 # class TensorBoardLogger(TrainerCallback):

@@ -550,4 +550,72 @@ class TestTrainingLoopTrainEpoch:
         assert mock_optimizer.step.call_count == max_steps_to_run
         assert mock_progress_tracker_instance.update.call_count == max_steps_to_run
         mock_logger_fixture.info.assert_any_call(f"Reached max_steps ({max_steps_to_run}). Ending epoch early.")
-        assert epoch_metrics.get('num_steps') == max_steps_to_run 
+        assert epoch_metrics.get('num_steps') == max_steps_to_run
+
+    @patch('torch.amp.autocast')
+    @patch('torch.nn.functional.cross_entropy')
+    @patch('tqdm.tqdm')
+    def test_train_epoch_gradient_accumulation_uneven(self,
+                                                      mock_tqdm,
+                                                      mock_cross_entropy,
+                                                      mock_autocast,
+                                                      mock_model,
+                                                      mock_optimizer,
+                                                      mock_device,
+                                                      mock_progress_tracker_instance,
+                                                      mock_scaler,
+                                                      mock_logger_fixture
+                                                     ):
+        """Test train_epoch with gradient accumulation where batches % steps != 0."""
+        # --- Setup Mocks & Data ---\
+        accumulation_steps = 2
+        num_batches = 5 # Uneven number
+        batches = [(torch.randn(2, 4), torch.randint(0, 10, (2,))) for _ in range(num_batches)]
+        multi_batch_dataloader = MagicMock(spec=DataLoader)
+        multi_batch_dataloader.__iter__.return_value = iter(batches)
+        multi_batch_dataloader.__len__.return_value = num_batches
+
+        mock_autocast.return_value.__enter__.return_value = None
+        mock_autocast.return_value.__exit__.return_value = None
+        mock_loss = torch.tensor(1.0, requires_grad=True)
+        mock_cross_entropy.return_value = mock_loss
+        mock_tqdm.return_value = enumerate(multi_batch_dataloader)
+
+        # --- Setup Loop (AMP Disabled) ---\
+        loop = TrainingLoop(
+            model=mock_model,
+            optimizer=mock_optimizer,
+            train_dataloader=multi_batch_dataloader,
+            device=mock_device,
+            config={},\
+            use_amp=False,\
+            gradient_accumulation_steps=accumulation_steps
+        )
+        loop.scaler = mock_scaler
+        loop.scaler.is_enabled = MagicMock(return_value=False)
+
+        # --- Run Epoch ---\
+        start_global_step = 0
+        epoch_metrics = loop.train_epoch(
+            current_epoch=0,\
+            global_step=start_global_step,\
+            progress=mock_progress_tracker_instance
+        )
+
+        # --- Assertions ---\
+        mock_model.train.assert_called_once()
+        assert mock_cross_entropy.call_count == num_batches
+        assert mock_model.call_count == num_batches
+
+        # Expect step count to be ceiling(num_batches / accumulation_steps)
+        expected_steps = 3 # ceil(5 / 2)
+        assert mock_optimizer.step.call_count == expected_steps
+        assert mock_scaler.update.call_count == expected_steps
+        # zero_grad is called once at the start, then after each step
+        assert mock_optimizer.zero_grad.call_count == 1 + expected_steps
+
+        # Progress updated after each optimizer step
+        assert mock_progress_tracker_instance.update.call_count == expected_steps
+        assert 'loss' in epoch_metrics
+        # The number of *valid* steps in the epoch (where loss was computed) should be num_batches
+        assert epoch_metrics.get('num_steps', -1) == num_batches 

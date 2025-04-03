@@ -99,21 +99,35 @@ class TextGenerator:
                 raise ValueError("Dataset must provide either a tokenizer with an encode method or a char_to_idx mapping.")
 
             # --- Determine Special Token IDs --- #
+            # Priority: Explicitly passed > Tokenizer > Model Config > Char Fallback (EOS only)
+
+            # PAD Token
             eff_pad_token_id = pad_token_id
             if eff_pad_token_id is None:
-                 if hasattr(self.model, 'config') and hasattr(self.model.config, 'pad_token_id'):
-                     eff_pad_token_id = self.model.config.pad_token_id
-                 elif hasattr(self.dataset, 'tokenizer') and hasattr(self.dataset.tokenizer, 'pad_token_id'):
-                     eff_pad_token_id = self.dataset.tokenizer.pad_token_id
+                if hasattr(self.dataset, 'tokenizer') and hasattr(self.dataset.tokenizer, 'pad_token_id') and self.dataset.tokenizer.pad_token_id is not None:
+                    eff_pad_token_id = self.dataset.tokenizer.pad_token_id
+                elif hasattr(self.model, 'config') and hasattr(self.model.config, 'pad_token_id'):
+                    eff_pad_token_id = self.model.config.pad_token_id
             
+            # EOS Token
             eff_eos_token_id = eos_token_id
             if eff_eos_token_id is None:
-                 if hasattr(self.model, 'config') and hasattr(self.model.config, 'eos_token_id'):
-                     eff_eos_token_id = self.model.config.eos_token_id
-                 elif hasattr(self.dataset, 'tokenizer') and hasattr(self.dataset.tokenizer, 'eos_token_id'):
-                     eff_eos_token_id = self.dataset.tokenizer.eos_token_id
-                 elif hasattr(self.dataset, 'char_to_idx'):
-                     eff_eos_token_id = self.dataset.char_to_idx.get('<eos>', None)
+                # Try tokenizer first
+                tokenizer = getattr(self.dataset, 'tokenizer', None)
+                if tokenizer:
+                    eff_eos_token_id = getattr(tokenizer, 'eos_token_id', None)
+                
+                # If still None, try model config
+                if eff_eos_token_id is None:
+                    model_config = getattr(self.model, 'config', None)
+                    if model_config:
+                        eff_eos_token_id = getattr(model_config, 'eos_token_id', None)
+                
+                # If still None, try char_to_idx fallback
+                if eff_eos_token_id is None:
+                    char_map = getattr(self.dataset, 'char_to_idx', None)
+                    if isinstance(char_map, dict):
+                        eff_eos_token_id = char_map.get('<eos>', None)
             
             self.logger.debug(f"Effective PAD token ID: {eff_pad_token_id}")
             self.logger.debug(f"Effective EOS token ID: {eff_eos_token_id}")
@@ -170,24 +184,31 @@ class TextGenerator:
             for sequence in output_sequences:
                 # Remove the prompt part to get only the generated tokens
                 # Ensure sequence is on CPU before slicing/converting
-                generated_ids = sequence.cpu()[input_ids.shape[-1]:].tolist()
+                input_len = input_ids.shape[-1]
+                generated_ids = sequence.cpu()[input_len:].tolist()
                 
                 # Decode, handling potential errors
+                generated_text = "[Decoding Error]" # Default value
                 try:
-                    # Attempt decoding, remove special tokens if possible
-                    generated_text = self.dataset.decode(generated_ids, skip_special_tokens=True)
+                    # Attempt 1: Decode with skip_special_tokens=True
+                    text_attempt_1 = self.dataset.decode(generated_ids, skip_special_tokens=True)
+                    generated_text = text_attempt_1 # Assign only if successful
                 except TypeError:
-                    # Fallback if skip_special_tokens is not supported
+                    self.logger.warning(
+                        "Decoding failed with skip_special_tokens=True, trying again without it.",
+                        exc_info=True
+                    )
                     try:
-                         generated_text = self.dataset.decode(generated_ids)
-                         # Manual cleanup might be needed here if special tokens remain
-                    except Exception as decode_err:
-                         self.logger.error(f"Decoding failed: {decode_err}")
-                         generated_text = "[Decoding Error]"
-                except Exception as decode_err:
-                    self.logger.error(f"Decoding failed: {decode_err}")
-                    generated_text = "[Decoding Error]"
-                    
+                        # Attempt 2: Decode without skip_special_tokens
+                        text_attempt_2 = self.dataset.decode(generated_ids, skip_special_tokens=False)
+                        generated_text = text_attempt_2 # Assign only if successful
+                    except Exception as decode_err_fallback:
+                        self.logger.error(f"Error during fallback decoding attempt: {decode_err_fallback}", exc_info=True)
+                        # Fallback failed, generated_text remains "[Decoding Error]"
+                except Exception as decode_err_primary:
+                    self.logger.error(f"Error decoding generated sequence: {decode_err_primary}", exc_info=True)
+                    # Primary failed (not TypeError), generated_text remains "[Decoding Error]"
+
                 generated_texts.append(generated_text.strip()) # Strip leading/trailing whitespace
 
             return generated_texts
