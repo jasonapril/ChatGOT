@@ -81,19 +81,29 @@ def test_generate_basic_sampling(mock_model, char_maps):
 
     # Verify model calls
     assert mock_model.call_count == max_length
-    expected_calls = [
-        call(torch.tensor([[1]], device=device)), # Initial context 'a'
-        call(torch.tensor([[1, 2]], device=device)), # Context 'ab'
-        call(torch.tensor([[1, 2, 3]], device=device)), # Context 'abc'
-    ]
-    # mock_model.assert_has_calls(expected_calls) # Fails due to tensor comparison
-    # Instead, check call arguments manually using torch.equal
-    assert len(mock_model.call_args_list) == len(expected_calls)
-    for actual_call, expected_call in zip(mock_model.call_args_list, expected_calls):
-        # Compare the tensor arguments using torch.equal
-        assert torch.equal(actual_call[0][0], expected_call[0][0])
-        # Optionally check kwargs if they were complex
-        assert actual_call[1] == expected_call[1]
+    # Instead, check call arguments manually using torch.equal and .args/.kwargs
+    assert len(mock_model.call_args_list) == max_length # Should be 3 calls
+
+    # Check call 1
+    call1_args, call1_kwargs = mock_model.call_args_list[0]
+    expected_call1_arg = torch.tensor([[1]], device=device) # Initial context 'a'
+    assert len(call1_args) == 1
+    assert torch.equal(call1_args[0], expected_call1_arg), f"Call 1 arg mismatch: Got {call1_args[0]}, Expected {expected_call1_arg}"
+    assert call1_kwargs == {}, f"Call 1 kwargs mismatch: Got {call1_kwargs}"
+
+    # Check call 2
+    call2_args, call2_kwargs = mock_model.call_args_list[1]
+    expected_call2_arg = torch.tensor([[1, 2]], device=device) # Context 'ab'
+    assert len(call2_args) == 1
+    assert torch.equal(call2_args[0], expected_call2_arg), f"Call 2 arg mismatch: Got {call2_args[0]}, Expected {expected_call2_arg}"
+    assert call2_kwargs == {}, f"Call 2 kwargs mismatch: Got {call2_kwargs}"
+
+    # Check call 3
+    call3_args, call3_kwargs = mock_model.call_args_list[2]
+    expected_call3_arg = torch.tensor([[1, 2, 3]], device=device) # Context 'abc'
+    assert len(call3_args) == 1
+    assert torch.equal(call3_args[0], expected_call3_arg), f"Call 3 arg mismatch: Got {call3_args[0]}, Expected {expected_call3_arg}"
+    assert call3_kwargs == {}, f"Call 3 kwargs mismatch: Got {call3_kwargs}"
 
     # Verify multinomial calls (sampling)
     assert mock_multinomial.call_count == max_length
@@ -406,17 +416,17 @@ def test_generate_sampling_context_truncation(mock_model, char_maps):
     assert mock_model.call_count == max_length
 
     # First call: context is initial_context (len 15) -> exceeds 10
-    # Should be truncated to last 10: [b,c,a,b,c,a,b,c,a,b] -> [2,3,1,2,3,1,2,3,1,2]
-    expected_first_call_context = torch.tensor([[2,3,1,2,3,1,2,3,1,2]], device=device)
-    first_call_arg = mock_model.call_args_list[0][0][0] # model(context)
+    # Should be truncated to last 10: [c,a,b,c,a,b,c,a,b,c] -> [3,1,2,3,1,2,3,1,2,3]
+    expected_first_call_context = torch.tensor([[3,1,2,3,1,2,3,1,2,3]], device=device)
+    first_call_arg = mock_model.call_args_list[0].args[0] # Access via .args
     # Check shape and content separately
     assert first_call_arg.shape[1] == model_max_len, "First call context length is wrong"
     assert torch.equal(first_call_arg, expected_first_call_context), "First call context content is wrong"
 
     # Second call: context = first_call_context + space (5)
-    # Context: [2,3,1,2,3,1,2,3,1,2,5] (len 11) -> exceeds 10
-    # Should be truncated to last 10: [3,1,2,3,1,2,3,1,2,5]
-    expected_second_call_context = torch.tensor([[3,1,2,3,1,2,3,1,2,5]], device=device)
+    # Context: [3,1,2,3,1,2,3,1,2,3,5] (len 11) -> exceeds 10
+    # Should be truncated to last 10: [1,2,3,1,2,3,1,2,3,5]
+    expected_second_call_context = torch.tensor([[1,2,3,1,2,3,1,2,3,5]], device=device)
     second_call_arg = mock_model.call_args_list[1][0][0] # model(context)
     # Check shape and content separately
     assert second_call_arg.shape[1] == model_max_len, "Second call context length is wrong"

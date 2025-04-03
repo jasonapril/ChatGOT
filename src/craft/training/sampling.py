@@ -38,6 +38,12 @@ def generate_text_sampling(model, char_to_idx, idx_to_char, seed_text, max_lengt
     context = [char_to_idx.get(c, char_to_idx.get("<unk>", 0)) for c in seed_text]
     context = torch.tensor(context, dtype=torch.long, device=device).unsqueeze(0)
     
+    # Truncate initial context if it exceeds model's max length
+    model_max_length = getattr(model.config, 'max_seq_length', 1024) if hasattr(model, 'config') else 1024
+    if context.size(1) > model_max_length:
+        context = context[:, -model_max_length:]
+        logging.warning(f"Initial seed text length ({context.size(1)}) exceeded model max length ({model_max_length}). Truncating.") # Optional: Add warning
+
     with torch.no_grad():
         for _ in range(max_length):
             # Get predictions

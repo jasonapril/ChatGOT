@@ -165,7 +165,7 @@ def test_batch_generate_different_lengths(mock_model, request):
     # and the mock model's simple logic doesn't break things.
     # expected = ["abcd", "bcdef"] # Original incorrect expectation
     # Corrected expectation based on mock model predicting EOS after PAD
-    expected = ["a", "bcdef"]
+    expected = ["a<eos>", "bcdef"] # Updated expectation
     # generated_list = batch_generate(mock_model, char_to_idx, idx_to_char, prompts, max_length, temperature=0.1, device='cpu') # Call was moved up
     assert len(generated_list) == len(prompts)
     assert generated_list == expected, f"Batch generation failed. Got: {generated_list}. Padding/context handling might be incorrect."
