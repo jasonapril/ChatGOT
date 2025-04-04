@@ -37,7 +37,12 @@ class TestTrainingLoopTrainEpochErrorHandling:
         mock_autocast.return_value.__enter__.return_value = None
         mock_autocast.return_value.__exit__.return_value = None
         mock_model.side_effect = RuntimeError("Simulated error")
-        mock_tqdm.return_value = enumerate(mock_dataloader)
+
+        # Explicitly define iterator behavior for this test
+        mock_input = torch.randn(2, 4) # Example input
+        mock_target = torch.randint(0, 10, (2,)) # Example target
+        mock_dataloader.__iter__.return_value = iter([(mock_input, mock_target)])
+        mock_dataloader.__len__.return_value = 1 # Ensure length is correct
 
         # --- Setup Loop ---
         loop = TrainingLoop(
@@ -68,8 +73,10 @@ class TestTrainingLoopTrainEpochErrorHandling:
 
     @patch('torch.amp.autocast')
     @patch('torch.nn.functional.cross_entropy')
+    @patch('tqdm.tqdm')
     def test_train_epoch_tqdm_exception(
         self,
+        mock_tqdm,
         mock_cross_entropy,
         mock_autocast,
         mock_model,
@@ -86,6 +93,12 @@ class TestTrainingLoopTrainEpochErrorHandling:
         mock_autocast.return_value.__exit__.return_value = None
         mock_loss = torch.tensor(1.0, requires_grad=True)
         mock_cross_entropy.return_value = mock_loss
+
+        # Explicitly define iterator behavior for this test
+        mock_input = torch.randn(2, 4) # Example input
+        mock_target = torch.randint(0, 10, (2,)) # Example target
+        mock_dataloader.__iter__.return_value = iter([(mock_input, mock_target)])
+        mock_dataloader.__len__.return_value = 1 # Ensure length is correct
 
         # --- Setup Loop ---
         loop = TrainingLoop(
@@ -176,13 +189,18 @@ class TestTrainingLoopTrainEpochErrorHandling:
         mock_autocast.return_value.__exit__.return_value = None
         mock_loss_tensor = torch.tensor(1.0, requires_grad=True)
         mock_cross_entropy.return_value = mock_loss_tensor
-        mock_tqdm.return_value = enumerate(mock_dataloader)
 
-        # Simulate OOM during backward pass
-        mock_scaled_loss = MagicMock()
-        mock_scaler.scale.return_value = mock_scaled_loss
+        # Explicitly define iterator behavior for this test
+        mock_input = torch.randn(2, 4) # Example input
+        mock_target = torch.randint(0, 10, (2,)) # Example target
+        mock_dataloader.__iter__.return_value = iter([(mock_input, mock_target)])
+        mock_dataloader.__len__.return_value = 1 # Ensure length is correct
+
+        # Simulate OOM during backward pass - Restore this setup
+        mock_scaled_loss = MagicMock(spec=torch.Tensor)
+        mock_scaler.scale = MagicMock(return_value=mock_scaled_loss)
         oom_error_message = "CUDA out of memory. Tried to allocate..."
-        mock_scaled_loss.backward.side_effect = RuntimeError(oom_error_message)
+        mock_scaled_loss.backward = MagicMock(side_effect=RuntimeError(oom_error_message))
 
         # --- Setup Loop ---\
         loop = TrainingLoop(
@@ -197,16 +215,16 @@ class TestTrainingLoopTrainEpochErrorHandling:
 
         # --- Run Epoch & Assert Exception ---\
         start_global_step = 0
-        with pytest.raises(RuntimeError, match=oom_error_message):
+        with pytest.raises(RuntimeError, match="CUDA out of memory. Tried to allocate..."):
             loop.train_epoch(
-                current_epoch=0,\
-                global_step=start_global_step,\
+                current_epoch=0,
+                global_step=start_global_step,
                 progress=mock_progress_tracker_instance
             )
 
         # Assertions
         mock_model.train.assert_called_once()
-        mock_scaled_loss.backward.assert_called_once() # Ensure backward was attempted
+        mock_scaled_loss.backward.assert_called_once() # Restore assertion: Ensure backward was attempted
         mock_logger_fixture.error.assert_called_once()
         args, kwargs = mock_logger_fixture.error.call_args
         assert "CUDA OOM encountered" in args[0]

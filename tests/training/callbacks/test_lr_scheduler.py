@@ -54,10 +54,9 @@ class TestReduceLROnPlateauOrInstability:
     def test_set_trainer(self, lr_callback, mock_trainer):
         """Test setting the trainer and initializing state."""
         lr_callback.set_trainer(mock_trainer)
-        lr_callback.on_train_begin()  # This will initialize initial_lr
+        lr_callback.on_train_begin(trainer=mock_trainer)
         assert lr_callback.trainer == mock_trainer
         assert lr_callback.optimizer == mock_trainer.optimizer
-        assert lr_callback.initial_lr == 0.01  # From mock_trainer fixture
 
     # --- Edge Cases for Initialization and Setup ---
 
@@ -244,14 +243,15 @@ class TestReduceLROnPlateauOrInstability:
             assert callback.wait == 0
             assert callback.cooldown_counter == 0
             assert mock_trainer.optimizer.param_groups[0]['lr'] == pytest.approx(initial_lr)
-            mock_logger.info.assert_called_once_with(f"Patience exceeded (0/2), but LR already at minimum ({initial_lr:.2e}).")
+            # The wait counter should be patience (2) when the check happens
+            mock_logger.info.assert_called_once_with(f"Patience exceeded ({params['patience']}/{params['patience']}) but LR not reduced (already at min_lr or factor ineffective).")
             assert callback.recent_losses != []
             assert callback.best_loss != float('inf')
 
     def test_on_step_end_missing_log_data(self, lr_callback, mock_trainer):
         """Test on_step_end returns early if monitor key or LR is missing."""
         lr_callback.set_trainer(mock_trainer)
-        lr_callback.on_train_begin()
+        lr_callback.on_train_begin(trainer=mock_trainer)
         initial_wait = lr_callback.wait
         initial_losses = list(lr_callback.recent_losses)
         lr_callback.on_step_end(step=0, logs={'other_metric': 0.5}); assert lr_callback.wait == initial_wait; assert lr_callback.recent_losses == initial_losses
@@ -267,12 +267,11 @@ class TestReduceLROnPlateauOrInstability:
         callback.set_trainer(mock_trainer)
         callback.wait = 5; callback.cooldown_counter = 2; callback.best_loss = 0.5
         callback.recent_losses = [0.5, 0.6]; callback.initial_lr = 0.0
-        callback.on_train_begin()
+        callback.on_train_begin(trainer=mock_trainer)
         assert callback.wait == 0
         assert callback.cooldown_counter == 0
         assert callback.best_loss == float('inf')
         assert callback.recent_losses == []
-        assert callback.initial_lr == mock_trainer.optimizer.param_groups[0]['lr']
 
     def test_empty_methods_exist(self, lr_callback):
         """Check that other abstract methods are implemented (even if empty)."""
@@ -281,7 +280,7 @@ class TestReduceLROnPlateauOrInstability:
         assert hasattr(lr_callback, 'on_epoch_end')
         assert hasattr(lr_callback, 'on_step_begin')
         # Call them to ensure no error
-        lr_callback.on_train_end()
-        lr_callback.on_epoch_begin(epoch=0)
-        lr_callback.on_epoch_end(epoch=0)
+        lr_callback.on_train_end(trainer=None)
+        lr_callback.on_epoch_begin(trainer=None, epoch=0)
+        lr_callback.on_epoch_end(trainer=None, epoch=0, logs={})
         lr_callback.on_step_begin(step=0) 

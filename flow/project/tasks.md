@@ -165,6 +165,32 @@ This file serves as the working memory for all active tasks in the project. It's
 - ### 🟡 Improve CLI Generation Tokenization
   - Refactor `src/cli/run.py::generate_text`
 
+### CI/CD & Deployment (Future)
+   - [ ] Set up basic CI (GitHub Actions?) to run tests on push.
+   - [ ] Explore deployment options (e.g., containerization, cloud services).
+
+### Configuration Logic
+   - [ ] Improve Configuration Handling (`conf/`, Hydra instantiation, Pydantic validation).
+   - [x] Integrate basic Pydantic validation in `scripts/train.py` (2025-04-03)
+     - Files: `scripts/train.py`, `src/craft/config/schemas.py`, `src/craft/data/base.py`, `src/craft/models/factory.py`, `src/craft/training/optimizers.py`, `src/craft/training/schedulers.py`
+
+### Refactoring & Cleanup (Ongoing)
+   - [ ] Address TODOs and FIXMEs in the code.
+   - [ ] Improve test coverage (currently 81%).
+   - [ ] Standardize docstrings (NumPy style?).
+   - [ ] Add type hints where missing.
+   - [ ] Refactor `tests/training/test_amp.py` tests for `SafeGradScaler` after recent updates. <# Added 2024-04-03 #>
+   - [ ] **Refactor Large Callback Test Files:** 🟡 To Do <# Added 2025-04-04 #>
+     - **Goal**: Break down large test files in `tests/training/callbacks/` (e.g., `test_early_stopping.py`, `test_sample_generation.py`) into smaller, more focused test classes/files for improved readability and maintainability.
+     - **Context**: Identified after refactoring callback source code and fixing associated tests.
+   - [ ] **Evaluate and Refactor Large Files:** 🟡 Active <# Started 2025-04-04 #>
+     - **Goal**: Assess files like `src/craft/training/callbacks.py` and `src/craft/data/base.py` for potential refactoring opportunities (e.g., splitting into smaller modules) to improve readability and maintainability.
+
+### Feature Enhancements (Ideas)
+   - [ ] Add support for different model architectures (RNN, etc.).
+   - [ ] Add support for loading and generating with third-party models (e.g., from Hugging Face Hub) in `scripts/generate.py`.
+   - [ ] Add support for third-party models in general
+
 ## Completed Tasks (Recent)
 
 - ### 🟡 Review Legacy Code ✅ 2025-04-01
@@ -173,28 +199,8 @@ This file serves as the working memory for all active tasks in the project. It's
 - [✅] **Complete Model Architecture Refactoring** (Est. Effort: High) ✅ 2025-03-30 (Assumed completed based on sub-tasks)
 - ### 🟡 Implement Basic Unit Tests ✅ 2025-03-28
 
-### Task 3: CI/CD & Deployment (Future)
-   - [ ] Set up basic CI (GitHub Actions?) to run tests on push.
-   - [ ] Explore deployment options (e.g., containerization, cloud services).
-
-### Task 4: Configuration Logic
-   - [ ] Improve Configuration Handling (`conf/`, Hydra instantiation, Pydantic validation).
-   - [x] Integrate basic Pydantic validation in `scripts/train.py` (2025-04-03)
-     - Files: `scripts/train.py`, `src/craft/config/schemas.py`, `src/craft/data/base.py`, `src/craft/models/factory.py`, `src/craft/training/optimizers.py`, `src/craft/training/schedulers.py`
-
-### Task 5: Refactoring & Cleanup (Ongoing)
-   - [ ] Address TODOs and FIXMEs in the code.
-   - [ ] Improve test coverage (currently 81%).
-   - [ ] Standardize docstrings (NumPy style?).
-   - [ ] Add type hints where missing.
-   - [ ] Refactor `tests/training/test_amp.py` tests for `SafeGradScaler` after recent updates. <# Added 2024-04-03 #>
-
-### Task 6: Feature Enhancements (Ideas)
-   - [ ] Add support for different model architectures (RNN, etc.).
-   - [ ] Add support for loading and generating with third-party models (e.g., from Hugging Face Hub) in `scripts/generate.py`.
-   - [ ] Add support for third-party models in general
-
-### Task 3.3: Test Output Cleanup
-   - [x] **Task 3.3: Test Output Cleanup:** Investigate and fix the issue where tests create persistent top-level directories (`dummy_output_dir`, `sp_save_test`, `test_ckpts`, `some_dir`). Use pytest `tmp_path` fixture. (See [Context](#context-task-33))
-       - Status: **DONE** (2025-04-03)
-       - Files: `tests/data/tokenizers/test_subword.py`, `tests/data/tokenizers/test_sentencepiece.py`, `tests/training/test_checkpointing.py`
+### Test Output Cleanup ✅ 2025-04-03
+  - **Goal**: Fix issue where tests create persistent top-level directories.
+  - **Context**: Previously labeled Task 3.3.
+  - **Status**: DONE
+  - **Files**: `tests/data/tokenizers/test_subword.py`, `tests/data/tokenizers/test_sentencepiece.py`, `tests/training/test_checkpointing.py`

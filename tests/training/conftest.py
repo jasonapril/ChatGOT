@@ -7,6 +7,8 @@ from torch.cuda.amp import GradScaler
 from torch.utils.data import TensorDataset, DataLoader
 import logging
 import time
+from craft.config.schemas import TrainingConfig
+from craft.data.tokenizers.base import BaseTokenizer
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -19,7 +21,8 @@ except ImportError:
 from craft.training.callbacks import Callback
 
 
-# --- Fixtures ---
+# --- Fixtures specific to tests/training --- 
+# These augment or specialize fixtures from the root conftest.py
 
 @pytest.fixture(scope="session") # Scope session as device doesn't change
 def mock_device():
@@ -27,25 +30,20 @@ def mock_device():
     return torch.device("cpu")
 
 @pytest.fixture
-def mock_optimizer():
-    """Provides a mock optimizer with param_groups."""
-    optimizer = MagicMock()
-    optimizer.param_groups = [{'lr': 0.01}]
-    # Mock step/zero_grad if needed later by specific tests
-    # optimizer.step = MagicMock()
-    # optimizer.zero_grad = MagicMock()
-    return optimizer
-
-@pytest.fixture
 def mock_model():
-    """Provides a basic mock model with eval/train methods."""
-    model = MagicMock(spec=["eval", "train", "parameters"])
-    model.eval = MagicMock()
-    model.train = MagicMock()
-    # Mock parameters to return an iterable (e.g., an empty list or a list with a mock parameter)
-    # This is needed for things like gradient clipping which iterate over model.parameters()
-    model.parameters = MagicMock(return_value=[torch.nn.Parameter(torch.tensor(1.0))])
-    return model
+    """Mocks a torch.nn.Module, simulating a forward pass."""
+    m = MagicMock(spec=torch.nn.Module)
+    m.to.return_value = m
+    # Mock the forward call to return a mock tensor
+    # The shape should be compatible with cross_entropy: [batch, vocab_size, seq_len]
+    mock_output_tensor = MagicMock(spec=torch.Tensor)
+    mock_output_tensor.view.return_value = mock_output_tensor # For loss calculation view
+    m.return_value = mock_output_tensor 
+    # Make sure parameters returns something iterable for grad clipping
+    m.parameters = MagicMock(return_value=[torch.nn.Parameter(torch.tensor(1.0))]) 
+    m.train = MagicMock()
+    m.eval = MagicMock()
+    return m
 
 @pytest.fixture
 def mock_model_with_generate(mock_model): # Can build upon the basic mock_model
@@ -77,21 +75,7 @@ def mock_tokenizer():
     tokenizer.pad_token_id = 0 # Add pad token id if needed
     return tokenizer
 
-@pytest.fixture
-def mock_trainer(mock_model, mock_optimizer, mock_device):
-    """Provides a basic mock trainer instance with common attributes."""
-    trainer = MagicMock()
-    trainer.model = mock_model
-    trainer.optimizer = mock_optimizer
-    trainer.device = mock_device
-    trainer.logger = MagicMock(spec=logging.Logger)
-    trainer.state = MagicMock()
-    trainer.state.best_metric_value = float("-inf") # For EarlyStopping
-    trainer.state.early_stopping_counter = 0
-    trainer.state.stopped_training = False
-    trainer.current_epoch = 0
-    # Add other commonly used attributes here if needed
-    return trainer
+# mock_trainer fixture is defined in root conftest.py
 
 @pytest.fixture
 def mock_scheduler():
@@ -104,6 +88,7 @@ def mock_scheduler():
 def mock_dataloader():
     """Fixture for a mock dataloader yielding one batch.
     Yields batches of (inputs, targets) with appropriate shapes.
+    Uses a real DataLoader for realistic iteration.
     """
     # Consistent shapes with mock_model output: [batch=2, seq=5, vocab=10]
     batch_size = 2
@@ -116,20 +101,19 @@ def mock_dataloader():
     # Create a dummy dataset and loader yielding one batch
     dataset = TensorDataset(inputs, targets)
     # Use a real DataLoader to ensure correct batch format is yielded
-    # Use batch_size=batch_size to yield the whole dummy dataset as one batch
     dataloader = DataLoader(dataset, batch_size=batch_size)
-    # We need a mock wrapper to control __len__ if needed by tqdm
+    # Wrap in a mock ONLY to control __len__ if needed (e.g., by tqdm)
+    # but iterate over the *real* dataloader.
     mock_loader = MagicMock(spec=DataLoader)
-    # Make iteration return the real dataloader's iterator
     mock_loader.__iter__.return_value = iter(dataloader) 
-    # Set length for progress bar
     mock_loader.__len__.return_value = len(dataloader) 
     return mock_loader
 
+# Restore the previous mock_scaler fixture which had more detail
 @pytest.fixture
 def mock_scaler():
     """Fixture for a mock GradScaler."""
-    scaler = MagicMock()
+    scaler = MagicMock(spec=GradScaler)
     # Simulate the scaled loss tensor returned when scale is called with AMP enabled
     scaler.mock_scaled_loss = MagicMock(spec=torch.Tensor, backward=MagicMock(), name="mock_scaled_loss_for_scaler")
     # Default behavior: scale returns the mock scaled loss (as if AMP is enabled)
@@ -185,3 +169,49 @@ def mock_callback_fixture():
 def start_global_step():
     """Provides a default starting global step."""
     return 0 
+
+# --- Common Fixtures used within tests/training (might override root fixtures) ---
+
+@pytest.fixture
+def mock_dataloader():
+    """Mocks a torch.utils.data.DataLoader."""
+    return MagicMock(spec=torch.utils.data.DataLoader)
+
+# NOTE: mock_optimizer is now used from root conftest.py
+
+@pytest.fixture
+def mock_tokenizer():
+    """Mocks a craft.data.tokenizers.base.BaseTokenizer."""
+    return MagicMock(spec=BaseTokenizer)
+
+@pytest.fixture
+def mock_callback():
+    """Provides a simple MagicMock for use as a callback."""
+    return MagicMock() # Simple mock for callbacks
+
+@pytest.fixture
+def default_training_config() -> TrainingConfig:
+    """Provides a default, valid TrainingConfig instance."""
+    # Minimal valid config according to Pydantic model defaults
+    # Add required fields that don't have defaults
+    return TrainingConfig(batch_size=8) # Add a default batch_size
+
+@pytest.fixture
+def full_training_config() -> TrainingConfig:
+    """Provides a TrainingConfig with more fields set."""
+    return TrainingConfig(
+        epochs=5,
+        use_amp=False,
+        gradient_accumulation_steps=4,
+        max_grad_norm=0.5,
+        log_interval=50,
+        save_steps_interval=1000,
+        time_save_interval_seconds=3600,
+        eval_interval=500,
+        compile_model=False,
+        activation_checkpointing=False,
+        torch_compile=False,
+        batch_size=16, # Included for completeness
+        learning_rate=1e-4, # Included for completeness
+        max_steps=10000, # Included for completeness
+    ) 
