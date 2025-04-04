@@ -17,6 +17,10 @@ import argparse
 import logging
 import torch
 from typing import Dict, Any, Optional, Tuple
+from omegaconf import DictConfig, OmegaConf
+
+# Import from the new location within training
+from craft.training.memory_utils import preallocate_gpu_memory, get_memory_optimized_settings
 
 def setup_mixed_precision(args: argparse.Namespace) -> Tuple[bool, Optional[torch.cuda.amp.GradScaler]]:
     """
@@ -60,8 +64,6 @@ def optimize_memory_usage(args: argparse.Namespace, device: torch.device) -> Non
     if not torch.cuda.is_available() or device.type != 'cuda':
         return
         
-    from craft.utils.memory import preallocate_gpu_memory, get_memory_optimized_settings
-    
     # Get GPU info
     gpu_name = torch.cuda.get_device_name(0)
     total_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB

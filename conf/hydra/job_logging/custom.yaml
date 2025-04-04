@@ -1,21 +1,8 @@
 # conf/hydra/job_logging/custom.yaml
-# Extracted from main config.yaml
+# Define only the custom formatters used by Hydra
 
-version: 1
-disable_existing_loggers: false
-
-handlers:
-  console:
-    class: logging.StreamHandler
-    formatter: minimal
-    level: INFO
-  file:
-    class: logging.FileHandler
-    formatter: standard
-    filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log
-    level: DEBUG
-
-loggers:
-  root:
-    level: DEBUG
-    handlers: [console, file] 
+formatters:
+  minimal:
+    format: '%(message)s'
+  standard:
+    format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s' 

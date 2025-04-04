@@ -20,9 +20,9 @@ def default_subword_config():
         "vocab_size": 5000,
         # Optional fields with defaults
         "pad_token": "<pad>",
-        "unk_token": "<unk>",
-        "bos_token": "<s>",
-        "eos_token": "</s>",
+        "unk_token": "]",
+        "bos_token": "[",
+        "eos_token": "]",
     }
 
 @pytest.fixture
@@ -63,9 +63,9 @@ class TestSubwordTokenizer:
         assert tokenizer.config == default_subword_config
         assert tokenizer.vocab_size == 5000
         assert tokenizer.pad_token == "<pad>"
-        assert tokenizer.unk_token == "<unk>"
-        assert tokenizer.bos_token == "<s>"
-        assert tokenizer.eos_token == "</s>"
+        assert tokenizer.unk_token == "]"
+        assert tokenizer.bos_token == "["
+        assert tokenizer.eos_token == "]"
         assert tokenizer.tokenizer is None # HF Tokenizer not loaded/trained yet
         
     def test_init_missing_required_config(self):
@@ -124,7 +124,7 @@ class TestSubwordTokenizer:
         mock_byte_level_cls.assert_called_once_with(add_prefix_space=False)
         mock_bpe_trainer_cls.assert_called_once_with(
             vocab_size=default_subword_config['vocab_size'],
-            special_tokens=["<pad>", "<unk>", "<s>", "</s>"] # From defaults
+            special_tokens=["<pad>", "]", "[", "]"] # From defaults
         )
         
         # 2. Verify pre_tokenizer was set
@@ -215,11 +215,15 @@ class TestSubwordTokenizer:
         """Test save delegates to the HF tokenizer instance's save method."""
         tokenizer = self._setup_initialized_tokenizer(default_subword_config, mock_hf_tokenizer)
         save_dir = tmp_path / "save_output"
-        # Mock expects save directory to exist
-        save_dir.mkdir()
         expected_save_path = str(save_dir / "tokenizer.json")
 
         tokenizer.save(str(save_dir))
         
         mock_hf_tokenizer.save.assert_called_once_with(expected_save_path)
+
+    def test_save_not_trained(self, tmp_path):
+        """Test saving fails if tokenizer is not trained."""
+        tokenizer_not_loaded = SubwordTokenizer(config={"vocab_size": 100})
+        with pytest.raises(RuntimeError, match="Tokenizer not initialized"):
+            tokenizer_not_loaded.save(tmp_path / "some_dir")
 

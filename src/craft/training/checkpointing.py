@@ -12,6 +12,7 @@ import logging
 import shutil
 from typing import Dict, Any, Optional
 from omegaconf import DictConfig, OmegaConf
+from pydantic import BaseModel
 
 class CheckpointManager:
     """Manages saving and loading model checkpoints."""
@@ -92,14 +93,15 @@ class CheckpointManager:
         serializable_config = self.config
         try:
             # Attempt to resolve OmegaConf to primitive types if it's OmegaConf
-            # Check if it's DictConfig rather than dict
             if isinstance(self.config, DictConfig):
                 serializable_config = OmegaConf.to_container(self.config, resolve=True)
+            elif isinstance(self.config, BaseModel):
+                serializable_config = self.config.model_dump()
         except ImportError:
-            # If OmegaConf not installed or fails, proceed with original (might raise error later)
+            # If OmegaConf or Pydantic not installed or fails, proceed with original
             pass
         except Exception as e:
-            self.logger.warning(f"Could not serialize OmegaConf config for checkpoint: {e}")
+            self.logger.warning(f"Could not serialize config for checkpoint: {e}")
             # Fallback or store None?
             serializable_config = None # Avoid saving potentially problematic object
 
@@ -204,3 +206,117 @@ class CheckpointManager:
         except Exception as e:
             self.logger.error(f"Failed to load checkpoint from {path}: {e}", exc_info=True)
             return None 
+
+# --- Module-Level Helper Functions ---
+# Moved from checkpoint_utils.py
+
+def get_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
+    """
+    Get the path to the latest checkpoint in a directory.
+
+    Args:
+        checkpoint_dir: Directory containing checkpoint files
+
+    Returns:
+        Path to the latest checkpoint or None if no checkpoint is found
+    """
+    if not os.path.exists(checkpoint_dir):
+        logging.warning(f"Checkpoint directory not found: {checkpoint_dir}")
+        return None
+
+    try:
+        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(('.pt', '.pth'))]
+    except OSError as e:
+        logging.error(f"Error listing directory {checkpoint_dir}: {e}")
+        return None
+
+    if not checkpoint_files:
+        logging.warning(f"No checkpoint files (.pt or .pth) found in {checkpoint_dir}")
+        return None
+
+    try:
+        # Sort checkpoint files by modification time
+        checkpoint_files.sort(key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)), reverse=True)
+    except FileNotFoundError:
+        # Handle race condition: file deleted between listdir and getmtime
+        logging.warning(f"File not found during sorting in {checkpoint_dir}, possibly deleted. Retrying...")
+        # Simple retry: could implement more robust logic
+        return get_latest_checkpoint(checkpoint_dir) 
+    except Exception as e:
+        logging.error(f"Error sorting checkpoint files in {checkpoint_dir}: {e}")
+        return None
+
+    latest_checkpoint = os.path.join(checkpoint_dir, checkpoint_files[0])
+    logging.info(f"Latest checkpoint found: {latest_checkpoint}")
+    return latest_checkpoint
+
+def count_checkpoints(checkpoint_dir: str) -> int:
+    """
+    Count the number of checkpoint files (.pt or .pth) in a directory.
+
+    Args:
+        checkpoint_dir: Directory containing checkpoint files
+
+    Returns:
+        Number of checkpoint files
+    """
+    if not os.path.exists(checkpoint_dir):
+        logging.warning(f"Checkpoint directory not found: {checkpoint_dir}")
+        return 0
+
+    try:
+        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(('.pt', '.pth'))]
+        return len(checkpoint_files)
+    except OSError as e:
+        logging.error(f"Error accessing checkpoint directory {checkpoint_dir}: {e}")
+        return 0
+
+def clean_old_checkpoints(checkpoint_dir: str, keep: int = 5) -> None:
+    """
+    Remove old checkpoint files (.pt or .pth), keeping only the most recent ones.
+
+    Args:
+        checkpoint_dir: Directory containing checkpoint files
+        keep: Number of most recent checkpoints to keep (must be >= 0)
+    """
+    if keep < 0:
+        logging.warning(f"Invalid value for 'keep' ({keep}). Must be non-negative. Not cleaning checkpoints.")
+        return
+        
+    if not os.path.exists(checkpoint_dir):
+        logging.warning(f"Checkpoint directory not found: {checkpoint_dir}. Cannot clean.")
+        return
+
+    try:
+        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(('.pt', '.pth'))]
+    except OSError as e:
+        logging.error(f"Error listing directory {checkpoint_dir} for cleaning: {e}")
+        return
+
+    if len(checkpoint_files) <= keep:
+        logging.info(f"Found {len(checkpoint_files)} checkpoints in {checkpoint_dir}. No cleaning needed (keeping {keep}).")
+        return
+
+    try:
+        # Sort checkpoint files by modification time
+        checkpoint_files.sort(key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)), reverse=True)
+    except FileNotFoundError:
+        # Handle race condition: file deleted between listdir and getmtime
+        logging.warning(f"File not found during sorting in {checkpoint_dir} for cleaning, possibly deleted. Skipping cleaning cycle.")
+        return
+    except Exception as e:
+        logging.error(f"Error sorting checkpoint files in {checkpoint_dir} for cleaning: {e}")
+        return
+
+    # Remove old checkpoint files
+    files_to_remove = checkpoint_files[keep:]
+    logging.info(f"Cleaning {len(files_to_remove)} old checkpoints from {checkpoint_dir} (keeping {keep}).")
+    for checkpoint_file in files_to_remove:
+        checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
+        try:
+            os.remove(checkpoint_path)
+            logging.debug(f"Removed old checkpoint: {checkpoint_path}") # Use debug level for successful removal
+        except FileNotFoundError:
+            logging.warning(f"Attempted to remove {checkpoint_path}, but it was already deleted.")
+        except Exception as e:
+            logging.error(f"Failed to remove checkpoint {checkpoint_path}: {str(e)}") 

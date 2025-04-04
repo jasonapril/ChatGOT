@@ -10,9 +10,12 @@ from typing import Optional
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-# Setup basic logging for Hydra initialization phase
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-logger = logging.getLogger(__name__)
+# Import utility functions here
+try:
+    from craft.utils.common import set_seed, setup_device
+except ImportError as e:
+    logging.error(f"Failed to import common utilities: {e}")
+    sys.exit(1)
 
 # Delayed imports for better error handling if dependencies are missing
 DataLoadersDict = None
@@ -32,13 +35,18 @@ def _delayed_imports():
         from craft.training.optimizers import create_optimizer
         from craft.training.schedulers import create_scheduler
     except ImportError as e:
-        logger.error(f"Failed to import necessary craft components: {e}")
-        logger.error("Please ensure the 'craft' package is installed and accessible.")
-        raise
+        # Re-raise the import error to be handled by the main function's exception block,
+        # which will have access to the properly configured logger.
+        # logger.error(f"Failed to import necessary craft components: {e}")
+        # logger.error("Please ensure the 'craft' package is installed and accessible.")
+        raise e
 
 @hydra.main(config_path="../conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """Main training script execution using Hydra."""
+    # Get logger *after* Hydra has configured logging
+    logger = logging.getLogger(__name__)
+
     logger.info("Starting training script...")
     logger.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
     logger.info(f"Hydra working directory: {os.getcwd()}") # Hydra changes cwd
@@ -85,21 +93,10 @@ def main(cfg: DictConfig) -> None:
             else:
                 logger.warning(f"Using vocab_size from configuration: {vocab_size}")
         
-        # Update model config with the determined vocab_size
-        # This ensures the model is created with the correct size
-        OmegaConf.update(cfg.model, "vocab_size", vocab_size, merge=True)
-
         # --- Model Creation ---
         logger.info("Creating model...")
-        # The model config (cfg.model) should contain vocab_size unless overridden
-        # It might be better practice to get vocab_size from the loaded dataset/tokenizer if possible
-        if 'vocab_size' not in cfg.model:
-             logger.warning("'vocab_size' not found in model config, attempting to infer (not implemented yet). Ensure it's set.")
-             # TODO: Add logic to get vocab_size from data pipeline if needed
-             # Example: vocab_size = getattr(train_loader.dataset, 'vocab_size', None)
-             # if vocab_size: cfg.model.vocab_size = vocab_size 
-
-        model = create_model_from_config(cfg.model)
+        # Pass the inferred vocab_size directly to the factory function
+        model = create_model_from_config(cfg.model, vocab_size=vocab_size)
         model.to(device) # Ensure model is on the correct device initially
         logger.info("Model created.")
 
@@ -117,21 +114,20 @@ def main(cfg: DictConfig) -> None:
         callbacks = []
         if "callbacks" in cfg and cfg.callbacks:
             logger.info("Instantiating callbacks...")
-            for cb_conf in cfg.callbacks:
-                try:
-                    # Assuming callback configs have '_target_' and other args
-                    # Need to import the Callback base class for type checking if desired
-                    # from craft.training.callbacks import Callback
-                    cb_instance = hydra.utils.instantiate(cb_conf)
-                    callbacks.append(cb_instance)
-                    logger.info(f"  Successfully instantiated callback: {type(cb_instance).__name__}")
-                    # if not isinstance(cb_instance, Callback):
-                    #    logger.warning(f"Instantiated object {type(cb_instance).__name__} is not a subclass of Callback.")
-                except Exception as e:
-                    logger.error(f"Failed to instantiate callback with config: {cb_conf}")
-                    logger.exception(e)
-                    # Decide whether to raise error or just skip the callback
-                    logger.warning("Skipping callback due to instantiation error.")
+            # Iterate over the configuration *values* (dictionaries), not the keys
+            for cb_name, cb_conf in cfg.callbacks.items(): 
+                if isinstance(cb_conf, DictConfig): # Ensure it's a config object
+                    logger.info(f"  Instantiating callback '{cb_name}'...")
+                    try:
+                        cb_instance = hydra.utils.instantiate(cb_conf)
+                        callbacks.append(cb_instance)
+                        logger.info(f"    Successfully instantiated callback: {type(cb_instance).__name__}")
+                    except Exception as e:
+                        logger.error(f"Failed to instantiate callback '{cb_name}' with config: {cb_conf}")
+                        logger.exception(e)
+                        logger.warning(f"Skipping callback '{cb_name}' due to instantiation error.")
+                else:
+                     logger.warning(f"Skipping non-dictionary item found in callbacks config: key='{cb_name}', value='{cb_conf}'")
             logger.info(f"Instantiated {len(callbacks)} callbacks.")
         else:
             logger.info("No callbacks configured.")

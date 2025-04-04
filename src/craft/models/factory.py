@@ -2,10 +2,27 @@
 Factory function for creating model instances based on configuration.
 """
 import logging
-from typing import Any, Dict, Type
+from typing import Any, Dict, Type, Optional
+import torch.nn as nn
+from pydantic import ValidationError
 
-# Import base classes and configs
+# Import OmegaConf
+from omegaconf import DictConfig, OmegaConf
+
+# Import Hydra utils AFTER OmegaConf
+import hydra.utils
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
+
+# Import base classes and configs (needed for type hints, but registry is moved)
 from .base import Model, BaseModelConfig, LanguageModelConfig, VisionModelConfig, MultiModalModelConfig
+# Import specific model implementations to register them (registration moved to __init__.py)
+# from .transformer import TransformerModel # Example: Ensure this is imported
+# from .rnn import RNNModel              # Example: Import other models
+
+# --- Import Registries from __init__ --- #
+from . import MODEL_CONFIG_REGISTRY, _MODEL_REGISTRY # Assuming _MODEL_REGISTRY is also moved or handled
 
 # --- Model Registration ---
 # Simple registry dictionary: maps (model_type, architecture_name) -> model_class
@@ -36,92 +53,133 @@ def register_model(model_type: str, architecture_name: str | None = None):
 
 # --- Factory Function ---
 
-def create_model_from_config(config_dict: Dict[str, Any]) -> Model:
-    """
-    Factory function to create a model instance from a configuration dictionary.
-    Uses Pydantic for config validation and instantiation, and a registry for model lookup.
+def create_model_from_config(model_cfg: DictConfig, 
+                               vocab_size: Optional[int] = None) -> nn.Module:
+    """Instantiates a model based on the provided OmegaConf configuration.
 
     Args:
-        config_dict: Dictionary containing the model configuration. 
-                     Must include 'model_type'. May include 'architecture'.
+        model_cfg: The OmegaConf DictConfig object for the model.
+                   Expected to have at least '_target_' and 'model_type'.
+                   It might also contain a nested 'config' DictConfig for Pydantic validation.
+        vocab_size: Explicit vocabulary size to override any value in the config.
+                    Useful when vocab size is determined from data.
 
     Returns:
-        An instance of the specified model class.
+        An instantiated PyTorch model (nn.Module).
+
+    Raises:
+        ValueError: If configuration is invalid (e.g., missing target, unknown type).
+        ValidationError: If the nested Pydantic config fails validation.
+        ImportError: If the target class cannot be imported.
+        Exception: For other instantiation errors.
     """
-    model_type = config_dict.get("model_type")
-    if not model_type:
-        raise ValueError("Configuration must include a 'model_type' field.")
+    logger.info(f"Attempting to create model with config: {model_cfg}")
 
-    # Architecture can be specified to select among models of the same type
-    # Look for architecture first at the top level, then inside nested 'config' if present
-    architecture = config_dict.get("architecture")
-    if not architecture and isinstance(config_dict.get("config"), dict):
-        architecture = config_dict["config"].get("architecture")
-    # e.g., "gpt_decoder", "transformer"
-
-    # Determine the appropriate Pydantic config class based *only* on model_type
-    config_cls: Type[BaseModelConfig]
-    if model_type == "language":
-        config_cls = LanguageModelConfig
-    elif model_type == "vision":
-        config_cls = VisionModelConfig
-    elif model_type == "multimodal":
-        config_cls = MultiModalModelConfig
-    elif model_type == "base" or model_type == "generative":
-        raise ValueError(f"Cannot directly instantiate abstract model type '{model_type}'. Provide a concrete type.")
+    # Basic validation
+    if "_target_" not in model_cfg:
+        raise ValueError("Model configuration must include '_target_'.")
+    if "model_type" not in model_cfg:
+        logger.warning("'model_type' not found in top-level model config. Model type validation skipped.")
+        model_type = None
     else:
-        # If type is unknown, maybe try BaseModelConfig? Or raise error?
-        # Let's raise for now, expecting known types.
-        raise ValueError(f"Unknown model type for config determination: {model_type}")
+        model_type = model_cfg.model_type
 
-    # Validate and create the specific Pydantic config object
-    try:
-        # We primarily validate the structure here. The architecture variable extracted
-        # earlier (from the raw dict) is used for registry lookup.
-        model_config = config_cls(**config_dict)
+    # --- Pydantic Config Validation (if applicable) ---
+    pydantic_config_instance = None
+    if "config" in model_cfg and isinstance(model_cfg.config, DictConfig):
+        logger.info(f"Found nested 'config' section. Attempting Pydantic validation for model_type: {model_type}")
+        nested_config_cfg = model_cfg.config
         
-        # Optional: Log a warning if the architecture extracted from the dict differs
-        # from what might be in the validated Pydantic object (if it exists there).
-        if architecture and hasattr(model_config, 'architecture') and model_config.architecture != architecture:
-             logging.warning(f"Architecture mismatch: Dict specified '{architecture}', "
-                             f"but Pydantic config resolved to '{model_config.architecture}'. "
-                             f"Using '{architecture}' for model registry lookup.")
-        # DO NOT reset the 'architecture' variable here: 
-        # architecture = model_config.architecture 
+        # Determine the expected Pydantic config class based on model_type
+        config_cls = MODEL_CONFIG_REGISTRY.get(model_type)
+        
+        if not config_cls:
+            logger.warning(f"No Pydantic config class registered for model_type '{model_type}'. Skipping Pydantic validation.")
+        else:
+            logger.info(f"Validating nested config against: {config_cls.__name__}")
+            try:
+                # Convert OmegaConf nested config to a plain dictionary for Pydantic
+                # Resolve interpolations first
+                resolved_nested_config = OmegaConf.to_container(nested_config_cfg, resolve=True)
+                if not isinstance(resolved_nested_config, dict):
+                    raise TypeError(f"Resolved nested config is not a dict: {type(resolved_nested_config)}")
+                config_dict = resolved_nested_config
 
-    except Exception as e: # Catch Pydantic validation errors
-        logging.error(f"Configuration validation failed for model type '{model_type}': {e}")
-        raise # **EXIT POINT FOR VALIDATION ERRORS**
+                # **Inject/Override vocab_size before validation if provided**
+                if vocab_size is not None:
+                    if 'vocab_size' in config_dict and config_dict['vocab_size'] != vocab_size:
+                        logger.warning(f"Overriding vocab_size from config ({config_dict['vocab_size']}) with provided value ({vocab_size})")
+                    config_dict['vocab_size'] = vocab_size
+                elif 'vocab_size' not in config_dict:
+                     # If not provided and not in config, Pydantic will raise error if required
+                     logger.warning(f"vocab_size not provided explicitly and not found in nested config for {config_cls.__name__}. Validation might fail if required.")
 
-    # --- Model Class Lookup using Registry ---
-    # Uses the 'architecture' variable determined from the input dictionary
-    model_cls: Type[Model] | None = None
-    
-    # Try lookup with specific architecture first
-    if architecture:
-        key = (model_type, architecture)
-        model_cls = _MODEL_REGISTRY.get(key)
-        if not model_cls:
-             logging.warning(f"No model registered for key {key}. Falling back to default for type '{model_type}'.")
+                # Instantiate the Pydantic model for validation
+                pydantic_config_instance = config_cls(**config_dict)
+                logger.info(f"Pydantic validation successful for {config_cls.__name__}.")
 
-    # Fallback to default for the model type (architecture=None)
-    if not model_cls:
-         key = (model_type, None)
-         model_cls = _MODEL_REGISTRY.get(key)
+            except ValidationError as e:
+                logger.error(f"Configuration validation failed for model type '{model_type}': {e}")
+                raise e # Re-raise the validation error
+            except Exception as e:
+                logger.error(f"Unexpected error during Pydantic validation: {e}")
+                raise ValueError(f"Error validating nested model config: {e}") from e
 
-    if not model_cls:
-        # Import implementations here dynamically or ensure they are imported elsewhere
-        # to populate the registry *before* the factory is called.
-        # For now, we rely on models being registered via decorators at import time.
-        logging.error(f"Model registry: {_MODEL_REGISTRY}") # Log registry content for debugging
-        raise ValueError(f"No model implementation found in registry for type='{model_type}', architecture='{architecture}'. Ensure the model class is registered.")
-    # --- End Lookup ---
-
-    # Instantiate the model with the validated config
+    # --- Model Instantiation --- # 
+    logger.info(f"Instantiating model: {model_cfg._target_}")
     try:
-        model = model_cls(config=model_config)
-        model._log_model_size() # Log size after instantiation
+        # If Pydantic validation happened, pass the validated instance
+        # Modify the instantiation call if the target model expects the *Pydantic object*
+        # Check if the target expects a 'config' argument
+        # This requires inspecting the target class signature, which is complex.
+        # Simpler Approach: Assume the target model takes the validated pydantic_config_instance
+        # if it exists, otherwise instantiate directly with model_cfg.
+
+        # Revised approach: Always instantiate using Hydra, but ensure the 
+        # nested 'config' within model_cfg IS the validated Pydantic object if validation occurred.
+        if pydantic_config_instance is not None:
+             # Replace the original DictConfig 'config' with the validated Pydantic object
+             # This assumes the model's __init__ expects the Pydantic object at model_cfg.config
+             # OmegaConf.update(model_cfg, "config", pydantic_config_instance, merge=True)
+             # ^^^ This might not work if model_cfg is read-only or doesn't trigger setter.
+             
+             # Safer approach: If the target model's __init__ expects the Pydantic config
+             # object DIRECTLY as an argument named 'config', we need to handle that.
+             # Let's assume the common pattern where the model takes the Pydantic config:
+             # model = TargetClass(config=pydantic_config_instance)
+             # We can achieve this by passing the instance via hydra.utils.instantiate
+             # if we structure the config carefully, but it's often simpler 
+             # to handle it explicitly if validation occurred.
+             
+             # Let's stick to the assumption that the model __init__ takes the pydantic config.
+             # We modify the args passed to instantiate.
+             # Remove the nested 'config' DictConfig and pass the Pydantic object separately?
+             # Or assume the target expects the Pydantic object.
+             
+             # Standard Hydra instantiation - assumes target reads model_cfg.config
+             # We need to ensure model_cfg.config *is* the pydantic object. 
+             # This is tricky with OmegaConf's structure.
+
+             # Simplest Fix: Modify the target model's __init__ to accept the Pydantic config.
+             # Assume `TransformerModel.__init__(self, config: LanguageModelConfig)`
+             target_class = hydra.utils.get_class(model_cfg._target_)
+             model = target_class(config=pydantic_config_instance) 
+        else:
+            # If no Pydantic validation, instantiate directly using Hydra
+            model = hydra.utils.instantiate(model_cfg)
+
+        if not isinstance(model, nn.Module):
+            raise TypeError(f"Instantiated object is not a PyTorch Module (nn.Module), got: {type(model)}")
+            
+        logger.info(f"Successfully created model: {model.__class__.__name__}")
         return model
+    
+    except ImportError as e:
+        logger.error(f"Could not import target class '{model_cfg._target_}': {e}")
+        raise e
     except Exception as e:
-         logging.error(f"Failed to instantiate model class {model_cls.__name__} with config {model_config}: {e}")
-         raise 
+        logger.error(f"Failed to instantiate model '{model_cfg._target_}': {e}", exc_info=True)
+        # Provide more context if possible
+        if pydantic_config_instance:
+            logger.error(f"Instantiation attempted with validated Pydantic config: {pydantic_config_instance}")
+        raise Exception(f"Error instantiating model '{model_cfg._target_}': {e}") from e 

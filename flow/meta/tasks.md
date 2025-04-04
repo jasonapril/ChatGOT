@@ -84,6 +84,9 @@ This document tracks tasks related to the development and improvement of the Flo
 
 ## User-Added Tasks to Review
 
+### Define Flow Roles
+- Each Flow project should specify the type of role(s) needed from Flow. For example, the Craft project requires Flow to act as a software developer, so this should be specifed, and we should be linked to that general domain knowledge by the project. Any exisiting domain knowledge and role specifications should be moved out of flow.md or any other system-level files and into their appropriate files.
+
 ### Review Current Practices & Flow Alignment (Context: Recent Debugging) ✅
 - **Sub-tasks**:
   - [x] Review recent debugging work (test fixing) against Flow principles (`flow/flow.md`). ✅

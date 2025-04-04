@@ -3,37 +3,68 @@ Custom utilities for Automatic Mixed Precision (AMP) training.
 """
 
 import logging
+from typing import Optional, Dict, Any
+
 import torch
-from torch.cuda.amp import GradScaler
+# Import the newer GradScaler location (torch.amp)
+from torch.amp import GradScaler 
 
 logger = logging.getLogger(__name__)
 
+# Inherit from the newer GradScaler
 class SafeGradScaler(GradScaler):
     """
     Enhanced GradScaler with NaN detection and fallback to full precision.
 
-    Inherits from torch.cuda.amp.GradScaler and adds:
+    Inherits from torch.amp.cuda.GradScaler and adds:
     - Checks for NaN/Inf in the loss before scaling.
     - If NaN/Inf occurs repeatedly, disables AMP and falls back to full precision.
     - Checks for NaN/Inf during the optimizer step and attempts fallback.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, 
+                 enabled: bool = True, 
+                 init_scale: float = 2.**16, 
+                 growth_factor: float = 2.0, 
+                 backoff_factor: float = 0.5, 
+                 growth_interval: int = 2000, 
+                 max_consecutive_nan_skip: int = 5, 
+                 enable_fallback: bool = False):
         """
-        Initialize SafeGradScaler.
+        Initializes the SafeGradScaler.
 
         Args:
-            *args: Positional arguments passed to GradScaler.
-            **kwargs: Keyword arguments passed to GradScaler.
-                      Includes an additional parameter:
-                      max_nan_before_fallback (int): Max consecutive NaN/Inf occurrences
-                                                     before disabling AMP (default: 3).
+            enabled (bool): Whether AMP and scaling are enabled.
+            init_scale (float): Initial scale factor.
+            growth_factor (float): Factor by which the scale is multiplied during growth.
+            backoff_factor (float): Factor by which the scale is multiplied during backoff.
+            growth_interval (int): Number of steps between scale growth attempts.
+            max_consecutive_nan_skip (int): Max number of consecutive steps with NaN/Inf loss
+                                           before triggering fallback (if enabled) or raising error.
+            enable_fallback (bool): If True, attempts to disable AMP and continue training
+                                    after max_consecutive_nan_skip is reached.
         """
-        self.max_nan_before_fallback = kwargs.pop('max_nan_before_fallback', 3)
-        super().__init__(*args, **kwargs)
-        self.nan_counter = 0
-        self.fallback_triggered = False
-        self.warning_logged = False # Track if fallback warning was logged
+        # Explicitly call the parent __init__ with appropriate args
+        # The base GradScaler takes 'enabled', 'init_scale', 'growth_factor', 
+        # 'backoff_factor', 'growth_interval'
+        # Note: The warning suggested torch.amp.GradScaler('cuda', ...), but since 
+        # torch.amp.cuda.GradScaler exists, inheriting directly seems correct.
+        # We pass the standard args. 
+        super().__init__(init_scale=init_scale,
+                         growth_factor=growth_factor,
+                         backoff_factor=backoff_factor,
+                         growth_interval=growth_interval,
+                         enabled=enabled)
+        
+        self.max_consecutive_nan_skip = max_consecutive_nan_skip
+        self.enable_fallback = enable_fallback
+        self._consecutive_nan_skips = 0
+        # Track internal enabled state for fallback
+        self._internal_enabled = enabled 
+        self._initial_enabled_state = enabled # Store initial state for reference
+
+        if not enabled:
+            logger.info("SafeGradScaler initialized but AMP is disabled.")
 
     def scale(self, loss):
         """
@@ -43,35 +74,31 @@ class SafeGradScaler(GradScaler):
         # Check for NaN/Inf before scaling
         if not self._enabled:
             # If AMP is already disabled (manually or by fallback), return unscaled loss
-            if not self.warning_logged:
-                 logger.warning("Mixed precision is disabled. Loss scaling skipped.")
-                 self.warning_logged = True
+            logger.warning("Mixed precision is disabled. Loss scaling skipped.")
             return loss
 
         if torch.isnan(loss).any() or torch.isinf(loss).any():
-            self.nan_counter += 1
+            self._consecutive_nan_skips += 1
             loss_val_str = f"{loss.item() if not torch.isinf(loss).all() else 'inf'}"
             logger.warning(
                 f"NaN/Inf detected in loss before scaling: {loss_val_str} "
-                f"(occurrence {self.nan_counter}/{self.max_nan_before_fallback})"
+                f"(occurrence {self._consecutive_nan_skips}/{self.max_consecutive_nan_skip})"
             )
 
             # If we've seen too many NaNs, disable mixed precision permanently
-            if self.nan_counter >= self.max_nan_before_fallback and not self.fallback_triggered:
+            if self._consecutive_nan_skips >= self.max_consecutive_nan_skip and not self.enable_fallback:
                 logger.error(
                     f"Disabling mixed precision permanently due to repeated NaN/Inf values in loss."
                 )
                 self._enabled = False # Disable scaler
-                self.fallback_triggered = True
-                self.warning_logged = True # Ensure warning is logged on next call
 
             # Return unscaled loss to potentially continue training (caller should check)
             # Or, if fallback triggered, we are now in full precision mode anyway.
             return loss
         else:
             # Reset counter slightly if loss is normal (prevents single spikes disabling AMP)
-            if self.nan_counter > 0:
-                self.nan_counter = max(0, self.nan_counter - 1) # Gradually decrease counter
+            if self._consecutive_nan_skips > 0:
+                self._consecutive_nan_skips = max(0, self._consecutive_nan_skips - 1) # Gradually decrease counter
 
         # If we reach here, AMP is enabled and loss is valid, proceed with scaling
         return super().scale(loss)
@@ -94,8 +121,6 @@ class SafeGradScaler(GradScaler):
             if "inf or nan" in str(e).lower():
                 logger.error(f"NaN/Inf detected during optimizer step, disabling mixed precision: {e}")
                 self._enabled = False
-                self.fallback_triggered = True
-                self.warning_logged = True
 
                 # Gradients are invalid, zero them out before attempting fallback step
                 optimizer.zero_grad()
@@ -125,24 +150,25 @@ class SafeGradScaler(GradScaler):
     def state_dict(self):
         """Returns the state dict, adding fallback status."""
         state_dict = super().state_dict()
-        state_dict["fallback_triggered"] = self.fallback_triggered
-        state_dict["nan_counter"] = self.nan_counter
+        state_dict["_consecutive_nan_skips"] = self._consecutive_nan_skips
+        state_dict["_internal_enabled"] = self._internal_enabled
+        state_dict["_initial_enabled_state"] = self._initial_enabled_state
         # Note: _enabled state is implicitly saved via scale factor etc.
         return state_dict
 
     def load_state_dict(self, state_dict):
         """Loads the state dict, restoring fallback status."""
-        self.fallback_triggered = state_dict.get("fallback_triggered", False)
-        self.nan_counter = state_dict.get("nan_counter", 0)
+        self._consecutive_nan_skips = state_dict.get("_consecutive_nan_skips", 0)
+        self._internal_enabled = state_dict.get("_internal_enabled", True)
+        self._initial_enabled_state = state_dict.get("_initial_enabled_state", True)
 
         # If fallback was triggered, ensure the scaler remains disabled
-        if self.fallback_triggered:
+        if self._consecutive_nan_skips >= self.max_consecutive_nan_skip:
              self._enabled = False
-             self.warning_logged = True # Assume warning is needed if loading a fallback state
 
         super().load_state_dict(state_dict)
         # Re-check enabled status after loading GradScaler's state
-        if self.fallback_triggered:
+        if self._consecutive_nan_skips >= self.max_consecutive_nan_skip:
              self._enabled = False
 
 # </rewritten_file> 

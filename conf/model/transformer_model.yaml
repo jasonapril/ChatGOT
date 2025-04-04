@@ -1,5 +1,5 @@
 # conf/model/transformer_model.yaml
-_target_: src.models.transformer.TransformerModel
+_target_: craft.models.transformer.TransformerModel
 model_type: language # Corrected: Should be the general type
 # architecture field is defined within config below
 
@@ -8,6 +8,7 @@ config:
   _target_: src.models.base.LanguageModelConfig
   architecture: transformer # This defines the specific architecture
   model_type: ${model.model_type} # Propagate top-level type into config object
+  vocab_size: null      # Add placeholder for vocab_size
   # --- Model Architecture Parameters --- #
   # These parameters now belong under the 'config:' key
   d_model: 768

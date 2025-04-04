@@ -1,43 +1,26 @@
 """
-Utility functions module.
+Craft Utilities Package.
+
+This package contains various utility modules for the Craft project.
 """
 
-# Correct imports to use relative (.) or absolute (craft.) paths
+# Import key functions/submodules for easier access
+from .common import set_seed # Keep only commonly used/exported items
+from .logging import setup_logger, log_section_header, force_flush_logs, format_time
+from .io import ensure_directory, save_json, load_json
+from .generation import sample_text
+# Add other key exports if needed
 
-from .checkpoint import (
-    save_checkpoint,
-    load_checkpoint,
-    clean_old_checkpoints,
-    get_latest_checkpoint,
-    count_checkpoints
-)
-from .common import (
-    set_seed,
-    setup_device,
-    get_memory_usage,
-    format_time,
-    format_number
-)
-from .logging import setup_logger, log_section_header, force_flush_logs
-from .metrics import calculate_tokens_per_second, calculate_perplexity
-from .memory import get_memory_optimized_settings, preallocate_gpu_memory
-
+# Define __all__ based on intended public API of the utils package
 __all__ = [
-    "save_checkpoint",
-    "load_checkpoint",
-    "clean_old_checkpoints",
-    "get_latest_checkpoint",
-    "count_checkpoints",
     "set_seed",
-    "setup_device",
-    "get_memory_usage",
-    "format_time",
-    "format_number",
     "setup_logger",
     "log_section_header",
     "force_flush_logs",
-    "calculate_tokens_per_second",
-    "calculate_perplexity",
-    "get_memory_optimized_settings",
-    "preallocate_gpu_memory",
+    "format_time",
+    "ensure_directory",
+    "save_json",
+    "load_json",
+    "sample_text",
+    # Add other exported names here
 ] 

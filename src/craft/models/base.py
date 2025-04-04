@@ -13,8 +13,11 @@ import torch
 import torch.nn as nn
 from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
 import torch.nn.functional as F
+from omegaconf import DictConfig
 
-from craft.utils.checkpoint import save_checkpoint, load_checkpoint
+# Import from the new location
+# Remove this import to break circular dependency. Checkpointing should be handled externally.
+# from craft.training.checkpoint_utils import save_checkpoint, load_checkpoint
 
 
 # Pydantic ModelConfig Base
@@ -123,64 +126,99 @@ class Model(nn.Module, ABC):
         logging.info(f"Model initialized with {n_params:,} parameters")
         logging.info(f"Trainable parameters: {trainable_params:,}")
     
-    def save(self, path: str, optimizer: Optional[torch.optim.Optimizer] = None, 
-             epoch: Optional[int] = None, step: Optional[int] = None, **kwargs):
+    def save(self, path: str, **kwargs):
         """
-        Save the model to a file.
-        Uses the Pydantic config's model_dump method.
+        Save the model's state_dict and configuration to a file using torch.save.
+        Intended for saving the model architecture and weights, not the full training state.
+        Use CheckpointManager for saving full training checkpoints.
+
+        Args:
+            path: Path to save the checkpoint file (.pt or .pth recommended).
+            **kwargs: Additional metadata to save in the checkpoint dictionary.
         """
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
+
         checkpoint = {
             "model_state_dict": self.state_dict(),
-            "model_config": self.config.model_dump(),
+            "model_config": self.config.model_dump(), # Use Pydantic V2's model_dump
+            **kwargs # Include any additional metadata provided
         }
-        
-        if optimizer is not None:
-            checkpoint["optimizer_state_dict"] = optimizer.state_dict()
-        
-        if epoch is not None:
-            checkpoint["epoch"] = epoch
-        if step is not None:
-            checkpoint["step"] = step
-            
-        for key, value in kwargs.items():
-            checkpoint[key] = value
-        
-        save_checkpoint(checkpoint, path)
-        logging.info(f"Model saved to {path}")
-    
-    def load(self, path: str, device: Optional[torch.device] = None, 
-             optimizer: Optional[torch.optim.Optimizer] = None, strict: bool = True) -> Dict[str, Any]:
+
+        try:
+            torch.save(checkpoint, path)
+            logging.info(f"Model state and config saved to {path}")
+        except Exception as e:
+            logging.error(f"Failed to save model to {path}: {e}", exc_info=True)
+
+    def load(self, path: str, device: Optional[Union[torch.device, str]] = None,
+             strict: bool = True) -> Dict[str, Any]:
         """
-        Load the model from a file.
-        We expect the factory function to handle config instantiation before calling load.
+        Load the model's state_dict from a file saved by `Model.save`.
+        This method assumes the model architecture (instantiated via config) matches the saved state.
+        It does NOT load optimizer or scheduler states. Use CheckpointManager for that.
+
+        Args:
+            path: Path to the checkpoint file.
+            device: Device to load the model onto ('cpu', 'cuda', or torch.device object). Defaults to auto-detect.
+            strict: Whether to strictly enforce that the keys in state_dict match the keys returned by this module's state_dict().
+
+        Returns:
+            The loaded checkpoint dictionary (excluding model_state_dict if successfully loaded).
+
+        Raises:
+            FileNotFoundError: If the checkpoint file does not exist.
+            KeyError: If the checkpoint file does not contain 'model_state_dict'.
         """
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Checkpoint file not found: {path}")
+
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        checkpoint = load_checkpoint(path, device)
+        elif isinstance(device, str):
+            device = torch.device(device)
 
+        try:
+            # Load the entire checkpoint dictionary first
+            # Set weights_only=False because we save non-tensor config dict. Be cautious.
+            logging.warning(f"Loading model checkpoint {path} with weights_only=False. Ensure the source is trusted.")
+            checkpoint = torch.load(path, map_location=device, weights_only=False)
+        except Exception as e:
+            logging.error(f"Failed to load checkpoint from {path}: {e}", exc_info=True)
+            raise
+
+        if "model_state_dict" not in checkpoint:
+            raise KeyError(f"Checkpoint file {path} does not contain 'model_state_dict'.")
+
+        # Optionally verify config compatibility (basic check)
         if "model_config" in checkpoint:
-            loaded_config_type = checkpoint["model_config"].get("model_type")
-            if loaded_config_type and loaded_config_type != self.config.model_type:
-                logging.warning(
-                    f"Loading checkpoint with model_type '{loaded_config_type}' "
-                    f"into model with type '{self.config.model_type}'"
+            loaded_config_dict = checkpoint["model_config"]
+            # Simple check for model_type mismatch
+            if loaded_config_dict.get("model_type") != self.config.model_type:
+                 logging.warning(
+                    f"Loading checkpoint with model_type '{loaded_config_dict.get('model_type')}' "
+                    f"into model with type '{self.config.model_type}'. Ensure compatibility."
                 )
-        
-        missing_keys, unexpected_keys = self.load_state_dict(checkpoint["model_state_dict"], strict=strict)
-        if missing_keys:
-            logging.warning(f"Missing keys when loading model state: {missing_keys}")
-        if unexpected_keys:
-            logging.warning(f"Unexpected keys when loading model state: {unexpected_keys}")
-        
-        if optimizer is not None and "optimizer_state_dict" in checkpoint:
-            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        
+            # More thorough checks could be added here if needed
+        else:
+             logging.warning(f"Checkpoint {path} does not contain 'model_config'. Cannot verify compatibility.")
+
+        # Load the state dict
+        try:
+            missing_keys, unexpected_keys = self.load_state_dict(checkpoint["model_state_dict"], strict=strict)
+            if missing_keys:
+                logging.warning(f"Missing keys when loading model state from {path}: {missing_keys}")
+            if unexpected_keys:
+                logging.warning(f"Unexpected keys when loading model state from {path}: {unexpected_keys}")
+        except Exception as e:
+             logging.error(f"Error loading model state_dict from {path}: {e}", exc_info=True)
+             raise
+
+        # Move model to the target device AFTER loading state_dict
         self.to(device)
-        logging.info(f"Model loaded from {path} to {device}")
-        
+        logging.info(f"Model state loaded from {path} to {device}")
+
+        # Return the rest of the checkpoint data (excluding the state dict we just loaded)
+        del checkpoint["model_state_dict"]
         return checkpoint
     
     def get_config(self) -> Dict[str, Any]:

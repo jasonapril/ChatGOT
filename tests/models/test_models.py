@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 import torch
 import torch.nn as nn
 from pydantic import ValidationError, ConfigDict
+import pytest
+from omegaconf import OmegaConf, DictConfig
 
 # Import components directly from their specific modules
 # Import Model (the nn.Module base), not BaseModel (the Pydantic one by mistake)
@@ -90,53 +92,81 @@ class MockLanguageModel(LanguageModel):
         return torch.zeros(batch_size, input_ids.shape[1] + max_new_tokens)
 
 
-class TestBaseModel(unittest.TestCase):
-    """Tests for the Model base class (nn.Module)."""
-    
-    def setUp(self):
-        self.model = MockBaseModel()
-    
-    def test_initialization(self):
-        """Test that the model initializes correctly."""
-        # Check type and model_type from the config
-        self.assertIsInstance(self.model.config, BaseModelConfig)
-        self.assertEqual(self.model.model_type, "base")
-        self.assertIsInstance(self.model, nn.Module) # Check it's an nn.Module
-    
-    def test_forward(self):
-        """Test the forward method."""
-        x = torch.randn(5, 10)
-        output = self.model(x)
-        self.assertEqual(output.shape, (5, 10))
-    
-    def test_get_config(self):
+# Simple concrete model for testing base functionalities
+class ConcreteModel(Model):
+    def __init__(self, config):
+        super().__init__(config)
+        self.linear = nn.Linear(10, 5) # Example layer
+
+    def forward(self, x):
+        # Basic implementation for testing
+        return self.linear(x)
+
+# Tests for the Model base class (nn.Module)
+class TestBaseModel:
+    """Tests for the Model base class using pytest fixtures."""
+
+    @pytest.fixture
+    def config(self):
+        """Provides a basic BaseModelConfig fixture."""
+        return BaseModelConfig(model_type="test_base")
+
+    @pytest.fixture
+    def concrete_model(self, config):
+        """Provides an instance of the ConcreteModel fixture."""
+        return ConcreteModel(config)
+
+    def test_initialization(self, concrete_model, config):
+        """Test correct initialization."""
+        assert concrete_model.config == config
+        assert concrete_model.model_type == "test_base"
+        assert isinstance(concrete_model.linear, nn.Linear)
+
+    def test_get_config(self, concrete_model, config):
         """Test the get_config method."""
-        config = self.model.get_config()
-        self.assertIsInstance(config, dict)
-        self.assertEqual(config["model_type"], "base")
-    
-    def test_save_load(self):
+        retrieved_config = concrete_model.get_config()
+        assert retrieved_config == config.model_dump()
+
+    def test_forward(self, concrete_model):
+        """Test the forward method (concrete implementation)."""
+        # The abstract Model.forward raises NotImplementedError.
+        # We test the concrete implementation here.
+        input_tensor = torch.randn(1, 10)
+        output = concrete_model.forward(input_tensor)
+        assert output.shape == (1, 5) # Based on ConcreteModel's linear layer
+
+    def test_save_load(self, concrete_model, tmp_path):
         """Test the save and load methods."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = os.path.join(temp_dir, "model.pt")
-            self.model.save(path)
-            self.assertTrue(os.path.exists(path))
-            
-            # Determine target device (consistent with load method)
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            
-            # Create a new model and load the saved state
-            new_model = MockBaseModel()
-            # Load method moves new_model to device
-            new_model.load(path, device=device) 
-            
-            # Ensure the original model is also on the same device for comparison
-            self.model.to(device)
-            
-            # Check that the parameters are the same
-            for p1, p2 in zip(self.model.parameters(), new_model.parameters()):
-                # Ensure parameters being compared are on the same device explicitly
-                self.assertTrue(torch.all(torch.eq(p1.to(device), p2.to(device))))
+        save_path = tmp_path / "model.pt"
+        extra_data = {"test_key": "test_value"}
+        
+        # Save the original model (likely on CPU)
+        original_device = next(concrete_model.parameters()).device
+        concrete_model.save(str(save_path), **extra_data)
+        assert save_path.exists()
+
+        # Create a new model instance of the same type to load into
+        new_model = ConcreteModel(concrete_model.config)
+
+        # Ensure parameters are different before loading (comparing on original device)
+        assert not torch.equal(concrete_model.linear.weight.to(original_device), 
+                               new_model.linear.weight.to(original_device))
+
+        # Load the saved state into the new model.
+        # The load method will move new_model to the detected device (CPU or CUDA)
+        loaded_data = new_model.load(str(save_path))
+        loaded_device = next(new_model.parameters()).device
+
+        # Move the original model to the same device as the loaded model for comparison
+        concrete_model.to(loaded_device)
+
+        # Check if model state is loaded correctly (now comparing on the same device)
+        assert torch.equal(concrete_model.linear.weight, new_model.linear.weight)
+        assert torch.equal(concrete_model.linear.bias, new_model.linear.bias)
+
+        # Check config compatibility (implicitly tested by successful load)
+        # Verify that the extra data was returned from load
+        assert "test_key" in loaded_data
 
 
 class TestGenerativeModel(unittest.TestCase):
@@ -192,19 +222,27 @@ class TestModelCreation(unittest.TestCase):
     
     def test_create_language_transformer_model(self):
         """Test creating a TransformerModel via the factory."""
-        # Define a minimal valid config
+        # Define a minimal valid config as a dictionary
         config_dict = {
+            "_target_": "craft.models.transformer.TransformerModel",
             "model_type": "language",
-            "architecture": "transformer", # Matches the registered name
-            "vocab_size": 50,          # Required for LanguageModelConfig
-            "d_model": 128,            # Optional, provide for testing
-            "n_head": 4,               # Optional, provide for testing
-            "n_layers": 2,             # Optional, provide for testing
-            # Other fields will use defaults from LanguageModelConfig
+            "config": {
+                "_target_": "craft.models.base.LanguageModelConfig",
+                "architecture": "transformer",
+                "model_type": "language",
+                "vocab_size": 50,          # Required for LanguageModelConfig
+                "d_model": 128,            # Optional, provide for testing
+                "n_head": 4,               # Optional, provide for testing
+                "n_layers": 2,             # Optional, provide for testing
+                # Other fields will use defaults from LanguageModelConfig
+            }
         }
         
-        # Call the factory function
-        model = create_model_from_config(config_dict)
+        # Convert the dictionary to an OmegaConf DictConfig object
+        model_cfg = OmegaConf.create(config_dict)
+        
+        # Call the factory function with the DictConfig
+        model = create_model_from_config(model_cfg)
         
         # --- Assertions --- 
         # Check the type
@@ -233,36 +271,50 @@ class TestModelCreation(unittest.TestCase):
     
     def test_unregistered_model_type_or_architecture(self):
         """Test error for unregistered model type/architecture combo."""
-        config = {
+        # This test needs to be adapted as the factory signature changed
+        # It now relies on _target_ and validates the nested Pydantic config
+        # Let's test attempting to instantiate an unregistered _target_
+        config_unregistered = {
+            "_target_": "craft.models.non_existent.NonExistentModel",
             "model_type": "language",
-            "architecture": "non_existent_transformer",
-            "vocab_size": 100
+            "config": {"vocab_size": 100} # Minimal valid nested config
         }
-        
-        # Expect ValueError from factory if the combo isn't in the registry
-        with self.assertRaises(ValueError):
-            create_model_from_config(config)
-            
-        config_unknown_type = {
-            "model_type": "audio", # Assuming 'audio' is not registered
-            "architecture": "transformer",
-            "vocab_size": 100
-        }
-        with self.assertRaises(ValueError):
-             create_model_from_config(config_unknown_type)
+        model_cfg_unregistered = OmegaConf.create(config_unregistered)
+        # Expect ImportError or potentially Hydra error
+        with self.assertRaises((ImportError, ModuleNotFoundError)): # Hydra might raise ModuleNotFoundError
+             create_model_from_config(model_cfg_unregistered)
+
+        # Test with a valid target but unregistered type in registry (less likely now)
+        # This part might be less relevant if we rely solely on _target_
+        # config_unknown_type = {
+        #     "_target_": "craft.models.transformer.TransformerModel",
+        #     "model_type": "audio", # Assuming 'audio' is not registered
+        #     "config": {"vocab_size": 100}
+        # }
+        # model_cfg_unknown_type = OmegaConf.create(config_unknown_type)
+        # with self.assertRaises(ValueError): # Expect error during Pydantic lookup
+        #      create_model_from_config(model_cfg_unknown_type)
 
     def test_invalid_config_validation(self):
         """Test Pydantic validation for missing required fields."""
-        # Config missing the required 'vocab_size' for LanguageModelConfig
-        invalid_config = {
+        # Config missing the required 'vocab_size' within the nested 'config'
+        invalid_config_dict = {
+            "_target_": "craft.models.transformer.TransformerModel", # Need target
             "model_type": "language",
-            "architecture": "transformer",
-            "d_model": 64 
+            "config": {
+                "_target_": "craft.models.base.LanguageModelConfig",
+                "architecture": "transformer",
+                "model_type": "language",
+                "d_model": 64 
+                # Missing vocab_size
+            }
         }
+        # Convert to DictConfig
+        invalid_model_cfg = OmegaConf.create(invalid_config_dict)
         
-        # Expect Pydantic ValidationError
+        # Expect Pydantic ValidationError from within create_model_from_config
         with self.assertRaises(ValidationError):
-            create_model_from_config(invalid_config)
+            create_model_from_config(invalid_model_cfg)
 
 
 # --- New Test Class for Base Generate Method --- #

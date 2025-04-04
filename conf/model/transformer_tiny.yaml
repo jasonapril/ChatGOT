@@ -1,13 +1,14 @@
 # conf/model/transformer_tiny.yaml
 # Configuration for a very small Transformer model for testing on low-memory GPUs
 
-_target_: src.models.transformer.TransformerModel
+_target_: craft.models.transformer.TransformerModel
 model_type: language # Should match the training task
 
 config:
   _target_: src.models.base.LanguageModelConfig
   architecture: transformer
   model_type: ${model.model_type}
+  vocab_size: null      # Add placeholder for vocab_size
   d_model: 128          # Significantly reduced
   n_layers: 2           # Significantly reduced
   n_head: 4             # Reduced

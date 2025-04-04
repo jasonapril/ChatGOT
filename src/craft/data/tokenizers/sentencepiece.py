@@ -100,5 +100,5 @@ class SentencePieceTokenizer(BaseTokenizer):
             'eos_id': self.eos_id
         }
         import json
-        with open(os.path.join(output_dir, 'tokenizer_config.json'), 'w') as f:
-            json.dump(config, f, indent=2) 
+        with open(os.path.join(output_dir, 'tokenizer_config.json'), 'w', encoding="utf-8") as f:
+            json.dump(self.config, f, indent=4) 

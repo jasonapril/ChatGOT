@@ -1,4 +1,3 @@
-      
 # Flow System: Detailed Guidelines and Conventions
 
 This document provides detailed operational guidelines, conventions, templates, and procedures for using the Flow system effectively. It expands on the high-level principles outlined in the main `flow.md`.
@@ -57,6 +56,7 @@ Detailed procedures for managing tasks within `../project/tasks.md`.
 -   **Timestamps & Context:** When adding tasks or significant updates, consider adding a timestamp or linking back to the originating discussion/commit for context.
 -   **Archival Process:** Once a task is completed (✅) or deemed no longer active, remove it from `../project/tasks.md` and log its completion/archival in the `../project/logs/` directory, typically with a timestamp and outcome summary. Maintain only recent history (e.g., last 5-10 completed items) directly in `tasks.md` if desired for quick reference before full archival.
 -   **Scheduled Reviews & Retrospectives:** Implement regular reviews (daily/weekly) to reconcile the active task list, ensure consistency, identify blockers, and capture key decisions. Consider brief retrospectives after major milestones or complex tasks to capture lessons learned.
+-   **Timestamp Format**: Use `YYYY-MM-DD` for dates in task updates and completion markers (e.g., `<# Done 2024-04-03 #>`).
 
 ## AI Agent Interaction Patterns
 

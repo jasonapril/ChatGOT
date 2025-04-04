@@ -11,91 +11,58 @@ This file serves as the working memory for all active tasks in the project. It's
 *These tasks represent major foundational refactoring.*
 
 - **Restructure Source Code Organization**: 🟡 ⏳
-  - **Goal**: Implement a flatter, more maintainable source code structure following industry standards
-  - **Current Structure**:
+  - **Goal**: Implement a cleaner, more maintainable source code structure by relocating utilities and removing unused/non-standard modules.
+  - **Previous Structure**:
     ```
-    src/
+    src/craft/
     ├── cli/
+    ├── config/
     ├── data/
     ├── models/
+    ├── performance/  <- To be removed
     ├── training/
-    ├── performance/
-    ├── utils/
-    └── __init__.py
+    └── utils/        <- To be cleaned up
     ```
-  - **Proposed Structure**:
+  - **Target Structure**:
     ```
-    src/
-    ├── __init__.py
-    ├── models/
-    │   ├── __init__.py
-    │   ├── base.py
-    │   └── transformer.py
+    src/craft/
+    ├── cli/
+    ├── config/
     ├── data/
-    │   ├── __init__.py
-    │   ├── processors.py
-    │   └── tokenizers.py
-    ├── training.py
-    ├── utils.py
-    └── cli.py
+    ├── models/
+    ├── training/     <- Will contain checkpoint_utils, metrics, memory_utils
+    └── utils/        <- Will contain logging, io, generation, common
     ```
-  - **Implementation Plan**:
+  - **Implementation Plan (Revised 2025-04-03)**:
     1. **Preparation Phase**:
-       - [x] Review all existing tests and their coverage ✅ <# Done Apr 04 #>
-       - [ ] Document current import dependencies 🟡 <# In Progress #>
-       - [ ] Create test suite for new structure
-       - [ ] Set up CI to run tests on each change
-    
-    2. **Code Migration Phase** (for each module):
-       - [ ] Create new file structure
-       - [ ] Move code piece by piece
-       - [ ] Update imports
-       - [ ] Run tests
-       - [ ] Fix any issues
-       - [ ] Only remove old code after tests pass
-    
-    3. **Module-Specific Tasks**:
-       - **Models Module**:
-         - [ ] Move `base.py` and `transformer.py`
-         - [ ] Update model factory
-         - [ ] Test model creation and initialization
-       
-       - **Data Module**:
-         - [ ] Move processors and tokenizers
-         - [ ] Update dataset loading
-         - [ ] Test data pipeline end-to-end
-       
-       - **Training Module**:
-         - [ ] Move core training logic
-         - [ ] Update training callbacks
-         - [ ] Test training loop
-       
-       - **Utils Module**:
-         - [ ] Move common utilities
-         - [ ] Update logging
-         - [ ] Test utility functions
-       
-       - **CLI Module**:
-         - [ ] Move command handlers
-         - [ ] Update command registration
-         - [ ] Test CLI commands
-    
-    4. **Final Steps**:
-       - [ ] Run full test suite
-       - [ ] Update documentation
-       - [ ] Clean up old files
-       - [ ] Verify all functionality works
-    
+       - [x] Review all existing tests and their coverage ✅ <# Done 2025-04-03 #>
+       - [x] Document current import dependencies ✅ <# Done 2025-04-03 (see flow/project/dependencies.dot) #>
+       - [ ] Create test suite structure for target layout (Minimal changes needed now)
+       - [ ] Set up CI to run tests on each change (Skipping for now)
+
+    2. **Code Migration & Cleanup Phase**: ✅ <# Done 2025-04-03 #>
+       - [x] **Move `utils/checkpoint.py`** -> `training/checkpoint_utils.py`. Verify imports. ✅ <# Done 2025-04-03 #>
+       - [x] **Move `utils/metrics.py`** -> `training/metrics.py`. Verify imports. ✅ <# Done 2025-04-03 #>
+       - [x] **Move `utils/memory.py`** -> `training/memory_utils.py`. Update import in `training/optimizations.py`. ✅ <# Done 2025-04-03 #>
+       - [x] **Delete `utils/performance.py`** (Unused). ✅ <# Done 2025-04-03 #>
+       - [x] **Delete `performance/` directory** (Unused/Experimental). ✅ <# Done 2025-04-03 #>
+       - [x] **Review `utils/common.py`:** Relocate/remove functions, improve coverage. ✅ <# Done 2025-04-03 #>
+       - [x] Run full test suite after each significant step. ✅ <# Done 2025-04-03 #>
+
+    3. **Final Steps**:
+       - [x] Refactor `Model.save/load`, fix `test_save_load`, merge `checkpoint_utils.py` into `checkpointing.py`. ✅ <# Done 2025-04-03 #>
+       - [ ] Update documentation (if affected beyond tasks.md).
+       - [ ] Clean up any remaining old files/artifacts.
+       - [x] Verify all functionality works (e.g., run a sample training/generation). ✅ <# Done 2025-04-03 #>
+
   - **Testing Strategy**:
-    - Unit tests for each module
-    - Integration tests for module interactions
-    - End-to-end tests for complete workflows
-    - Performance tests for critical paths
-    
-  - **Priority**: High (Foundational)
+    - Run `pytest` after each file move/deletion to catch immediate issues.
+    - Improve coverage for modified/relocated modules as needed (esp. `common.py`).
+
+  - **Priority**: High (Foundational Cleanup)
   - **Status**: In Progress
-  - 🔍 Identified during code review 2025-03-31
-  - 📝 Updated with detailed implementation plan 2025-03-31
+  - 🔍 Original task identified during code review 2025-03-31
+  - 📝 Plan revised based on analysis 2025-04-03
 
 ### 🟠 Medium Priority
 
@@ -201,3 +168,25 @@ This file serves as the working memory for all active tasks in the project. It's
 
 - [✅] **Complete Model Architecture Refactoring** (Est. Effort: High) ✅ 2025-03-30 (Assumed completed based on sub-tasks)
 - ### 🟡 Implement Basic Unit Tests ✅ 2025-03-28
+
+### Task 3: CI/CD & Deployment (Future)
+   - [ ] Set up basic CI (GitHub Actions?) to run tests on push.
+   - [ ] Explore deployment options (e.g., containerization, cloud services).
+
+### Task 4: Configuration Logic
+   - [ ] Improve Configuration Handling (`conf/`, Hydra instantiation, Pydantic validation).
+
+### Task 5: Refactoring & Cleanup (Ongoing)
+   - [ ] Address TODOs and FIXMEs in the code.
+   - [ ] Improve test coverage (currently 81%).
+   - [ ] Standardize docstrings (NumPy style?).
+   - [ ] Add type hints where missing.
+   - [ ] Refactor `tests/training/test_amp.py` tests for `SafeGradScaler` after recent updates. <# Added 2024-04-03 #>
+
+### Task 6: Feature Enhancements (Ideas)
+   - [ ] Add support for different model architectures (RNN, etc.).
+
+### Task 3.3: Test Output Cleanup
+   - [x] **Task 3.3: Test Output Cleanup:** Investigate and fix the issue where tests create persistent top-level directories (`dummy_output_dir`, `sp_save_test`, `test_ckpts`, `some_dir`). Use pytest `tmp_path` fixture. (See [Context](#context-task-33))
+       - Status: **DONE** (2024-08-01)
+       - Files: `tests/data/tokenizers/test_subword.py`, `tests/data/tokenizers/test_sentencepiece.py`, `tests/training/test_checkpointing.py`

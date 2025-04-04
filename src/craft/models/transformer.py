@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 # Import base class, new config type, and registration decorator
 from .base import LanguageModel, LanguageModelConfig 
-from .factory import register_model
+# from .factory import register_model # REMOVE import to break cycle
 
 
 class PositionalEncoding(nn.Module):
@@ -58,8 +58,8 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-# Register this model implementation
-@register_model("language", architecture_name="transformer")
+# Register this model implementation # REMOVE decorator
+# @register_model("language", architecture_name="transformer")
 class TransformerModel(LanguageModel):
     """
     Transformer model for character-level language modeling.
