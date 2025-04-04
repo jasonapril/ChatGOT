@@ -352,15 +352,16 @@ def create_dataloaders(
         return train_dataloader, None
 
 
-def create_dataset_from_config(data_config: DictConfig, split_config: DictConfig, original_cwd: Optional[str] = None) -> BaseDataset:
+def create_dataset_from_config(data_config: DictConfig, split_config: DictConfig, original_cwd: Optional[str] = None, split_name: str = "unknown") -> BaseDataset:
     """
     Factory function to create a dataset instance from configuration dictionaries.
     Resolves relative paths using original_cwd if provided.
 
     Args:
         data_config (DictConfig): The main data configuration (e.g., cfg.data).
-        split_config (DictConfig): Configuration for the specific split (e.g., cfg.data.train).
+        split_config (DictConfig): Configuration for the specific split dataset (e.g., cfg.data.train.dataset).
         original_cwd (Optional[str]): The original working directory to resolve relative paths.
+        split_name (str): The name of the split being processed (e.g., 'train').
 
     Returns:
         BaseDataset: An instance of the dataset defined by the configuration.
@@ -429,13 +430,16 @@ def create_dataset_from_config(data_config: DictConfig, split_config: DictConfig
              logger.warning("original_cwd not provided to create_dataset_from_config. Cannot resolve relative paths.")
         # --- End Resolve Paths ---
 
-        # Convert back to DictConfig *after* modifications
-        instant_config_omegaconf = OmegaConf.create(instant_config)
+        # Convert the dataset_config subset to OmegaConf DictConfig for instantiation
+        if not isinstance(instant_config, DictConfig):
+            instant_config = OmegaConf.create(instant_config)
 
-        logger.info(f"Instantiating {target_class_path} with config: {OmegaConf.to_container(instant_config_omegaconf)}")
+        # Original logging line using attribute access, assuming instant_config is now DictConfig
+        logger.info(f"Instantiating {instant_config._target_} with config: {OmegaConf.to_container(instant_config)}")
         # Use the OmegaConf object for instantiation
-        dataset = hydra.utils.instantiate(instant_config_omegaconf)
-        logger.info(f"Successfully instantiated dataset: {type(dataset).__name__}")
+        dataset = hydra.utils.instantiate(instant_config)
+
+        logger.info(f"Dataset '{split_name}' instantiated successfully: {type(dataset)}")
         return dataset
     except Exception as e:
         # Log the config *before* conversion back to OmegaConf for better debugging dict structure
@@ -458,30 +462,59 @@ def prepare_dataloaders_from_config(data_config: DictConfig, batch_size: int, nu
         Tuple[Optional[DataLoader], Optional[DataLoader], Optional[DataLoader]]: 
             Train, validation, and test dataloaders. Returns None for splits not defined in the config.
     """
+    logger.info("--- Entering prepare_dataloaders_from_config ---")
     train_loader, val_loader, test_loader = None, None, None
     # train_dataset = None # REMOVED - No longer need to extract vocab_size here
     # vocab_size = None    # REMOVED
 
     for split in ["train", "val", "test"]:
-        if split in data_config:
+        # Check if the attribute exists on the Pydantic model and is not None
+        if hasattr(data_config, split) and getattr(data_config, split) is not None:
             logger.info(f"Preparing dataset and dataloader for split: {split}")
-            split_config = data_config[split]
-            
+            # Get the config for the split using getattr
+            split_config = getattr(data_config, split)
+            dataset = None # Initialize dataset to None for this split
             try:
                 # Pass top-level data_config and split_config to factory
-                dataset = create_dataset_from_config(data_config=data_config, split_config=split_config, original_cwd=original_cwd)
-                # REMOVED: No need to store train_dataset
-                # if split == "train":
-                #     train_dataset = dataset 
-            except ValueError as e:
-                # Factory function now logs details, just log context here
-                logger.error(f"Failed to create dataset for split '{split}'. See previous errors.")
-                continue 
+                # Note: split_config here is DatasetSplitConfig, we need its 'dataset' part
+                if hasattr(split_config, 'dataset') and split_config.dataset is not None:
+                    dataset_specific_config = split_config.dataset 
+                    # Ensure dataset_specific_config is a DictConfig if needed by create_dataset_from_config
+                    if isinstance(dataset_specific_config, dict):
+                         dataset_specific_config = OmegaConf.create(dataset_specific_config)
+                    elif not isinstance(dataset_specific_config, DictConfig):
+                         logger.error(f"Dataset config for split '{split}' has unexpected type: {type(dataset_specific_config)}")
+                         raise ValueError(f"Invalid dataset config type for split '{split}'.")
+                    
+                    # Pass the split name to the factory function
+                    dataset = create_dataset_from_config(
+                        data_config=data_config, 
+                        split_config=dataset_specific_config, 
+                        original_cwd=original_cwd,
+                        split_name=split # Pass the current split name
+                    )
+                else:
+                    logger.error(f"Split config for '{split}' is missing the 'dataset' attribute or it is None.")
+                    raise ValueError(f"Invalid split config for '{split}'.")
+
+            except Exception as e: # Catch any exception during dataset creation
+                logger.error(f"Failed to create dataset for split '{split}'. See underlying error: {e}", exc_info=True)
+                if split == "train": # Failure to create train dataset is critical
+                    logger.error("Cannot proceed without the training dataset. Returning None dataloaders.")
+                    return None, None, None # Return None immediately if train fails
+                else: # For val/test, log and skip this split
+                    logger.warning(f"Skipping dataloader creation for optional split '{split}' due to dataset error.")
+                    continue # Go to the next split
             
-            if len(dataset) == 0:
-                logger.warning(f"Dataset for split '{split}' is empty. Skipping DataLoader creation.")
-                continue
-              
+            # Check if dataset was created successfully and is not empty
+            if dataset is None or len(dataset) == 0:
+                logger.warning(f"Dataset for split '{split}' is None or empty. Skipping DataLoader creation.")
+                if split == "train": # Also critical if train dataset is empty
+                     logger.error("Training dataset is empty. Returning None dataloaders.")
+                     return None, None, None
+                else:
+                    continue
+
             shuffle = (split == "train")
             logger.info(f"DataLoader shuffle set to {shuffle} for split '{split}'")
             
@@ -511,6 +544,7 @@ def prepare_dataloaders_from_config(data_config: DictConfig, batch_size: int, nu
     # else:
     #     ...
         
+    logger.info(f"--- Exiting prepare_dataloaders_from_config. Returning: train={train_loader is not None}, val={val_loader is not None}, test={test_loader is not None} ---")
     return train_loader, val_loader, test_loader # Return only the 3 dataloaders
 
 
@@ -519,16 +553,13 @@ def create_data_manager_from_config(config: DictConfig) -> DataManager:
     pass # Keep the existing function implementation 
 
 
-def create_data_loaders_from_config(data_config: DictConfig) -> Dict[str, DataLoader]:
+def create_data_loaders_from_config(data_config: Union[DictConfig, dict]) -> Dict[str, DataLoader]:
     """
-    Creates DataLoaders for train, validation, and test splits based on config.
-
-    Instantiates datasets for each split defined in the config (e.g., data_config.train,
-    data_config.val) using hydra.utils.instantiate and wraps them in DataLoaders.
+    Creates DataLoaders for train, validation, and optionally test splits based
+    on a provided configuration dictionary or DictConfig.
 
     Args:
-        data_config: The OmegaConf DictConfig object for the 'data' section,
-                     expected to contain sub-configs for 'train', 'val', 'test' (optional).
+        data_config: The configuration dictionary or DictConfig object for the 'data' section.
                      Each split config should have a `dataset` sub-config for instantiation
                      and an optional `dataloader` sub-config for loader parameters.
 
@@ -539,7 +570,7 @@ def create_data_loaders_from_config(data_config: DictConfig) -> Dict[str, DataLo
     Raises:
         ValueError: If required configurations (like train/val splits or _target_)
                     are missing or invalid.
-        InstantiationError: If Hydra fails to instantiate the dataset.
+        hydra.errors.InstantiationException: If Hydra fails to instantiate the dataset.
     """
     logger.info("Creating DataLoaders...")
     dataloaders = {}
@@ -568,27 +599,38 @@ def create_data_loaders_from_config(data_config: DictConfig) -> Dict[str, DataLo
                 # This case should be caught by the checks above, but added for safety
                 raise ValueError(f"Configuration for required split '{split}' is missing.")
 
-        if not isinstance(split_cfg, DictConfig):
+        if not isinstance(split_cfg, (DictConfig, dict)): # Allow both DictConfig and standard dict
             logger.error(f"Configuration for split '{split}' must be a dictionary/DictConfig. Found type: {type(split_cfg)}")
             raise ValueError(f"Invalid configuration type for split '{split}'.")
 
-        # --- Get Dataset Config --- 
+        # --- Get Dataset Config ---
         dataset_cfg = split_cfg.get("dataset")
-        if dataset_cfg is None or not isinstance(dataset_cfg, DictConfig):
+        if dataset_cfg is None or not isinstance(dataset_cfg, (DictConfig, dict)): # Allow dict
              raise ValueError(f"Missing or invalid 'dataset' configuration section for split '{split}'.")
 
-        if "_target_" not in dataset_cfg:
-             raise ValueError(f"Missing '_target_' key in 'dataset' configuration for split '{split}'. Cannot instantiate dataset.")
+        # Check for _target_ in a way that works for both DictConfig and dict
+        target_key = "_target_" # Hydra's key
+        if isinstance(dataset_cfg, dict) and target_key not in dataset_cfg:
+             raise ValueError(f"Missing '{target_key}' key in 'dataset' configuration dictionary for split '{split}'.")
+        # Optional: Keep the elif check for DictConfig if desired
+        elif isinstance(dataset_cfg, DictConfig) and target_key not in dataset_cfg:
+             # This case might be less likely now but kept for safety
+             raise ValueError(f"Missing '{target_key}' key in 'dataset' DictConfig for split '{split}'.")
 
         # --- Get DataLoader Config --- 
-        dataloader_cfg = split_cfg.get("dataloader", OmegaConf.create({})) # Default to empty config
+        dataloader_cfg = split_cfg.get("dataloader", {}) # Default to empty dict
         if not isinstance(dataloader_cfg, DictConfig):
             logger.warning(f"'dataloader' config for split '{split}' is not a DictConfig. Using defaults. Found: {type(dataloader_cfg)}")
-            dataloader_cfg = OmegaConf.create({}) 
+            # Ensure dataloader_cfg is a dict if we proceed
+            if not isinstance(dataloader_cfg, dict):
+                 dataloader_cfg = {}
 
         try:
-            logger.info(f"Instantiating dataset for split '{split}' with target: {dataset_cfg._target_}")
+            # Use dictionary access for target, as dataset_cfg might be dict
+            target_path = dataset_cfg.get("_target_", "[N/A]") # Use .get() for safety
+            logger.info(f"Instantiating dataset for split '{split}' with target: {target_path}")
             # Instantiate using the dataset sub-config
+            # hydra.utils.instantiate works fine with dicts too
             dataset: Dataset = hydra.utils.instantiate(dataset_cfg)
             logger.info(f"Dataset '{split}' instantiated successfully: {type(dataset)}")
 
@@ -599,11 +641,11 @@ def create_data_loaders_from_config(data_config: DictConfig) -> Dict[str, DataLo
             batch_size = dataloader_cfg.get("batch_size", default_batch_size)
             num_workers = dataloader_cfg.get("num_workers", default_num_workers)
             pin_memory = dataloader_cfg.get("pin_memory", default_pin_memory)
-            
+
             # Default shuffle logic (True for train, False otherwise), can be overridden
             default_shuffle = (split == "train")
             shuffle = dataloader_cfg.get("shuffle", default_shuffle)
-            
+
             # Default drop_last logic (True for train, False otherwise), can be overridden
             default_drop_last = (split == "train")
             drop_last = dataloader_cfg.get("drop_last", default_drop_last)
@@ -620,11 +662,15 @@ def create_data_loaders_from_config(data_config: DictConfig) -> Dict[str, DataLo
             logger.info(f"DataLoader for split '{split}' created. Shuffle={shuffle}, DropLast={drop_last}, BatchSize={batch_size}, NumWorkers={num_workers}")
 
         except hydra.errors.InstantiationException as e:
-            logger.error(f"Hydra failed to instantiate dataset for split '{split}'. Config: {OmegaConf.to_yaml(dataset_cfg)}. Error: {e}", exc_info=True)
+            # Ensure dataset_cfg is convertible for logging if it's a dict
+            loggable_dataset_cfg = OmegaConf.create(dataset_cfg) if isinstance(dataset_cfg, dict) else dataset_cfg
+            logger.error(f"Hydra failed to instantiate dataset for split '{split}'. Config: {OmegaConf.to_yaml(loggable_dataset_cfg, resolve=True)}. Error: {e}", exc_info=True)
             # Re-raise the specific Hydra exception for clarity
             raise e
         except Exception as e:
-            logger.error(f"Failed to create DataLoader for split '{split}'. Dataset Config: {OmegaConf.to_yaml(dataset_cfg)}. Error: {e}", exc_info=True)
+            # Ensure dataset_cfg is convertible for logging if it's a dict
+            loggable_dataset_cfg = OmegaConf.create(dataset_cfg) if isinstance(dataset_cfg, dict) else dataset_cfg
+            logger.error(f"Failed to create DataLoader for split '{split}'. Dataset Config: {OmegaConf.to_yaml(loggable_dataset_cfg, resolve=True)}. Error: {e}", exc_info=True)
             # Raise a more general error if it wasn't an instantiation issue
             raise ValueError(f"Failed to create loader for split '{split}'") from e
 
@@ -635,4 +681,5 @@ def create_data_loaders_from_config(data_config: DictConfig) -> Dict[str, DataLo
 
     return dataloaders
 
-# Ensure this function is imported where needed, potentially in src/craft/data/__init__.py 
+
+# Ensure this function is imported where needed, potentially in src/craft/data/__init__.py

@@ -1,0 +1,34 @@
+# conf/generate.yaml - Hydra configuration for the generation script
+
+defaults:
+  # We don't need model, training, data etc. here as they will be loaded
+  # from the specified training run's config.
+  - _self_
+
+# --- Generation Script Specific Parameters ---
+
+# Path to the Hydra run directory containing the trained model config and checkpoint
+# MUST be overridden on the command line or in an experiment config
+load_from_run: ??? # Example: outputs/hydra/YYYY-MM-DD/HH-MM-SS
+
+# Name of the checkpoint file to load within the run's checkpoint directory
+# Defaults to 'last.pt' but 'best_model.pt' might be common.
+checkpoint_name: last.pt
+
+# Device for generation (can be overridden)
+# This might override the device used during training if specified differently.
+device: auto
+
+# --- Default Generation Parameters ---
+# Mirroring the GenerationConfig schema and defaults from main config.yaml
+# These can be overridden via command line.
+generation:
+  start_prompt: "The meaning of life is\n"
+  max_new_tokens: 200
+  temperature: 0.8
+  top_k: null # Use null for None
+
+# (Optional) Override generation parameters here if needed, otherwise defaults from the 'generation' group are used.
+# generation:
+#   start_prompt: "Another prompt"
+#   max_new_tokens: 50 

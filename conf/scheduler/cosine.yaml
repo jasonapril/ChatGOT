@@ -1,4 +1,7 @@
 # conf/scheduler/cosine.yaml
+_target_: torch.optim.lr_scheduler.CosineAnnealingLR
+T_max: 100000 # Example default T_max, should likely be adjusted or calculated later
+eta_min: 1e-6  # Example default eta_min
 # type: cosine # REMOVED - Redundant with _target_ in main config
 # warmup_steps: 100 # REMOVED - CosineAnnealingLR does not accept this directly
 # total_steps: ??? # Calculated in train_runner based on epochs/dataset size

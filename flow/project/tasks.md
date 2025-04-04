@@ -53,7 +53,8 @@ This file serves as the working memory for all active tasks in the project. It's
        - [x] Refactor `Model.save/load`, fix `test_save_load`, merge `checkpoint_utils.py` into `checkpointing.py`. ✅ <# Done 2025-04-03 #>
        - [ ] Update documentation (if affected beyond tasks.md).
        - [ ] Clean up any remaining old files/artifacts.
-       - [x] Verify all functionality works (e.g., run a sample training/generation). ✅ <# Done 2025-04-03 #>
+       - [x] Verify all functionality works (e.g., run a sample training/generation). ✅ <# Done 2025-04-03
+        #>
 
   - **Testing Strategy**:
     - Run `pytest` after each file move/deletion to catch immediate issues.
@@ -131,6 +132,9 @@ This file serves as the working memory for all active tasks in the project. It's
 
 ## Upcoming Tasks
 
+- ### 🔴 Decide What to do with Completed Tasks
+  - Probably keep them in a log.
+
 - ### 🟠 Review Flow Alignment & Identify System Improvements
   - **Goal**: Ensure development practices align with Flow principles and improve the Flow system's effectiveness based on recent work.
   - **Sub-tasks**:
@@ -151,7 +155,7 @@ This file serves as the working memory for all active tasks in the project. It's
 - ### 🔴 Define Goals
   - We should define the precise goals that we wish to attain with this project, and work backwards from there to ensure that the project's implementations are ideal for fulfilling those goals.
   - Develop AI models that work on low-spec devices (performance critical)
-  - Experiment with cutting edge AI architectures (research)
+  - Experiment with cutting edge AI architectures
 
 - ### 🟠 Review Dependencies
   - Which libraries/frameworks/packages/etc. does Craft depend on? Are they all justified and ideal? What are the pros and cons compared to alternatives? When does it make sense to use custom libraries/frameworks/packages/etc.?
@@ -175,6 +179,8 @@ This file serves as the working memory for all active tasks in the project. It's
 
 ### Task 4: Configuration Logic
    - [ ] Improve Configuration Handling (`conf/`, Hydra instantiation, Pydantic validation).
+   - [x] Integrate basic Pydantic validation in `scripts/train.py` (2025-04-03)
+     - Files: `scripts/train.py`, `src/craft/config/schemas.py`, `src/craft/data/base.py`, `src/craft/models/factory.py`, `src/craft/training/optimizers.py`, `src/craft/training/schedulers.py`
 
 ### Task 5: Refactoring & Cleanup (Ongoing)
    - [ ] Address TODOs and FIXMEs in the code.
@@ -185,8 +191,10 @@ This file serves as the working memory for all active tasks in the project. It's
 
 ### Task 6: Feature Enhancements (Ideas)
    - [ ] Add support for different model architectures (RNN, etc.).
+   - [ ] Add support for loading and generating with third-party models (e.g., from Hugging Face Hub) in `scripts/generate.py`.
+   - [ ] Add support for third-party models in general
 
 ### Task 3.3: Test Output Cleanup
    - [x] **Task 3.3: Test Output Cleanup:** Investigate and fix the issue where tests create persistent top-level directories (`dummy_output_dir`, `sp_save_test`, `test_ckpts`, `some_dir`). Use pytest `tmp_path` fixture. (See [Context](#context-task-33))
-       - Status: **DONE** (2024-08-01)
+       - Status: **DONE** (2025-04-03)
        - Files: `tests/data/tokenizers/test_subword.py`, `tests/data/tokenizers/test_sentencepiece.py`, `tests/training/test_checkpointing.py`

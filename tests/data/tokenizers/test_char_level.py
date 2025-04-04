@@ -178,13 +178,12 @@ def test_char_tokenizer_save_load(temp_text_file_for_tokenizer, sample_text_cont
     tokenizer_orig = CharLevelTokenizer(config={'special_tokens': {'unk': '<UNK>'}})
     output_dir = str(tmp_path / "save_load_test")
     tokenizer_orig.train(temp_text_file_for_tokenizer, output_dir)
-    orig_vocab_map = tokenizer_orig.char_to_idx.copy()
-    orig_config = tokenizer_orig.config.copy()
+    orig_vocab_map  = tokenizer_orig.char_to_idx.copy()
+    orig_config     = tokenizer_orig.config.copy()
     orig_vocab_size = tokenizer_orig.get_vocab_size()
 
-    # 2. Load tokenizer in a new instance
-    tokenizer_loaded = CharLevelTokenizer() # Start empty
-    tokenizer_loaded.load(output_dir) # Load should populate config and vocab
+    # 2. Load tokenizer using the class method
+    tokenizer_loaded = CharLevelTokenizer.load(output_dir)
 
     # 3. Verify loaded state
     assert tokenizer_loaded.config == orig_config
@@ -223,9 +222,8 @@ def test_char_tokenizer_load_legacy_pickle(tmp_path, sample_text_content):
     with open(legacy_pickle_path, 'wb') as f:
         pickle.dump(legacy_data, f)
 
-    # 2. Load using the current load method
-    tokenizer = CharLevelTokenizer()
-    tokenizer.load(str(legacy_dir)) # Should detect and load pickle
+    # 2. Load using the class method
+    tokenizer = CharLevelTokenizer.load(str(legacy_dir)) # Should detect and load pickle
 
     # 3. Verify loaded state
     assert tokenizer.config == legacy_data['config']

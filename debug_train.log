@@ -1,0 +1,73 @@
+2025-04-04 11:07:08,453 - __main__ - INFO - Added DEBUG file handler writing to: C:\Users\nimbu\Desktop\Code\craft\debug_train.log
+2025-04-04 11:07:08,453 - __main__ - INFO - Validating configuration...
+2025-04-04 11:07:08,457 - __main__ - INFO - Configuration validation successful.
+2025-04-04 11:07:08,719 - root - INFO - Random seed set to 42 for reproducibility
+2025-04-04 11:07:09,787 - root - INFO - Using GPU: NVIDIA GeForce GTX 1650 Ti
+2025-04-04 11:07:09,787 - root - INFO -   - Total memory: 4.00 GB
+2025-04-04 11:07:09,787 - root - INFO -   - CUDA capability: 7.5
+2025-04-04 11:07:09,788 - __main__ - INFO - Using device: cuda
+2025-04-04 11:07:09,788 - __main__ - INFO - Creating dataloaders...
+2025-04-04 11:07:09,788 - craft.data.base - INFO - --- Entering prepare_dataloaders_from_config ---
+2025-04-04 11:07:09,788 - craft.data.base - INFO - Preparing dataset and dataloader for split: train
+2025-04-04 11:07:09,789 - craft.data.base - INFO - Attempting to create dataset for split using Hydra target: craft.data.dataset.PickledDataset...
+2025-04-04 11:07:09,789 - craft.data.base - INFO - Resolving relative path for 'file_path': 'data/processed/got/char_level/train.pkl' -> 'C:\Users\nimbu\Desktop\Code\craft\data/processed/got/char_level/train.pkl'
+2025-04-04 11:07:09,790 - craft.data.base - INFO - Instantiating craft.data.dataset.PickledDataset with config: {'_target_': 'craft.data.dataset.PickledDataset', 'file_path': 'C:\\Users\\nimbu\\Desktop\\Code\\craft\\data/processed/got/char_level/train.pkl', 'block_size': 1024}
+2025-04-04 11:07:09,790 - craft.data.dataset - INFO - Loading pre-tokenized data from: C:\Users\nimbu\Desktop\Code\craft\data/processed/got/char_level/train.pkl
+2025-04-04 11:07:09,795 - craft.data.dataset - INFO - Loaded 4936097 tokens with vocabulary size 0
+2025-04-04 11:07:09,795 - craft.data.base - INFO - Dataset 'train' instantiated successfully: <class 'craft.data.dataset.PickledDataset'>
+2025-04-04 11:07:09,795 - craft.data.base - INFO - DataLoader shuffle set to True for split 'train'
+2025-04-04 11:07:09,796 - craft.data.base - INFO - Preparing dataset and dataloader for split: val
+2025-04-04 11:07:09,796 - craft.data.base - INFO - Attempting to create dataset for split using Hydra target: craft.data.dataset.PickledDataset...
+2025-04-04 11:07:09,797 - craft.data.base - INFO - Resolving relative path for 'file_path': 'data/processed/got/char_level/val.pkl' -> 'C:\Users\nimbu\Desktop\Code\craft\data/processed/got/char_level/val.pkl'
+2025-04-04 11:07:09,798 - craft.data.base - INFO - Instantiating craft.data.dataset.PickledDataset with config: {'_target_': 'craft.data.dataset.PickledDataset', 'file_path': 'C:\\Users\\nimbu\\Desktop\\Code\\craft\\data/processed/got/char_level/val.pkl', 'block_size': 1024}
+2025-04-04 11:07:09,798 - craft.data.dataset - INFO - Loading pre-tokenized data from: C:\Users\nimbu\Desktop\Code\craft\data/processed/got/char_level/val.pkl
+2025-04-04 11:07:09,799 - craft.data.dataset - INFO - Loaded 274227 tokens with vocabulary size 0
+2025-04-04 11:07:09,800 - craft.data.base - INFO - Dataset 'val' instantiated successfully: <class 'craft.data.dataset.PickledDataset'>
+2025-04-04 11:07:09,800 - craft.data.base - INFO - DataLoader shuffle set to False for split 'val'
+2025-04-04 11:07:09,800 - craft.data.base - INFO - Preparing dataset and dataloader for split: test
+2025-04-04 11:07:09,800 - craft.data.base - INFO - Attempting to create dataset for split using Hydra target: craft.data.dataset.PickledDataset...
+2025-04-04 11:07:09,801 - craft.data.base - INFO - Resolving relative path for 'file_path': 'data/processed/got/char_level/test.pkl' -> 'C:\Users\nimbu\Desktop\Code\craft\data/processed/got/char_level/test.pkl'
+2025-04-04 11:07:09,801 - craft.data.base - INFO - Instantiating craft.data.dataset.PickledDataset with config: {'_target_': 'craft.data.dataset.PickledDataset', 'file_path': 'C:\\Users\\nimbu\\Desktop\\Code\\craft\\data/processed/got/char_level/test.pkl', 'block_size': 1024}
+2025-04-04 11:07:09,802 - craft.data.dataset - INFO - Loading pre-tokenized data from: C:\Users\nimbu\Desktop\Code\craft\data/processed/got/char_level/test.pkl
+2025-04-04 11:07:09,802 - craft.data.dataset - INFO - Loaded 274229 tokens with vocabulary size 0
+2025-04-04 11:07:09,803 - craft.data.base - INFO - Dataset 'test' instantiated successfully: <class 'craft.data.dataset.PickledDataset'>
+2025-04-04 11:07:09,803 - craft.data.base - INFO - DataLoader shuffle set to False for split 'test'
+2025-04-04 11:07:09,803 - craft.data.base - INFO - --- Exiting prepare_dataloaders_from_config. Returning: train=True, val=True, test=True ---
+2025-04-04 11:07:09,803 - __main__ - INFO - Dataloaders created.
+2025-04-04 11:07:09,803 - __main__ - INFO - Attempting to load tokenizer from preprocessed path: C:\Users\nimbu\Desktop\Code\craft\data\processed\got\char_level\tokenizer
+2025-04-04 11:07:09,804 - __main__ - INFO - Successfully loaded tokenizer for checkpoint saving: CharLevelTokenizer
+2025-04-04 11:07:09,804 - __main__ - INFO - Using vocab_size from loaded tokenizer: 96
+2025-04-04 11:07:09,805 - __main__ - INFO - Creating model...
+2025-04-04 11:07:09,805 - __main__ - INFO - Set validated_cfg.model.vocab_size to 96
+2025-04-04 11:07:09,805 - craft.models.factory - INFO - Attempting to create model with config: target='craft.models.transformer.TransformerModel' config={'_target_': 'src.models.base.LanguageModelConfig', 'architecture': 'transformer', 'model_type': 'language', 'vocab_size': None, 'd_model': 128, 'n_layers': 2, 'n_head': 4, 'd_hid': 512, 'dropout': 0.1, 'layer_norm_eps': 1e-05, 'activation': 'gelu', 'bias': True, 'max_seq_length': 1024} vocab_size=None model_type='language'
+2025-04-04 11:07:09,805 - craft.models.factory - INFO - Found nested 'config' section. Attempting Pydantic validation for model_type: language
+2025-04-04 11:07:09,806 - craft.models.factory - INFO - Validating nested config against: LanguageModelConfig
+2025-04-04 11:07:09,806 - craft.models.factory - WARNING - Overriding vocab_size from config (None) with provided value (96)
+2025-04-04 11:07:09,806 - craft.models.factory - INFO - Pydantic validation successful for LanguageModelConfig.
+2025-04-04 11:07:09,806 - craft.models.factory - INFO - Instantiating model: craft.models.transformer.TransformerModel
+2025-04-04 11:07:09,821 - craft.models.factory - INFO - Successfully created model: TransformerModel
+2025-04-04 11:07:09,904 - __main__ - INFO - Model created.
+2025-04-04 11:07:09,904 - __main__ - INFO - Creating optimizer and scheduler...
+2025-04-04 11:07:09,905 - craft.training.optimizers - INFO - Creating optimizer: torch.optim.AdamW with params: {'lr': 0.0001, 'weight_decay': 0.01}
+2025-04-04 11:07:09,905 - craft.training.optimizers - INFO - Optimizing 41 parameter groups.
+2025-04-04 11:07:11,672 - craft.training.optimizers - INFO - Optimizer AdamW created successfully.
+2025-04-04 11:07:11,672 - craft.training.schedulers - INFO - Creating scheduler: torch.optim.lr_scheduler.CosineAnnealingLR with params: {'T_max': 100000, 'eta_min': 1e-06}
+2025-04-04 11:07:11,672 - craft.training.schedulers - INFO - Scheduler CosineAnnealingLR created successfully.
+2025-04-04 11:07:11,673 - __main__ - INFO - Optimizer created. Scheduler created.
+2025-04-04 11:07:11,673 - __main__ - INFO - Instantiating callbacks...
+2025-04-04 11:07:11,673 - __main__ - WARNING - Callback 'tensorboard' configuration is invalid, None, or missing '_target_'. Skipping. Config: target='craft.training.callbacks.TensorBoardLogger'
+2025-04-04 11:07:11,673 - __main__ - INFO - Instantiated 0 callbacks.
+2025-04-04 11:07:11,673 - __main__ - INFO - Initializing Trainer...
+2025-04-04 11:07:11,674 - CheckpointManager - INFO - CheckpointManager using directory: C:\Users\nimbu\Desktop\Code\craft\outputs\hydra\2025-04-04\11-07-08
+2025-04-04 11:07:11,674 - __main__ - INFO - Trainer initialized.
+2025-04-04 11:07:11,674 - __main__ - INFO - Starting training process...
+2025-04-04 11:07:11,675 - Trainer - INFO - Starting training...
+2025-04-04 11:07:12,476 - ProgressTracker - INFO - Step: 1/5 | Loss: 4.5990 | LR: 1.00e-04 | T/s: 10269 | Time: 0.8s | Step Time: 0.798s
+2025-04-04 11:07:12,602 - ProgressTracker - INFO - Step: 2/5 | Loss: 4.5686 | LR: 1.00e-04 | T/s: 65321 | Time: 0.9s | Step Time: 0.126s
+2025-04-04 11:07:12,726 - ProgressTracker - INFO - Step: 3/5 | Loss: 4.5331 | LR: 1.00e-04 | T/s: 66261 | Time: 1.0s | Step Time: 0.124s
+2025-04-04 11:07:12,850 - ProgressTracker - INFO - Step: 4/5 | Loss: 4.4947 | LR: 1.00e-04 | T/s: 66834 | Time: 1.2s | Step Time: 0.124s
+2025-04-04 11:07:12,974 - ProgressTracker - INFO - Step: 5/5 | Loss: 4.4735 | LR: 1.00e-04 | T/s: 66178 | Time: 1.3s | Step Time: 0.125s
+2025-04-04 11:07:12,975 - TrainingLoop - INFO - Reached max_steps (5). Ending epoch early.
+2025-04-04 11:07:12,975 - TrainingLoop - INFO - Epoch 1 finished in 1.30s. Avg Loss: 4.5345, Tokens/sec: 31559.32
+2025-04-04 11:07:13,046 - Trainer - INFO - Reached max_steps (5) after epoch 1. Stopping training.
+2025-04-04 11:07:13,047 - __main__ - INFO - Training finished.

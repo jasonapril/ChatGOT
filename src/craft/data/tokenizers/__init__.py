@@ -2,6 +2,16 @@ from typing import Dict, Any
 from .base import BaseTokenizer
 from .char_level import CharLevelTokenizer
 from .subword import SubwordTokenizer
+from .sentencepiece import SentencePieceTokenizer
+
+# Define public interface
+__all__ = [
+    "BaseTokenizer",
+    "CharLevelTokenizer",
+    "SubwordTokenizer",
+    "SentencePieceTokenizer",
+    "create_tokenizer"
+]
 
 def create_tokenizer(config: Dict[str, Any]) -> BaseTokenizer:
     """Create a tokenizer based on the configuration."""

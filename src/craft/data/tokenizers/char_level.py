@@ -8,8 +8,8 @@ from pathlib import Path
 
 class CharLevelTokenizer(BaseTokenizer):
     def __init__(self, config: Dict[str, Any] = None):
-        # Ensure config is a dict and set default model_type
-        processed_config = config if config is not None else {}
+        # Ensure config is a dict, use a copy, and set default model_type
+        processed_config = config.copy() if config is not None else {} # Use .copy()
         processed_config.setdefault('model_type', 'char_level')
         super().__init__(processed_config)
         self.char_to_idx: Dict[str, int] = {}
@@ -56,47 +56,68 @@ class CharLevelTokenizer(BaseTokenizer):
         os.makedirs(output_dir, exist_ok=True)
         self.save(output_dir)
         
-    def load(self, model_path: str) -> None:
+    @classmethod
+    def load(cls, model_path: str) -> 'CharLevelTokenizer':
         """Load a pre-trained tokenizer from config and vocab files or legacy pickle."""
-        config_path = Path(model_path) / 'tokenizer_config.json'
-        vocab_path = Path(model_path) / 'vocab.json'
-        legacy_pickle_path = Path(model_path) / 'char_tokenizer.pkl'
+        model_path_obj = Path(model_path)
+        config_path = model_path_obj / 'tokenizer_config.json'
+        vocab_path = model_path_obj / 'vocab.json'
+        legacy_pickle_path = model_path_obj / 'char_tokenizer.pkl'
+
+        loaded_config = None
+        loaded_char_map = None
+        loaded_idx_map = None
 
         if config_path.exists() and vocab_path.exists():
-            # Load from JSON config and vocab
+            # Load from modern JSON format
             with open(config_path, 'r') as f:
-                self.config = json.load(f)
+                loaded_config = json.load(f)
             with open(vocab_path, 'r') as f:
-                self.char_to_idx = json.load(f)
-            # Rebuild dependent attributes
-            self.idx_to_char = {int(idx): char for char, idx in self.char_to_idx.items()} 
-            # Or maybe vocab stores idx as int? json loads strings. Assume string keys from json
-            self.idx_to_char = {idx: char for char, idx in self.char_to_idx.items()}
-            self.vocab_size = len(self.char_to_idx)
-            if 'vocab_size' not in self.config or self.config.get('vocab_size') != self.vocab_size:
-                 print(f"Warning: vocab_size in config ({self.config.get('vocab_size')}) doesn't match loaded vocab ({self.vocab_size}). Using loaded vocab size.")
-                 self.config['vocab_size'] = self.vocab_size
-            self._update_unk_from_config()
+                loaded_char_map = json.load(f)
+            # Rebuild idx_to_char
+            loaded_idx_map = {int(idx): char for char, idx in loaded_char_map.items()}
 
         elif legacy_pickle_path.exists():
             # Load from legacy pickle format
-            print(f"Loading legacy pickle format from {legacy_pickle_path}")
             with open(legacy_pickle_path, 'rb') as f:
                 legacy_data = pickle.load(f)
-            self.config = legacy_data.get('config', {})
-            self.char_to_idx = legacy_data.get('char_to_idx', {})
-            self.idx_to_char = legacy_data.get('idx_to_char', {})
-            # Ensure idx_to_char keys are integers if loaded from older pickles
-            self.idx_to_char = {int(k): v for k, v in self.idx_to_char.items()}
-            self.vocab_size = len(self.char_to_idx)
-            if 'vocab_size' not in self.config:
-                self.config['vocab_size'] = self.vocab_size
-            self._update_unk_from_config()
-            print("Legacy load complete. Consider resaving in the new format (config.json + vocab.json).")
+            if not all(k in legacy_data for k in ['config', 'char_to_idx', 'idx_to_char']):
+                 raise ValueError(f"Legacy pickle file {legacy_pickle_path} is missing required keys.")
+            loaded_config = legacy_data['config']
+            loaded_char_map = legacy_data['char_to_idx']
+            loaded_idx_map = legacy_data['idx_to_char']
 
         else:
-            raise FileNotFoundError(f"Could not find tokenizer files (tokenizer_config.json and vocab.json) or legacy char_tokenizer.pkl in {model_path}")
-        
+            raise FileNotFoundError(
+                f"Could not find tokenizer files (tokenizer_config.json/vocab.json or char_tokenizer.pkl) "
+                f"in {model_path}"
+            )
+
+        # Ensure data was loaded
+        if loaded_config is None or loaded_char_map is None or loaded_idx_map is None:
+             raise RuntimeError("Failed to load tokenizer data correctly.")
+
+        # Calculate vocab size
+        vocab_size = len(loaded_char_map)
+        # Ensure vocab_size is reflected in the loaded config dict
+        loaded_config['vocab_size'] = vocab_size
+
+        # === Refactored Approach ===
+        # 1. Initialize an empty instance
+        tokenizer = cls() 
+
+        # 2. Directly assign loaded attributes
+        tokenizer.config = loaded_config        # Assign the complete config dict
+        tokenizer.char_to_idx = loaded_char_map
+        tokenizer.idx_to_char = loaded_idx_map
+        tokenizer.vocab_size = vocab_size      # Assign the calculated vocab size
+
+        # 3. Update UNK token info based on assigned attributes
+        tokenizer._update_unk_from_config()
+        # ==========================
+
+        return tokenizer
+
     def encode(self, text: str) -> List[int]:
         """Encode text to token IDs, handling unknown characters."""
         token_ids = []

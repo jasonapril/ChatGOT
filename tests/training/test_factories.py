@@ -48,7 +48,7 @@ def test_create_optimizer_adamw_short_name_success(dummy_model):
 def test_create_optimizer_missing_target(dummy_model):
     """Test error when _target_ is missing."""
     cfg = OmegaConf.create({"lr": 0.001})
-    with pytest.raises(ValueError, match="must specify '_target_'"):
+    with pytest.raises(ValueError, match="must specify 'target' or '_target_'"):
         create_optimizer(dummy_model, cfg)
 
 def test_create_optimizer_adamw_missing_lr(dummy_model):
@@ -104,19 +104,19 @@ def test_create_scheduler_none_config(base_optimizer):
 def test_create_scheduler_missing_target(base_optimizer):
     """Test error when _target_ is missing."""
     cfg = OmegaConf.create({"T_max": 100})
-    with pytest.raises(ValueError, match="must specify '_target_'"):
+    with pytest.raises(ValueError, match="must specify 'target' or '_target_'"):
         create_scheduler(base_optimizer, cfg)
 
 def test_create_scheduler_cosine_missing_tmax(base_optimizer):
     """Test error when CosineAnnealingLR misses required 'T_max'."""
     cfg = OmegaConf.create({"_target_": "CosineAnnealingLR", "eta_min": 0.01})
-    with pytest.raises(ValueError, match="must include 'T_max'"):
+    with pytest.raises(ValueError, match="CosineAnnealingLR config must include 'T_max'"):
         create_scheduler(base_optimizer, cfg)
 
 def test_create_scheduler_unsupported_type(base_optimizer):
     """Test error for an explicitly unsupported scheduler type."""
     cfg = OmegaConf.create({"_target_": "torch.optim.lr_scheduler.StepLR", "step_size": 10})
-    with pytest.raises(ValueError, match="Unsupported scheduler type: torch.optim.lr_scheduler.StepLR"):
+    with pytest.raises(ValueError, match="Unsupported or unrecognized scheduler type: torch.optim.lr_scheduler.StepLR"):
         create_scheduler(base_optimizer, cfg)
 
 def test_create_scheduler_invalid_param_type(base_optimizer):
@@ -125,6 +125,5 @@ def test_create_scheduler_invalid_param_type(base_optimizer):
         "_target_": "CosineAnnealingLR",
         "T_max": "invalid_tmax_type" # Pass string instead of int
     })
-    # Expect the specific ValueError raised by our type check
     with pytest.raises(ValueError, match="parameter 'T_max' must be an integer"):
         create_scheduler(base_optimizer, cfg) 

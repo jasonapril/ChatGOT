@@ -1,0 +1,1 @@
+ Overly long files can sometimes make automated refactoring and edits more challenging for language models. Breaking down large files into smaller, more focused modules is generally good practice for maintainability and readability. It could potentially improve the reliability of automated tools as well.

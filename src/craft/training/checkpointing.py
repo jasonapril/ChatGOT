@@ -10,9 +10,11 @@ import os
 import torch
 import logging
 import shutil
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
+from pathlib import Path
+from ..data.tokenizers.base import BaseTokenizer
 
 class CheckpointManager:
     """Manages saving and loading model checkpoints."""
@@ -21,37 +23,34 @@ class CheckpointManager:
         self,
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
-        callbacks: Optional[Any] = None,
+        callbacks: Optional[List[Any]] = None,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         scaler: Optional[torch.amp.GradScaler] = None,
         config: Optional[Dict[str, Any]] = None,
-        checkpoint_dir: str = "checkpoints",
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        tokenizer: Optional[BaseTokenizer] = None,
+        keep_last_n: int = 3,
+        keep_best_n: int = 1
     ):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.scaler = scaler
         self.config = config
-        self.checkpoint_dir = checkpoint_dir
+        self.checkpoint_dir = os.getcwd()
         self.callbacks = callbacks
         self.logger = logging.getLogger(self.__class__.__name__)
         self.device = device
+        self.tokenizer = tokenizer
+        self.keep_last_n = keep_last_n
+        self.keep_best_n = keep_best_n
 
         # Ensure the main checkpoint directory exists
-        if self.checkpoint_dir:
-            try:
-                abs_checkpoint_dir = os.path.abspath(self.checkpoint_dir)
-                self.logger.info(f"Attempting to create checkpoint directory: {abs_checkpoint_dir}")
-                os.makedirs(abs_checkpoint_dir, exist_ok=True)
-                # Verify immediately after attempt
-                if os.path.exists(abs_checkpoint_dir):
-                    self.logger.info(f"Successfully confirmed checkpoint directory exists: {abs_checkpoint_dir}")
-                else:
-                    self.logger.error(f"FAILED TO CONFIRM checkpoint directory exists after makedirs: {abs_checkpoint_dir}")
-            except Exception as e:
-                 self.logger.error(f"Exception during checkpoint directory creation {self.checkpoint_dir}: {e}", exc_info=True)
-                 # Consider raising error or disabling checkpointing if dir creation fails
+        self.logger.info(f"CheckpointManager using directory: {self.checkpoint_dir}")
+
+        # Track saved checkpoints
+        self.saved_checkpoints = []
+        self.best_checkpoints = []
 
     def _get_tensorboard_log_dir(self) -> Optional[str]:
         """Helper to find the TensorBoardLogger and get its resolved log directory."""
@@ -78,69 +77,95 @@ class CheckpointManager:
 
     def save_checkpoint(
         self,
-        path: str,
-        current_epoch: int,
-        global_step: int,
-        best_val_metric: float,
-        metrics: Dict[str, list],
+        state: Dict[str, Any],
+        filename: str,
+        metrics: Optional[Dict[str, float]] = None,
         is_best: bool = False
     ) -> None:
-        """Saves a checkpoint of the model and training state."""
-        # Directory existence is now ensured by __init__ and path construction
-        # os.makedirs(os.path.dirname(path), exist_ok=True) # No longer needed here
+        """Saves a checkpoint of the model and training state using a state dict.
+           Handles tokenizer saving internally using self.tokenizer.
+        """
+        self.logger.info(f"[CheckpointManager] Received save request for filename: {filename}")
 
-        # Ensure config is serializable (convert OmegaConf if needed)
-        serializable_config = self.config
-        try:
-            # Attempt to resolve OmegaConf to primitive types if it's OmegaConf
-            if isinstance(self.config, DictConfig):
-                serializable_config = OmegaConf.to_container(self.config, resolve=True)
-            elif isinstance(self.config, BaseModel):
-                serializable_config = self.config.model_dump()
-        except ImportError:
-            # If OmegaConf or Pydantic not installed or fails, proceed with original
-            pass
-        except Exception as e:
-            self.logger.warning(f"Could not serialize config for checkpoint: {e}")
-            # Fallback or store None?
-            serializable_config = None # Avoid saving potentially problematic object
+        # Ensure the save directory exists (using self.checkpoint_dir)
+        if not os.path.exists(self.checkpoint_dir):
+            os.makedirs(self.checkpoint_dir, exist_ok=True)
+            self.logger.info(f"Created checkpoint directory: {self.checkpoint_dir}")
 
-        # Get TensorBoard log directory
-        tb_log_dir = self._get_tensorboard_log_dir()
-        
-        checkpoint = {
-            'epoch': current_epoch,
-            'global_step': global_step,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'best_val_metric': best_val_metric,
-            'metrics': metrics,
-            'config': serializable_config,
-            'tensorboard_log_dir': tb_log_dir
-        }
-        
-        if self.scheduler is not None:
-            checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
-        if self.scaler is not None:
-            checkpoint['scaler_state_dict'] = self.scaler.state_dict()
+        save_path = Path(self.checkpoint_dir) / filename
+        self.logger.info(f"[CheckpointManager] Attempting to save checkpoint state to: {save_path}")
 
         try:
-            torch.save(checkpoint, path)
-            self.logger.info(f"Checkpoint saved successfully to {path}")
+            # Save the provided state dictionary
+            torch.save(state, save_path)
+            self.logger.info(f"[CheckpointManager] Successfully saved checkpoint state to {save_path}")
             
+            # --- Save Tokenizer (using self.tokenizer) --- #
+            if self.tokenizer is not None:
+                self.logger.info(f"[CheckpointManager] Tokenizer object type: {type(self.tokenizer)}")
+                tokenizer_save_path = Path(self.checkpoint_dir) / "tokenizer" 
+                self.logger.info(f"[CheckpointManager] Attempting to save tokenizer using save to: {tokenizer_save_path}")
+                try:
+                    # Ensure the directory exists
+                    tokenizer_save_path.mkdir(parents=True, exist_ok=True)
+                    # Use the .save() method appropriate for our custom tokenizers
+                    self.tokenizer.save(str(tokenizer_save_path))
+                    self.logger.info(f"[CheckpointManager] Successfully saved tokenizer to {tokenizer_save_path}")
+                except AttributeError as ae:
+                     # Log if .save() is missing, though it should exist for BaseTokenizer subclasses
+                     self.logger.error(f"[CheckpointManager] Tokenizer object {type(self.tokenizer)} lacks the 'save' method. Error: {ae}", exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"[CheckpointManager] Failed to save tokenizer to {tokenizer_save_path}: {e}", exc_info=True)
+            else:
+                 self.logger.warning("[CheckpointManager] self.tokenizer is None, skipping tokenizer save.")
+            # --- End Save Tokenizer --- #
+
+            # Manage saved checkpoints (track based on filename pattern)
+            self._add_saved_checkpoint(str(save_path))
+            # --- Simplified best checkpoint tracking --- 
             if is_best:
-                # Construct absolute path for best_model.pt
-                best_path = os.path.join(self.checkpoint_dir, 'best_model.pt')
-                # Simple copy for cross-platform compatibility
-                if os.path.abspath(path) != os.path.abspath(best_path):
-                    shutil.copyfile(path, best_path)
-                    self.logger.info(f"Updated best model link to {best_path}")
-                else:
-                    # Log that we are saving directly as best_model.pt
-                    self.logger.info(f"Saved best model directly as {best_path}")
+                best_path = Path(self.checkpoint_dir) / "best.pt"
+                shutil.copyfile(save_path, best_path)
+                self.logger.info(f"Saved new best checkpoint link to {best_path} based on metrics: {metrics}")
+                # Update internal list of best checkpoints
+                self._add_best_checkpoint(str(best_path)) # Add the best.pt link
 
         except Exception as e:
-            self.logger.error(f"Failed to save checkpoint to {path}: {e}", exc_info=True)
+            self.logger.error(f"Failed to save checkpoint {filename}: {e}", exc_info=True)
+            # Return None or raise? For now, log and continue if possible
+            return None 
+
+    def _add_saved_checkpoint(self, checkpoint_path: str):
+        """Adds a checkpoint path to the tracking list and manages cleanup."""
+        # Simple tracking: add all non-best checkpoints to one list
+        if "best.pt" not in checkpoint_path:
+            self.saved_checkpoints.append(checkpoint_path)
+            self.saved_checkpoints.sort(key=os.path.getmtime) # Keep sorted by time
+            self._manage_checkpoints(self.saved_checkpoints, self.keep_last_n)
+
+    def _add_best_checkpoint(self, checkpoint_path: str):
+        """Adds a best checkpoint path and manages cleanup."""
+        # Track best checkpoints separately
+        self.best_checkpoints.append(checkpoint_path)
+        self.best_checkpoints.sort(key=os.path.getmtime) # Keep sorted by time
+        self._manage_checkpoints(self.best_checkpoints, self.keep_best_n)
+
+    def _manage_checkpoints(self, checkpoint_list: List[str], keep_n: int):
+        """Removes older checkpoints if the list exceeds keep_n."""
+        if keep_n <= 0: # Keep all if keep_n is non-positive
+            return
+        
+        while len(checkpoint_list) > keep_n:
+            path_to_remove = checkpoint_list.pop(0) # Remove the oldest
+            try:
+                if os.path.exists(path_to_remove):
+                    os.remove(path_to_remove)
+                    self.logger.info(f"Removed old checkpoint: {path_to_remove}")
+                # REMOVED Tokenizer deletion logic
+
+            except OSError as e:
+                self.logger.error(f"Error removing old checkpoint {path_to_remove}: {e}") 
+    # --- End Restored Methods --- 
 
     def load_checkpoint(self, path: str) -> Optional[Dict[str, Any]]:
         """Loads the trainer state from a checkpoint file (absolute path expected)."""

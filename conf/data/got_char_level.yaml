@@ -12,18 +12,18 @@ block_size: 1024 # Increased from 256 to 1024 for better context learning
 train:
   dataset:
     _target_: craft.data.dataset.PickledDataset
-    file_path: ${hydra:runtime.cwd}/data/processed/got/char_level/train.pkl
+    file_path: data/processed/got/char_level/train.pkl
     block_size: ${data.block_size}
   # Optional: Add train-specific dataloader args here if needed
 
 val:
   dataset:
     _target_: craft.data.dataset.PickledDataset
-    file_path: ${hydra:runtime.cwd}/data/processed/got/char_level/val.pkl
+    file_path: data/processed/got/char_level/val.pkl
     block_size: ${data.block_size}
 
 test:
   dataset:
     _target_: craft.data.dataset.PickledDataset
-    file_path: ${hydra:runtime.cwd}/data/processed/got/char_level/test.pkl
+    file_path: data/processed/got/char_level/test.pkl
     block_size: ${data.block_size} 

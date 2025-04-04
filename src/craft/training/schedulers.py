@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 import torch
 import torch.optim as optim
 from omegaconf import DictConfig
+from torch.optim.lr_scheduler import LRScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -28,58 +29,61 @@ def create_scheduler(optimizer: optim.Optimizer, scheduler_cfg: Optional[DictCon
                     or if required parameters are missing.
     """
     if scheduler_cfg is None:
-        logger.info("No scheduler configuration provided, skipping scheduler creation.")
+        logger.info("No scheduler configuration provided. Skipping scheduler creation.")
         return None
 
-    scheduler_name = scheduler_cfg.get("_target_")
-    if not scheduler_name:
-        raise ValueError("Scheduler configuration must specify '_target_' (e.g., 'torch.optim.lr_scheduler.CosineAnnealingLR')")
+    # Ensure target key is present (check both 'target' and '_target_')
+    target_key_alias = "target"
+    target_key_hydra = "_target_"
+    target_path = scheduler_cfg.get(target_key_alias) or scheduler_cfg.get(target_key_hydra)
 
-    # Filter out the target key, pass the rest as kwargs
-    scheduler_kwargs = {k: v for k, v in scheduler_cfg.items() if k != "_target_"}
+    if not target_path:
+        raise ValueError(f"Scheduler configuration must specify '{target_key_alias}' or '{target_key_hydra}'.")
 
-    logger.info(f"Creating scheduler: {scheduler_name} with params: {scheduler_kwargs}")
+    # Filter out the target key(s), pass the rest as kwargs
+    scheduler_kwargs = scheduler_cfg.copy() # Make a copy
+    scheduler_kwargs.pop(target_key_alias, None)
+    scheduler_kwargs.pop(target_key_hydra, None)
+
+    logger.info(f"Creating scheduler: {target_path} with params: {scheduler_kwargs}")
 
     scheduler: Optional[optim.lr_scheduler._LRScheduler] = None
     try:
-        # --- Explicitly supported schedulers ---
-        if scheduler_name.lower() == "torch.optim.lr_scheduler.cosineannealinglr" or scheduler_name.lower() == "cosineannealinglr":
+        # Check for supported schedulers (case-insensitive and allow short names)
+        target_lower = target_path.lower()
+        if "cosineannealinglr" in target_lower:
+            # Ensure required parameters are present (e.g., T_max)
             if 'T_max' not in scheduler_kwargs:
-                raise ValueError("CosineAnnealingLR configuration must include 'T_max'")
-            # Explicitly check type before instantiation
-            t_max = scheduler_kwargs['T_max']
-            if not isinstance(t_max, int):
-                 raise ValueError(f"CosineAnnealingLR parameter 'T_max' must be an integer, got {type(t_max)}")
+                raise ValueError("CosineAnnealingLR config must include 'T_max'")
+            # Optional: Validate T_max type
+            if not isinstance(scheduler_kwargs['T_max'], int):
+                raise ValueError("CosineAnnealingLR parameter 'T_max' must be an integer")
             
             scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, **scheduler_kwargs)
-        
-        # --- Add other explicitly supported schedulers here with elif --- 
-        # elif scheduler_name.lower() == "torch.optim.lr_scheduler.steplr":
-            # ... validation and instantiation ...
-            
+            logger.info("Scheduler CosineAnnealingLR created successfully.")
+
         else:
-            # --- Unsupported scheduler type ---
-            raise ValueError(f"Unsupported scheduler type: {scheduler_name}. Add explicit support or check config.")
+            logger.warning(f"Scheduler '{target_path}' not explicitly handled. Add support if needed.")
+            raise ValueError(f"Unsupported or unrecognized scheduler type: {target_path}")
 
     except ValueError as ve:
-        # Catch explicit ValueErrors raised above (missing required args, unsupported type, wrong type)
-        logger.error(f"Configuration error for scheduler {scheduler_name}: {ve}")
-        raise # Re-raise the specific configuration error
-        
+        # Log the specific parameter error and re-raise
+        logger.error(f"Failed to create scheduler {target_path} due to config error: {ve}")
+        raise ve 
     except TypeError as te:
-        # Catch unexpected TypeError from underlying scheduler instantiation (should be less likely now)
-        logger.error(f"Unexpected TypeError during scheduler instantiation for {scheduler_name}: {te}. Check config parameters.")
-        raise ValueError(f"Invalid parameters for scheduler {scheduler_name}: {te}") from te
-        
+        # Catch potential TypeError from PyTorch if kwargs are wrong type
+        logger.error(f"Failed to create scheduler {target_path} due to incorrect parameter type: {te}")
+        raise TypeError(f"Incorrect parameter type for {target_path}: {te}") from te
     except Exception as e:
-        # Catch any other unexpected errors during the process
-        logger.error(f"Failed to create scheduler {scheduler_name} due to unexpected error: {e}")
-        raise ValueError(f"Unexpected error creating scheduler {scheduler_name}") from e
+        logger.error(f"An unexpected error occurred creating scheduler {target_path}: {e}", exc_info=True)
+        raise RuntimeError(f"Unexpected error creating scheduler {target_path}") from e
+
+    return scheduler
 
     # Should only reach here if scheduler is successfully created
     if scheduler is None: 
         # This case should ideally not happen if logic above is correct, but as a safeguard:
-        raise ValueError(f"Scheduler creation failed unexpectedly for {scheduler_name}")
+        raise ValueError(f"Scheduler creation failed unexpectedly for {target_path}")
         
     logger.info(f"Scheduler {type(scheduler).__name__} created successfully.")
     return scheduler 

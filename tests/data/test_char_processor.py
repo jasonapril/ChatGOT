@@ -7,6 +7,8 @@ import numpy as np
 
 # Import the function to test
 from craft.data.char_processor import process_char_level_data
+# Import the tokenizer class to load the saved tokenizer
+from craft.data.tokenizers.char_level import CharLevelTokenizer
 
 # --- Test Fixtures ---
 
@@ -34,7 +36,7 @@ def test_processor_success_defaults(sample_input_file, temp_data_dir):
     train_path = output_dir / "train.pkl"
     val_path = output_dir / "val.pkl"
     test_path = output_dir / "test.pkl" # Check for test split too
-    # meta_path = output_dir / "metadata.json" # Metadata is now embedded in pkl files
+    tokenizer_dir = output_dir / "tokenizer"
 
     # Run the processor using positional arguments and default splits
     output_files = process_char_level_data(str(input_path), str(output_dir))
@@ -51,51 +53,55 @@ def test_processor_success_defaults(sample_input_file, temp_data_dir):
     assert train_path.exists()
     assert val_path.exists()
     assert test_path.exists()
-    # assert not meta_path.exists() # Metadata is embedded
+    assert tokenizer_dir.exists() # Check tokenizer directory exists
+    assert (tokenizer_dir / "vocab.json").exists()
+    assert (tokenizer_dir / "tokenizer_config.json").exists()
 
-    # Basic check of pickle file content
+    # Basic check of pickle file content (metadata is no longer here)
     with open(train_path, "rb") as f:
         train_data = pickle.load(f)
     assert "token_ids" in train_data
     assert isinstance(train_data["token_ids"], np.ndarray) # Processor uses numpy arrays
-    assert "vocab_size" in train_data # Check embedded metadata
-    assert "char_to_idx" in train_data
-    assert "idx_to_char" in train_data
+    # assert "vocab_size" in train_data # REMOVED check
+    # assert "char_to_idx" in train_data # REMOVED check
+    # assert "idx_to_char" in train_data # REMOVED check
 
     with open(val_path, "rb") as f:
         val_data = pickle.load(f)
     assert "token_ids" in val_data
     assert isinstance(val_data["token_ids"], np.ndarray)
 
-def test_processor_embedded_metadata_content(sample_input_file, temp_data_dir):
-    """Test the content of the metadata embedded in pkl files."""
+    # Check tokenizer loading and basic properties
+    loaded_tokenizer = CharLevelTokenizer.load(str(tokenizer_dir))
+    assert isinstance(loaded_tokenizer, CharLevelTokenizer)
+    assert loaded_tokenizer.vocab_size > 0
+
+def test_processor_tokenizer_metadata_content(sample_input_file, temp_data_dir):
+    """Test the content of the metadata stored in the saved tokenizer."""
     input_path = sample_input_file
     output_dir = temp_data_dir
-    train_path = output_dir / "train.pkl"
+    tokenizer_dir = output_dir / "tokenizer"
 
     process_char_level_data(str(input_path), str(output_dir))
 
-    assert train_path.exists()
-    with open(train_path, "rb") as f:
-        metadata = pickle.load(f) # Load the whole dict
-
-    assert "vocab_size" in metadata
-    assert "char_to_idx" in metadata
-    assert "idx_to_char" in metadata
+    assert tokenizer_dir.exists()
+    # Load the tokenizer
+    tokenizer = CharLevelTokenizer.load(str(tokenizer_dir))
 
     # Check expected characters (case-sensitive)
     expected_chars = set("abc123\n ABCxyz")
-    assert all(c in metadata["char_to_idx"] for c in expected_chars)
-    assert len(metadata["char_to_idx"]) == metadata["vocab_size"]
-    # idx_to_char keys are ints when loaded from pickle
-    assert len(metadata["idx_to_char"]) == metadata["vocab_size"]
+    assert all(c in tokenizer.char_to_idx for c in expected_chars)
+    assert len(tokenizer.char_to_idx) == tokenizer.vocab_size
+    assert len(tokenizer.idx_to_char) == tokenizer.vocab_size
 
     # Check mapping consistency
-    for char, idx in metadata["char_to_idx"].items():
-        assert metadata["idx_to_char"][idx] == char # Keys are ints
-    
-    # Check <unk> token is NOT present (min_freq feature not implemented)
-    assert "<unk>" not in metadata["char_to_idx"]
+    for char, idx in tokenizer.char_to_idx.items():
+        assert tokenizer.idx_to_char[idx] == char
+
+    # Check <unk> token is NOT present by default
+    assert tokenizer.unk_token is None
+    assert tokenizer.unk_token_id is None
+    assert "<unk>" not in tokenizer.char_to_idx
 
 def test_processor_data_split_and_content(sample_input_file, temp_data_dir):
     """Test token counts and split ratio based on the splits tuple."""
@@ -104,7 +110,8 @@ def test_processor_data_split_and_content(sample_input_file, temp_data_dir):
     train_path = output_dir / "train.pkl"
     val_path = output_dir / "val.pkl"
     test_path = output_dir / "test.pkl"
-    
+    tokenizer_dir = output_dir / "tokenizer"
+
     input_content = input_path.read_text(encoding='utf-8')
     total_chars = len(input_content)
     test_splits = (0.7, 0.2, 0.1) # Use custom splits
@@ -117,29 +124,29 @@ def test_processor_data_split_and_content(sample_input_file, temp_data_dir):
         val_data = pickle.load(f)
     with open(test_path, "rb") as f:
         test_data = pickle.load(f)
-        
+
     train_tokens = train_data["token_ids"]
     val_tokens = val_data["token_ids"]
     test_tokens = test_data["token_ids"]
-    metadata = train_data # Metadata is the same in all files
+    # Load tokenizer to get the mapping
+    tokenizer = CharLevelTokenizer.load(str(tokenizer_dir))
 
     assert len(train_tokens) + len(val_tokens) + len(test_tokens) == total_chars
-    
+
     # Check approximate split ratios (allow some tolerance due to integer division)
     expected_train_len = int(total_chars * test_splits[0])
     expected_val_len = int(total_chars * test_splits[1])
-    expected_test_len = total_chars - expected_train_len - expected_val_len 
+    expected_test_len = total_chars - expected_train_len - expected_val_len
 
-    assert abs(len(train_tokens) - expected_train_len) <= 1 
+    assert abs(len(train_tokens) - expected_train_len) <= 1
     assert abs(len(val_tokens) - expected_val_len) <= 1
     # Test split might absorb rounding errors
-    assert abs(len(test_tokens) - expected_test_len) <= 2 
+    assert abs(len(test_tokens) - expected_test_len) <= 2
 
-    # Verify some tokens map correctly
-    char_to_idx = metadata["char_to_idx"]
-    assert train_tokens[0] == char_to_idx['a']
-    assert train_tokens[1] == char_to_idx['b']
-    assert train_tokens[9] == char_to_idx['\n'] # First newline
+    # Verify some tokens map correctly using the loaded tokenizer
+    assert train_tokens[0] == tokenizer.char_to_idx['a']
+    assert train_tokens[1] == tokenizer.char_to_idx['b']
+    assert train_tokens[9] == tokenizer.char_to_idx['\n'] # First newline
 
 def test_processor_invalid_input_path(temp_data_dir):
     """Test error handling for non-existent input file."""

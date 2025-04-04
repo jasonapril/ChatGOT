@@ -7,6 +7,9 @@ import pickle
 import logging
 from typing import List, Tuple, Dict, Any
 import numpy as np
+from pathlib import Path
+
+from craft.data.tokenizers.char_level import CharLevelTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +18,13 @@ def process_char_level_data(input_path: str, output_dir: str, splits: Tuple[floa
     Processes a raw text file for character-level language modeling.
 
     Reads the input file, creates a character vocabulary, converts the text to
-    token IDs, splits into train/val/test sets, and saves each split along with
-    vocabulary metadata to pickle files in the output directory.
+    token IDs, splits into train/val/test sets, saves each split to pickle
+    files, and saves the tokenizer information separately.
 
     Args:
         input_path: Path to the raw input text file.
-        output_dir: Directory to save the processed .pkl files (train.pkl, val.pkl, test.pkl).
+        output_dir: Directory to save the processed .pkl files (train.pkl, val.pkl, test.pkl)
+                    and the tokenizer directory.
         splits: A tuple representing the fraction for (train, validation, test) splits.
                 Must sum to 1.0.
 
@@ -59,6 +63,22 @@ def process_char_level_data(input_path: str, output_dir: str, splits: Tuple[floa
         logger.info(f"Vocabulary size: {vocab_size}")
         # logger.debug(f"Vocabulary: {''.join(chars)}")
 
+        # --- Instantiate and Save Tokenizer ---
+        logger.info("Creating and saving CharLevelTokenizer...")
+        tokenizer = CharLevelTokenizer()
+        tokenizer.char_to_idx = char_to_idx
+        tokenizer.idx_to_char = idx_to_char
+        tokenizer.vocab_size = vocab_size
+        # We can potentially add any special tokens defined elsewhere here if needed
+        # tokenizer.config['special_tokens'] = {'unk': '<UNK>'} # Example
+        # tokenizer._update_unk_from_config() # Update internal state if UNK added
+
+        tokenizer_save_dir = Path(output_dir) / "tokenizer"
+        tokenizer.save(str(tokenizer_save_dir)) # Save expects string path
+        logger.info(f"Tokenizer saved to: {tokenizer_save_dir}")
+        # --- End Tokenizer Saving ---
+
+
         # Convert text to token IDs
         logger.info("Tokenizing data...")
         token_ids = np.array([char_to_idx[ch] for ch in data], dtype=np.uint16) # Use uint16 if vocab_size < 65536
@@ -74,12 +94,14 @@ def process_char_level_data(input_path: str, output_dir: str, splits: Tuple[floa
         test_ids = token_ids[val_end:]
         logger.info(f"Split sizes: Train={len(train_ids):,}, Val={len(val_ids):,}, Test={len(test_ids):,}")
 
-        # Prepare metadata
+        # Prepare metadata (excluding vocabulary info now)
         meta = {
-            'vocab_size': vocab_size,
-            'idx_to_char': idx_to_char,
-            'char_to_idx': char_to_idx,
-            'chars': chars, # Include the actual chars list
+            # 'vocab_size': vocab_size, # Removed - stored in tokenizer
+            # 'idx_to_char': idx_to_char, # Removed - stored in tokenizer
+            # 'char_to_idx': char_to_idx, # Removed - stored in tokenizer
+            # 'chars': chars, # Removed - stored in tokenizer
+            'input_file': input_path,
+            'split_ratios': splits,
         }
 
         # Save splits to pickle files
@@ -92,7 +114,7 @@ def process_char_level_data(input_path: str, output_dir: str, splits: Tuple[floa
             # Combine token IDs and metadata for saving
             save_data = {
                 'token_ids': split_ids,
-                **meta # Embed metadata in each split file
+                **meta # Embed non-vocab metadata in each split file
             }
 
             with open(output_filepath, 'wb') as f:

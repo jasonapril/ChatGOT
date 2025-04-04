@@ -8,16 +8,25 @@ for better organization and testability.
 """
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import logging
 import time
 import gc
 import contextlib
-from typing import Tuple, Dict, Any, Callable, List, Optional
+from typing import Tuple, Dict, Any, Callable, List, Optional, Union
 import numpy as np
 from tqdm import tqdm
 import torch.distributed as dist
 import os
+
+# Attempt to import OmegaConf safely
+try:
+    from omegaconf import DictConfig, OmegaConf
+    _OMEGACONF_AVAILABLE = True
+except ImportError:
+    _OMEGACONF_AVAILABLE = False
+    DictConfig = dict # Define as dict if not available
 
 # Use relative import for utils within the same package
 from ..utils.logging import force_flush_logs, format_time
@@ -44,7 +53,8 @@ class TrainingLoop:
         log_interval: int = 10,
         callbacks: Optional[List[Any]] = None,
         checkpoint_manager: Optional[CheckpointManager] = None, # Add checkpoint manager
-        save_steps_interval: int = 0 # Add save interval
+        save_steps_interval: int = 0, # Add save interval
+        max_steps: Optional[int] = None # Add max_steps
     ):
         self.model = model
         self.optimizer = optimizer
@@ -68,6 +78,7 @@ class TrainingLoop:
         self.scaler = torch.amp.GradScaler(self.device.type, enabled=self.use_amp)
         self.checkpoint_manager = checkpoint_manager # Store manager
         self.save_steps_interval = save_steps_interval # Store interval
+        self.max_steps = max_steps # Store max_steps
 
     def train_epoch(
         self,
@@ -85,9 +96,10 @@ class TrainingLoop:
         steps_per_epoch = len(self.train_dataloader)
         self.optimizer.zero_grad(set_to_none=True) # Reset gradients at epoch start
 
-        # Retrieve max_steps from config at the start of the epoch
-        max_steps = self.config.get('training', {}).get('max_steps')
-        self.log_interval = self.config.get('training', {}).get('log_interval', 10)
+        # Get max_steps from config safely
+        max_steps = getattr(self.config, 'max_steps', None)
+        # Get log_interval from config safely
+        self.log_interval = getattr(self.config, 'log_interval', 10)
 
         # Batch skipping logic for resuming
         resume_batch_offset = -1
@@ -114,6 +126,11 @@ class TrainingLoop:
             # Skip batches if resuming mid-epoch
             if is_resuming_this_epoch and i <= resume_batch_offset:
                 continue
+
+            # CHECK MAX STEPS *BEFORE* FORWARD PASS (using self.max_steps)
+            if self.max_steps is not None and global_step >= self.max_steps:
+                self.logger.info(f"Reached max_steps ({self.max_steps}) before processing batch {i+1}. Stopping epoch.")
+                break
 
             step_logs = {}
             # Note: on_step_begin is called with the global_step *before* it's potentially incremented in this loop iteration
@@ -177,18 +194,48 @@ class TrainingLoop:
 
                     # --- Periodic Checkpoint Save --- 
                     if self.checkpoint_manager and self.save_steps_interval > 0 and global_step > 0 and global_step % self.save_steps_interval == 0:
-                        # Construct absolute path using the manager's dir
-                        save_path = os.path.join(self.checkpoint_manager.checkpoint_dir, f"checkpoint_step_{global_step}.pt")
-                        self.logger.info(f"Reached global step {global_step}. Saving checkpoint to {save_path}")
-                        # Note: train_epoch doesn't have access to best_val_metric easily.
-                        # We are saving based on steps, not best validation score here.
+                        filename = f"checkpoint_step_{global_step}.pt"
+                        self.logger.info(f"[TrainingLoop] Step {global_step}: Triggering checkpoint save (filename: {filename})")
+                        
+                        # --- Construct state dictionary (Final Check) --- 
+                        serializable_config = self.config # Start with original config
+                        try:
+                            # Try OmegaConf resolution if available
+                            if _OMEGACONF_AVAILABLE:
+                                serializable_config = OmegaConf.to_container(self.config, resolve=True)
+                        except Exception as e:
+                            self.logger.warning(f"Could not serialize config for step checkpoint: {e}")
+                            serializable_config = None # Fallback
+
+                        tb_log_dir = None
+                        if self.callbacks:
+                           for cb in self.callbacks.callbacks:
+                               if cb.__class__.__name__ == 'TensorBoardLogger' and hasattr(cb, 'resolved_log_dir'):
+                                   tb_log_dir = cb.resolved_log_dir
+                                   break
+                                   
+                        state = {
+                            'epoch': current_epoch,
+                            'global_step': global_step,
+                            'model_state_dict': self.model.state_dict(),
+                            'optimizer_state_dict': self.optimizer.state_dict(),
+                            'best_val_metric': float('inf'), # Placeholder for step checkpoint
+                            'metrics': {'loss': loss_val, 'lr': self.optimizer.param_groups[0]['lr'] if self.optimizer else None},
+                            'config': serializable_config,
+                            'tensorboard_log_dir': tb_log_dir
+                        }
+                        if self.scheduler is not None:
+                            state['scheduler_state_dict'] = self.scheduler.state_dict()
+                        if hasattr(self, 'scaler') and self.scaler is not None: 
+                            state['scaler_state_dict'] = self.scaler.state_dict()
+                        # --- End construct state (Final Check) --- 
+                        
+                        # Correct call signature for CheckpointManager.save_checkpoint
                         self.checkpoint_manager.save_checkpoint(
-                            path=save_path,
-                            current_epoch=current_epoch,
-                            global_step=global_step,
-                            best_val_metric=float('inf'), # Placeholder or retrieve if needed
-                            metrics={'loss': loss_val}, # Save current step loss
-                            is_best=False
+                            state=state,
+                            filename=filename, 
+                            metrics=state['metrics'], # Pass metrics from state
+                            is_best=False # Not based on validation
                         )
                     # --- End Periodic Checkpoint Save ---
 

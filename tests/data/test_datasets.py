@@ -252,5 +252,6 @@ def test_create_data_loaders_missing_target(processed_data_dir):
     cfg = OmegaConf.create(cfg_dict)
     
     # Expecting our explicit ValueError now, not Hydra's error
-    with pytest.raises(ValueError, match="Missing '_target_' key in 'dataset' configuration for split 'train'"):
-         create_data_loaders_from_config(cfg.data) 
+    # Updated regex to match the actual error message which might specify DictConfig
+    with pytest.raises(ValueError, match="Missing '_target_' key in 'dataset' (DictConfig|configuration) for split 'train'"):
+        create_data_loaders_from_config(cfg.data) 

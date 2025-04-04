@@ -8,16 +8,14 @@ from unittest.mock import MagicMock, patch
 import logging
 import tempfile
 from pathlib import Path
-
-# Import the classes to test
-from craft.training.training_loop import TrainingLoop
-from craft.training.trainer import Trainer
-# Import other potentially needed components for mocking or setup
+from craft.config.schemas import TrainingConfig
 from craft.models.base import LanguageModelConfig, LanguageModel
 from craft.training.callbacks import Callback, CallbackList
 from craft.training.evaluation import Evaluator
 from craft.training.checkpointing import CheckpointManager
 from craft.training.progress import ProgressTracker
+from craft.training.training_loop import TrainingLoop
+from craft.training.trainer import Trainer
 
 # --- Mocks and Fixtures --- #
 
@@ -68,27 +66,40 @@ def mock_dataloader():
 # Basic Config Fixture
 @pytest.fixture
 def base_config():
-    cfg = OmegaConf.create({
+    """Provides a base OmegaConf config for training tests."""
+    # Define a more structured config, closer to real usage
+    conf = OmegaConf.create({
         "training": {
             "gradient_accumulation_steps": 1,
             "max_grad_norm": 1.0,
             "log_interval": 10,
-            "epochs": 2,
-            "steps_per_epoch": None, # Let it run through dataloader
+            "num_epochs": 2, # Renamed from epochs
+            "steps_per_epoch": None, # Or a default value
             "use_amp": False,
-            "checkpoints": {
-                 "save_interval": 1, # Save every epoch
-                 "keep_last": 2
-             }
+            "eval_interval": 50, # Added for testing eval logic
+            "compile_model": False, # Added for completeness
+            "activation_checkpointing": False, # Added
+            "batch_size": 4, # Added required field
+            "learning_rate": 1e-4, # Added required field
+            "max_steps": None, # Added
+            "torch_compile": False,
+            "sample_max_new_tokens": 100,
+            "sample_temperature": 0.8,
+            "sample_start_text": "Once upon a time"
+        },
+        "checkpoints": { # ADDED default checkpoints section
+            "save_interval": 100, # Example save interval (steps)
+            "keep_last": 2,
+            "checkpoint_dir": None, # Set dynamically in tests
+            "resume_from_checkpoint": None # Set dynamically in tests
         },
         "logging": {
             "level": "DEBUG"
         },
-        "device": "cpu", # Default to CPU for tests
-        "seed": 42,
-        # Add other sections if Trainer/TrainingLoop expects them
+        "device": "cpu",
+        "seed": 42
     })
-    return cfg
+    return conf
 
 # --- Tests for TrainingLoop --- #
 
@@ -254,31 +265,42 @@ def test_trainer_init(base_config, mock_dataloader, temp_checkpoint_dir):
     """Test Trainer initialization creates necessary components."""
     model = MockTrainModel()
     optimizer = AdamW(model.parameters(), lr=1e-3)
-    
-    # Pass necessary args from config directly to Trainer constructor
+
+    # Update base_config to include checkpoint_dir for testing
+    config_dict = OmegaConf.to_container(base_config, resolve=True)
+    config_dict['checkpoints']['checkpoint_dir'] = str(temp_checkpoint_dir)
+    updated_config = OmegaConf.create(config_dict)
+
+    # Flatten the relevant parts of the config for Pydantic
+    flat_config_dict = {}
+    flat_config_dict.update(updated_config.get('training', {}))
+    flat_config_dict.update(updated_config.get('checkpoints', {}))
+    flat_config_dict.update(updated_config.get('logging', {}))
+    flat_config_dict['device'] = updated_config.get('device')
+    flat_config_dict['seed'] = updated_config.get('seed')
+    # Ensure batch_size is present for validation
+    if 'batch_size' not in flat_config_dict:
+        flat_config_dict['batch_size'] = flat_config_dict.get('batch_size', 8) # Default if missing
+    # Add other top-level keys if necessary
+
+    # Convert flattened dict to TrainingConfig Pydantic model
+    pydantic_config = TrainingConfig(**flat_config_dict)
+
     trainer = Trainer(
         model=model,
         optimizer=optimizer,
         train_dataloader=mock_dataloader, # Pass list of batches
         val_dataloader=mock_dataloader, # Pass list of batches
-        config=base_config, # Pass full config dict
-        device=torch.device("cpu"),
-        # Extract specific args from config for constructor
-        checkpoint_dir=str(temp_checkpoint_dir),
-        log_interval=base_config.training.log_interval,
-        eval_interval=base_config.training.get("eval_interval", 1000),
-        save_interval=base_config.training.checkpoints.save_interval,
-        num_epochs=base_config.training.epochs,
-        use_amp=base_config.training.use_amp,
-        gradient_accumulation_steps=base_config.training.gradient_accumulation_steps,
-        max_grad_norm=base_config.training.max_grad_norm
+        config=pydantic_config, # Pass Pydantic model
+        device=torch.device("cpu"), # Optionally let Trainer determine this
+        resume_from_checkpoint=None # Pass explicitly
     )
 
     assert isinstance(trainer.model, nn.Module)
     assert isinstance(trainer.optimizer, torch.optim.Optimizer)
     assert trainer.train_dataloader is mock_dataloader
     assert trainer.val_dataloader is mock_dataloader
-    assert trainer.config is base_config 
+    assert trainer.config is pydantic_config 
     # Check internal components are created (these are not mocked here)
     assert isinstance(trainer.checkpoint_manager, CheckpointManager)
     assert isinstance(trainer.callbacks, CallbackList) # Changed attribute name
@@ -288,65 +310,93 @@ def test_trainer_init(base_config, mock_dataloader, temp_checkpoint_dir):
 @patch("craft.training.trainer.CheckpointManager")
 @patch("craft.training.trainer.CallbackList")
 @patch("craft.training.trainer.ProgressTracker")
-def test_trainer_train_flow(MockProgressTracker, MockCallbackList, MockCheckpointManager, MockEvaluator, MockTrainingLoop, 
+def test_trainer_train_flow(MockProgressTracker, MockCallbackList, MockCheckpointManager, MockEvaluator,
+                           MockTrainingLoop, # Use the patched class mock
                            base_config, mock_dataloader, temp_checkpoint_dir):
     """Test the main train() method flow uses its components."""
     model = MockTrainModel()
     optimizer = AdamW(model.parameters(), lr=1e-3)
-    epochs = base_config.training.epochs
-    eval_interval = base_config.training.get("eval_interval", 1)
-    save_interval = base_config.training.checkpoints.get("save_interval", 1)
 
-    # Instantiate mocks
-    mock_training_loop_instance = MockTrainingLoop.return_value
+    # Update config with checkpoint dir and ensure needed intervals
+    config_dict = OmegaConf.to_container(base_config, resolve=True)
+    config_dict['checkpoints']['checkpoint_dir'] = str(temp_checkpoint_dir)
+    config_dict['training']['eval_interval'] = config_dict['training'].get("eval_interval", 1)
+    config_dict['checkpoints']['save_interval'] = config_dict['checkpoints'].get("save_interval", 1)
+    config_dict['training']['max_steps'] = None # Ensure epoch loop runs fully
+    updated_config = OmegaConf.create(config_dict)
+
+    # Flatten the relevant parts of the config for Pydantic
+    flat_config_dict = {}
+    flat_config_dict.update(updated_config.get('training', {}))
+    flat_config_dict.update(updated_config.get('checkpoints', {}))
+    flat_config_dict.update(updated_config.get('logging', {}))
+    flat_config_dict['device'] = updated_config.get('device')
+    flat_config_dict['seed'] = updated_config.get('seed')
+    # Ensure batch_size is present for validation
+    if 'batch_size' not in flat_config_dict:
+        flat_config_dict['batch_size'] = flat_config_dict.get('batch_size', 8) # Default if missing
+    # Add other top-level keys if necessary
+
+    # Convert flattened dict to TrainingConfig Pydantic model
+    pydantic_config = TrainingConfig(**flat_config_dict)
+
+    # Instantiate mocks for other components
+    mock_training_loop_instance = MockTrainingLoop.return_value # Get the instance mock
     mock_evaluator_instance = MockEvaluator.return_value
     mock_checkpoint_manager_instance = MockCheckpointManager.return_value
     mock_callback_list_instance = MockCallbackList.return_value
-    
+
     # Mock necessary return values
     mock_checkpoint_manager_instance.load_checkpoint.return_value = None
     mock_evaluator_instance.evaluate.side_effect = [{"loss": 0.5}, {"loss": 0.4}]
-    mock_training_loop_instance.train_epoch.return_value = {'loss': 1.0}
+
+    # Restore original mock behavior for train_epoch if needed
+    # For this test, we expect it to be called 'epochs' times.
+    # Let's give it a simple return value
+    steps_per_epoch = 10 # Define steps per epoch for calculating return
+    epochs = updated_config.training.num_epochs
+    def train_epoch_side_effect(*args, **kwargs):
+        # Basic return mimicking progress
+        current_epoch = kwargs.get("current_epoch", 0)
+        return {
+            'loss': 1.0 - (current_epoch * 0.1),
+            'final_global_step': steps_per_epoch * (current_epoch + 1)
+        }
+    mock_training_loop_instance.train_epoch.side_effect = train_epoch_side_effect
 
     trainer = Trainer(
         model=model,
         optimizer=optimizer,
         train_dataloader=mock_dataloader, # Pass list of batches
         val_dataloader=mock_dataloader, # Pass list of batches
-        config=base_config,
+        config=pydantic_config, # Pass Pydantic model
         device=torch.device("cpu"),
-        checkpoint_dir=str(temp_checkpoint_dir),
-        log_interval=base_config.training.log_interval,
-        eval_interval=eval_interval,
-        save_interval=save_interval,
-        num_epochs=epochs,
-        use_amp=base_config.training.use_amp,
-        gradient_accumulation_steps=base_config.training.gradient_accumulation_steps,
-        max_grad_norm=base_config.training.max_grad_norm
+        resume_from_checkpoint=None # Pass explicitly
     )
-    # Replace callbacks with our mock AFTER init
-    trainer.callback_list = mock_callback_list_instance
-    
+    # Replace internal instances with mocks AFTER init
+    # Note: We don't replace trainer.training_loop as it's created inside train()
+    # The train_epoch method it calls is already patched.
+    trainer.evaluator = mock_evaluator_instance
+    trainer.checkpoint_manager = mock_checkpoint_manager_instance
+    trainer.callbacks = mock_callback_list_instance
+    trainer.progress = MockProgressTracker.return_value # Assume ProgressTracker is also mocked if needed
+
     # Run training
     trainer.train()
 
     # Assertions on mock calls
-    assert mock_training_loop_instance.train_epoch.call_count == epochs
-    expected_eval_calls = epochs // eval_interval
-    assert MockEvaluator.call_count == expected_eval_calls
-    if expected_eval_calls > 0:
-        assert MockEvaluator.return_value.evaluate.call_count == expected_eval_calls
-    else:
-        MockEvaluator.return_value.evaluate.assert_not_called()
-    expected_save_calls = epochs // save_interval
-    # Checkpointing happens if eval improves OR at save_interval
-    # This logic is complex to mock exactly, check >= 
-    assert mock_checkpoint_manager_instance.save_checkpoint.call_count >= expected_save_calls 
-    # Check callbacks using the replaced mock list
+    epochs = updated_config.training.num_epochs
+    eval_interval = updated_config.training.eval_interval
+    save_interval = updated_config.checkpoints.save_interval
+
+    assert mock_training_loop_instance.train_epoch.call_count == epochs # Assert on the instance mock method
+    # Check other calls
+    assert mock_evaluator_instance.evaluate.call_count == epochs // eval_interval
+    assert mock_checkpoint_manager_instance.save_checkpoint.call_count == epochs // save_interval
     assert mock_callback_list_instance.on_train_begin.call_count == 1
-    assert mock_callback_list_instance.on_train_end.call_count == 1
     assert mock_callback_list_instance.on_epoch_begin.call_count == epochs
     assert mock_callback_list_instance.on_epoch_end.call_count == epochs
+    assert mock_callback_list_instance.on_train_end.call_count == 1
 
 @patch("craft.training.trainer.CheckpointManager")
 def test_trainer_resume_from_checkpoint(MockCheckpointManager, base_config, mock_dataloader, temp_checkpoint_dir):
@@ -354,33 +404,63 @@ def test_trainer_resume_from_checkpoint(MockCheckpointManager, base_config, mock
     model = MockTrainModel()
     optimizer = AdamW(model.parameters(), lr=1e-3)
     checkpoint_path = temp_checkpoint_dir / "last.pt"
-    
+
     mock_checkpoint_manager_instance = MockCheckpointManager.return_value
-    mock_checkpoint_manager_instance.load_checkpoint.return_value = {
-        "epoch": 1, 
-        "global_step": 100, 
-        "best_val_metric": 0.4, 
-        "metrics": {} 
+    # Get base config as dict for checkpoint data (needs to be nested as saved)
+    base_config_dict_for_ckpt = OmegaConf.to_container(base_config, resolve=True)
+    checkpoint_data_to_load = {
+        "epoch": 1,
+        "global_step": 100,
+        "best_val_metric": 0.4,
+        "metrics": {},
+        # Embed nested config dict directly, as CheckpointManager loads/saves dicts
+        "config": base_config_dict_for_ckpt
     }
+    mock_checkpoint_manager_instance.load_checkpoint.return_value = checkpoint_data_to_load
+
+    # Update config to specify resume path and checkpoint dir
+    config_dict = OmegaConf.to_container(base_config, resolve=True)
+    config_dict['checkpoints']['checkpoint_dir'] = str(temp_checkpoint_dir)
+    config_dict['checkpoints']['resume_from_checkpoint'] = str(checkpoint_path)
+    updated_config = OmegaConf.create(config_dict)
+
+    # Flatten the relevant parts of the config for Pydantic
+    flat_config_dict = {}
+    flat_config_dict.update(updated_config.get('training', {}))
+    flat_config_dict.update(updated_config.get('checkpoints', {}))
+    flat_config_dict.update(updated_config.get('logging', {}))
+    flat_config_dict['device'] = updated_config.get('device')
+    flat_config_dict['seed'] = updated_config.get('seed')
+    # Ensure batch_size is present for validation
+    if 'batch_size' not in flat_config_dict:
+        flat_config_dict['batch_size'] = flat_config_dict.get('batch_size', 8) # Default if missing
+    # Add other top-level keys if necessary
+
+    # Convert flattened dict to TrainingConfig Pydantic model
+    pydantic_config = TrainingConfig(**flat_config_dict)
 
     trainer = Trainer(
         model=model,
         optimizer=optimizer,
         train_dataloader=mock_dataloader, # Pass list of batches
         val_dataloader=mock_dataloader, # Pass list of batches
-        config=base_config,
+        config=pydantic_config, # Pass Pydantic model
         device=torch.device("cpu"),
-        checkpoint_dir=str(temp_checkpoint_dir), 
-        resume_from_checkpoint=str(checkpoint_path), # Pass resume path directly
-        # Pass other args matching constructor
-        log_interval=base_config.training.log_interval,
-        eval_interval=base_config.training.get("eval_interval", 1000),
-        save_interval=base_config.training.checkpoints.save_interval,
-        num_epochs=base_config.training.epochs,
-        use_amp=base_config.training.use_amp,
-        gradient_accumulation_steps=base_config.training.gradient_accumulation_steps,
-        max_grad_norm=base_config.training.max_grad_norm
+        resume_from_checkpoint=str(checkpoint_path) # Pass explicitly
     )
 
+    # Assert CheckpointManager was called correctly during init
+    MockCheckpointManager.assert_called_once()
+    call_args, call_kwargs = MockCheckpointManager.call_args
+    assert call_kwargs["config"] == pydantic_config.model_dump() # CheckpointManager gets the Pydantic model dump
+
+    # Assert _resume_from_checkpoint was effectively called via CheckpointManager
     mock_checkpoint_manager_instance.load_checkpoint.assert_called_once_with(str(checkpoint_path))
-    assert trainer.epoch == 1 
+
+    # Assert Trainer state was updated from loaded data
+    assert trainer.epoch == checkpoint_data_to_load["epoch"]
+    assert trainer.global_step == checkpoint_data_to_load["global_step"]
+    assert trainer.best_val_metric == checkpoint_data_to_load["best_val_metric"]
+    assert trainer.metrics == checkpoint_data_to_load["metrics"]
+
+# --- More Tests (If any) --- # 
