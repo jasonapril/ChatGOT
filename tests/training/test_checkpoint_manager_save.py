@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 import re
+import unittest.mock
 
 # Module under test
 from craft.training.checkpointing import CheckpointManager, CheckpointLoadError, TrainingState
@@ -367,10 +368,16 @@ def test_save_checkpoint_error_handling(checkpoint_manager, mock_objects_for_cm)
         mock_get_logger.return_value = mock_logger
         checkpoint_manager.logger = mock_logger
 
-        checkpoint_manager.save_checkpoint(
-            state=training_state, filename=filename
+        # Expect OSError now because save_checkpoint re-raises
+        with pytest.raises(OSError, match="Disk full"):
+            checkpoint_manager.save_checkpoint(
+                state=training_state, filename=filename
+            )
+
+        mock_torch_save.assert_called_once_with(
+            unittest.mock.ANY, # Check the dict was passed
+            save_path
         )
-        mock_torch_save.assert_called_once() # Ensure save was attempted
         # Assert on local mock logger
         mock_logger.error.assert_called_once()
         assert "Disk full" in mock_logger.error.call_args[0][0]

@@ -54,9 +54,12 @@ class TestTensorBoardLogger:
              patch('craft.training.callbacks.tensorboard.SummaryWriter', autospec=True) as mock_writer_class:
             tb_logger_callback.on_train_begin(trainer=mock_trainer)
             # Construct expected path using os.path.join for platform compatibility
-            expected_log_dir = os.path.join('mock/output/dir/run', 'tensorboard')
-            # Verify that the log_dir_absolute was set correctly based on the mocked Hydra config
+            # If log_dir_base is set in the fixture, that takes priority
+            expected_log_dir = os.path.abspath(tb_logger_callback.log_dir_base)
+            # Verify that the log_dir_absolute was set correctly based on the explicit config
             assert tb_logger_callback.log_dir_absolute == expected_log_dir
+            # Check that makedirs was called for the correct path
+            mock_makedirs.assert_called_with(expected_log_dir, exist_ok=True)
             # Assert SummaryWriter was called with the path determined by the callback
             mock_writer_class.assert_called_once_with(log_dir=tb_logger_callback.log_dir_absolute)
             assert tb_logger_callback.writer is mock_writer_class.return_value

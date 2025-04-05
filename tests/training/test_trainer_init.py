@@ -86,7 +86,9 @@ class TestTrainerInit:
             # checkpoint_dir=None, # REMOVED
             callbacks=trainer.callbacks,
             device=trainer.device,
-            tokenizer=None # Default tokenizer is None
+            tokenizer=None, # Default tokenizer is None
+            checkpoint_dir=None, # Expect None from default config
+            max_checkpoints_to_keep=5 # Expect default 5 as keep_last is None
         )
         assert trainer.checkpoint_manager == mock_checkpoint_manager_instance
 
@@ -231,7 +233,9 @@ class TestTrainerInit:
             config=test_config.model_dump(), # Check dumped config is passed
             callbacks=trainer.callbacks,
             device=trainer.device,
-            tokenizer=mock_tokenizer
+            tokenizer=mock_tokenizer,
+            checkpoint_dir=test_config.checkpoint_dir, # Expect None from fixture
+            max_checkpoints_to_keep=5 # Expect default 5 as keep_last is None in fixture
         )
 
         # Verify resume path triggered the load_checkpoint call in CheckpointManager

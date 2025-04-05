@@ -35,6 +35,7 @@ class TestTrainerGenerate:
         mock_config_obj.save_interval = 500
         mock_config_obj.save_steps_interval = 0
         mock_config_obj.checkpoint_dir = None
+        mock_config_obj.keep_last = None
         mock_config_obj.batch_size = 32 # Need this for init
         # Mock the model_dump method used by CheckpointManager
         mock_config_dict = {'batch_size': 32} # Example dumped dict
