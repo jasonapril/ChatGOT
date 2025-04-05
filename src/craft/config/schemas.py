@@ -57,6 +57,9 @@ class TrainingConfig(BaseModel):
     sample_max_new_tokens: Optional[int] = 100
     sample_temperature: Optional[float] = 0.8
     sample_start_text: Optional[str] = "The meaning of life is"
+    keep_last: Optional[int] = Field(None, description="Number of recent checkpoints to keep")
+    resume_from_checkpoint: Optional[str] = Field(None, description="Path to resume from")
+    checkpoint_dir: Optional[str] = Field(None, description="Directory to save checkpoints")
 
 
 # Placeholder DataConfig - needs details based on specific data loaders

@@ -206,8 +206,9 @@ class CheckpointManager:
 
         except Exception as e:
             self.logger.error(f"Failed to save checkpoint {filename}: {e}", exc_info=True)
-            # Return None or raise? For now, log and continue if possible
-            return None 
+            # Return None or raise? Let's raise to make errors visible.
+            # return None 
+            raise # Re-raise the caught exception
 
     def _parse_checkpoint_name(self, filename: str) -> Optional[Tuple[int, int]]:
         """Parses epoch and step from a checkpoint filename.

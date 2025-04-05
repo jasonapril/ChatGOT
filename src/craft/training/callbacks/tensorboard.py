@@ -36,9 +36,25 @@ class TensorBoardLogger(Callback):
         self.comment = comment
         self.writer: Optional[SummaryWriter] = None
         self.log_dir_absolute: Optional[str] = None # Store the final absolute path
+        self.experiment_name: Optional[str] = None # Store experiment name from trainer config
 
         if not _TENSORBOARD_AVAILABLE:
             self.logger.warning("TensorBoard not found. Install tensorboard (e.g., pip install tensorboard) to use TensorBoardLogger.")
+
+    def set_trainer(self, trainer):
+        """Set the trainer and attempt to get experiment name."""
+        super().set_trainer(trainer)
+        # Attempt to get experiment name from the main config attached to the trainer
+        if hasattr(trainer, 'config') and hasattr(trainer.config, 'experiment_name'):
+            self.experiment_name = trainer.config.experiment_name
+            self.logger.info(f"Retrieved experiment_name from trainer config: {self.experiment_name}")
+        else:
+             # Get experiment name from training config if available
+            if hasattr(trainer, 'training_config') and hasattr(trainer.training_config, 'experiment_name'):
+                 self.experiment_name = trainer.training_config.experiment_name
+                 self.logger.info(f"Retrieved experiment_name from trainer training_config: {self.experiment_name}")
+            else:
+                self.logger.warning("Could not find 'experiment_name' in trainer.config or trainer.training_config. Fallback log path construction might fail.")
 
     def set_log_dir_absolute(self, path: str):
         """Allows external setting of the absolute log directory, primarily for resuming."""
@@ -47,26 +63,30 @@ class TensorBoardLogger(Callback):
 
     def _initialize_writer(self):
         """Initializes the TensorBoard SummaryWriter."""
-        log_dir = None
-        try:
-            # Try getting log directory from Hydra first
-            hydra_cfg = HydraConfig.get()
-            hydra_run_dir = hydra_cfg.hydra.run.dir
-            log_dir = os.path.join(hydra_run_dir, "tensorboard") # Use Hydra path
-            self.logger.info(f"Using Hydra run directory for TensorBoard logs: {log_dir}")
-        except ValueError: # HydraConfig not set
-            self.logger.info("HydraConfig not available, using log_dir_base and experiment_id.")
-        except Exception as e: # Catch other potential errors from HydraConfig/OmegaConf
-            self.logger.warning(f"Could not get Hydra run directory: {e}. Falling back.")
+        # For testing/simplicity, prioritize the explicitly provided log_dir_base
+        if self.log_dir_base:
+            log_dir = os.path.abspath(self.log_dir_base)
+            self.logger.info(f"Using explicitly configured log_dir for TensorBoard: {log_dir}")
+        else:
+            # Fallback to Hydra logic only if log_dir_base is not provided
+            log_dir = None
+            try:
+                hydra_cfg = HydraConfig.get()
+                hydra_run_dir = hydra_cfg.hydra.run.dir
+                log_dir = os.path.join(hydra_run_dir, "tensorboard") 
+                self.logger.info(f"Using Hydra run directory for TensorBoard logs: {log_dir}")
+            except ValueError: 
+                self.logger.info("HydraConfig not available and no explicit log_dir provided.")
+            except Exception as e: 
+                self.logger.warning(f"Could not get Hydra run directory: {e}. Falling back.")
 
-        # Fallback or if Hydra path wasn't determined
-        if log_dir is None:
-            if not self.log_dir_base or not self.experiment_id:
-                self.logger.error("log_dir_base or experiment_id is not set, and Hydra path unavailable. Cannot initialize TensorBoard.")
-                return
-            # Use base directory and experiment ID
-            log_dir = os.path.abspath(os.path.join(self.log_dir_base, self.experiment_id))
-            self.logger.info(f"Using fallback directory for TensorBoard logs: {log_dir}")
+            if log_dir is None:
+                # Removed fallback logic using experiment_name as it was unreliable
+                self.logger.error(
+                    "Cannot initialize TensorBoard: No explicit 'log_dir' provided in config "
+                    "and could not determine Hydra run directory."
+                )
+                return # Cannot initialize writer
 
         # Store the final determined path
         self.log_dir_absolute = log_dir

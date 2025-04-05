@@ -16,6 +16,8 @@ from .base import BaseDataset
 # Remove direct import of specific dataset types unless absolutely needed for factory logic
 # from .dataset import CharDataset # Example, adjust if others are needed
 from .tokenizers.base import BaseTokenizer # Needed for collate setup
+# Remove import for SentencePieceTokenizer if no longer needed directly here
+# from .tokenizers.sentencepiece import SentencePieceTokenizer
 # Import specific collate functions if used directly
 # from .collation import character_collate_fn # Commented out - Module not found
 from functools import partial
@@ -214,20 +216,25 @@ def prepare_dataloaders_from_config(
         # because the user might only configure 'test', for example.
         # The check later ensures the loader is created if the key exists.
 
-    # 1. Instantiate Tokenizer (same as before)
+    # 1. Instantiate Tokenizer
     if tokenizer is None and "tokenizer" in data_cfg:
         try:
             logger.info(f"Instantiating tokenizer from config: {data_cfg.tokenizer.get('_target_', 'N/A')}")
             tokenizer_cfg = data_cfg.tokenizer
+            # Ensure it's a DictConfig for instantiation
             if not isinstance(tokenizer_cfg, DictConfig):
                  tokenizer_cfg = OmegaConf.create(tokenizer_cfg)
+            
+            # Standard instantiation - SentencePieceTokenizer __init__ now handles model_path
             tokenizer = hydra.utils.instantiate(tokenizer_cfg, _convert_="partial")
+            
             if not isinstance(tokenizer, BaseTokenizer):
                  logger.warning(f"Instantiated tokenizer is not a BaseTokenizer subclass: {type(tokenizer)}. May cause issues.")
             logger.info(f"Successfully instantiated tokenizer: {type(tokenizer).__name__}")
+
         except Exception as e:
             logger.error(f"Failed to instantiate tokenizer from config: {e}", exc_info=True)
-            tokenizer = None
+            tokenizer = None # Ensure tokenizer is None on failure
     elif tokenizer is not None:
          logger.info(f"Using provided tokenizer override: {type(tokenizer).__name__}")
     else:

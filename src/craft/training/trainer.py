@@ -98,7 +98,10 @@ class Trainer:
             config=self.config.model_dump() if self.config else {}, # Pass config as dict if needed
             callbacks=self.callbacks,
             device=self.device,
-            tokenizer=self.tokenizer # Pass tokenizer
+            tokenizer=self.tokenizer, # Pass tokenizer
+            checkpoint_dir=self.config.checkpoint_dir, # <<< Pass the directory
+            # Pass keep_last from TrainingConfig to manager's parameter
+            max_checkpoints_to_keep=self.config.keep_last if self.config.keep_last is not None else 5
         )
         
         # Training state

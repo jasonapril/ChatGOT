@@ -177,27 +177,29 @@ class TrainingLoop:
                     if self.max_grad_norm is not None:
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
 
+                    # Optimizer Step
                     if self.use_amp:
                         self.scaler.step(self.optimizer)
                     else:
                         self.optimizer.step()
-
                     self.scaler.update()
 
+                    # Scheduler Step
                     if self.scheduler is not None:
                         self.scheduler.step()
 
+                    # Zero Grad
                     self.optimizer.zero_grad(set_to_none=True)
 
                     # Increment global step *after* a successful optimizer step
                     global_step += 1
 
-                    # --- Periodic Checkpoint Save ---
+                    # --- Periodic Checkpoint Save (BEFORE max_steps check) ---
                     if self.checkpoint_manager and self.save_steps_interval > 0 and global_step > 0 and global_step % self.save_steps_interval == 0:
-                        filename = f"checkpoint_step_{global_step}.pt"
+                        filename = f"checkpoint_step_{global_step:06d}.pt" # Use padding
                         self.logger.info(f"[TrainingLoop] Step {global_step}: Triggering checkpoint save (filename: {filename})")
-
-                        # --- Construct state dictionary (Final Check) ---
+                        
+                        # Construct state dictionary (Final Check)
                         serializable_config = self.config # Start with original config
                         try:
                             # Try OmegaConf resolution if available
@@ -232,15 +234,15 @@ class TrainingLoop:
                         )
                         # --- End create TrainingState object --- #
 
-                        # Correct call signature for CheckpointManager.save_checkpoint
+                        # Save checkpoint
                         self.checkpoint_manager.save_checkpoint(
-                            state=state, # Pass the TrainingState instance now
+                            state=state, 
                             filename=filename,
-                            metrics=state.metrics, # Pass metrics from state
-                            is_best=False # Not based on validation
+                            metrics=state.metrics,
+                            is_best=False 
                         )
                     # --- End Periodic Checkpoint Save ---
-
+                    
                     # Calculate metrics for update
                     current_lr = self.optimizer.param_groups[0]['lr'] if self.scheduler else None
                     step_time = time.time() - last_log_time
@@ -263,13 +265,13 @@ class TrainingLoop:
                     step_token_accumulator = 0
                     last_log_time = time.time()
 
-                    # Check max_steps using the *updated* global_step and the *retrieved* max_steps
+                    # Step end callback is called with the *incremented* global_step
+                    self._callback_on_step_end(global_step, logs=step_logs)
+
+                    # Check max_steps using the *updated* global_step (AFTER checkpointing and callbacks)
                     if max_steps is not None and global_step >= max_steps:
                         self.logger.info(f"Reached max_steps ({max_steps}). Ending epoch early.")
                         break
-
-                    # Step end callback is called with the *incremented* global_step
-                    self._callback_on_step_end(global_step, logs=step_logs)
 
             except RuntimeError as e:
                 if "CUDA out of memory" in str(e):
