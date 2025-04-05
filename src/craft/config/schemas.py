@@ -106,10 +106,10 @@ class GenerationConfig(BaseModel):
     top_k: Optional[int] = Field(None, ge=1)
 
 
-# --- Main Application Schema ---
+# --- New Experiment Schema ---
 
-class AppConfig(BaseModel):
-    # Config groups loaded by Hydra
+class ExperimentConfig(BaseModel):
+    """Schema for the core experiment parameters nested under 'experiment' key."""
     model: ModelConfig
     training: TrainingConfig
     data: DataConfig
@@ -117,8 +117,17 @@ class AppConfig(BaseModel):
     scheduler: Optional[SchedulerConfig] = None # Scheduler is optional
     callbacks: CallbacksConfig = None # Callbacks are optional
     generation: GenerationConfig
+    # Allow extra fields within the experiment block if needed
+    model_config = {'extra': 'allow'}
 
-    # Top-level parameters
+# --- Main Application Schema (Modified) ---
+
+class AppConfig(BaseModel):
+    """Main application configuration schema, expecting experiment settings under 'experiment'."""
+    # Hydra composed groups (now nested under 'experiment')
+    experiment: ExperimentConfig
+
+    # Top-level parameters (remain at the top)
     project_name: str = "Craft"
     experiment_name: Optional[str] = "default_experiment"
     seed: int = 42

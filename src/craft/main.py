@@ -4,15 +4,16 @@ import logging
 import os
 import sys
 import torch
-from pydantic import ValidationError
+from pydantic import ValidationError, BaseModel
 from typing import Optional, List, Any
+from hydra.core.hydra_config import HydraConfig
 
 # Add project root to path if needed (adjust if running as a module)
 # project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # sys.path.insert(0, project_root)
 
 # --- Core Imports ---
-from craft.config.schemas import TrainingConfig, AppConfig # Import main config schema
+from craft.config.schemas import TrainingConfig, AppConfig, CallbackConfigEntry # Import main config schema and CallbackConfigEntry
 from craft.training.trainer import Trainer
 from craft.utils.logging import setup_logging # Keep logging setup
 from craft.utils.common import set_seed, setup_device # Import setup utilities
@@ -71,6 +72,7 @@ def main(cfg: DictConfig) -> None:
         # DataLoaders & Tokenizer
         log.info("Preparing dataloaders...")
         # prepare_dataloaders expects the root config containing the 'data' section
+        # Pass the whole validated config, it should find cfg.experiment.data
         train_loader, val_loader, test_loader, tokenizer = prepare_dataloaders_from_config(cfg)
         log.info(f"Dataloaders prepared. Train: {train_loader is not None}, Val: {val_loader is not None}, Test: {test_loader is not None}")
         if tokenizer:
@@ -78,36 +80,49 @@ def main(cfg: DictConfig) -> None:
 
         # Model
         log.info("Creating model...")
-        # create_model needs the model config section and potentially vocab size
-        vocab_size = getattr(tokenizer, 'vocab_size', None) if tokenizer else None
-        model = create_model_from_config(validated_cfg.model, vocab_size=vocab_size)
+        # Ensure vocab_size from tokenizer is passed to model config if needed
+        vocab_size = tokenizer.get_vocab_size() if tokenizer else None
+        log.info(f"Using vocab size: {vocab_size}")
+        
+        # Pass the raw DictConfig from Hydra to the factory, not the validated Pydantic object
+        # The factory and hydra instantiate work better with DictConfig
+        model_cfg_raw = cfg.experiment.model # Get the original DictConfig
+        model = create_model_from_config(model_cfg_raw, vocab_size=vocab_size)
         model.to(device) # Ensure model is on the correct device
         log.info(f"Model created: {model.__class__.__name__}")
 
         # Optimizer
         log.info("Creating optimizer...")
         # create_optimizer needs optimizer config and model parameters
-        optimizer = create_optimizer(model, validated_cfg.optimizer)
+        optimizer = create_optimizer(model, validated_cfg.experiment.optimizer)
         log.info(f"Optimizer created: {optimizer.__class__.__name__}")
 
         # Scheduler (Optional)
         scheduler = None
-        if validated_cfg.scheduler:
+        if validated_cfg.experiment.scheduler:
             log.info("Creating scheduler...")
             # create_scheduler needs optimizer and scheduler config
-            scheduler = create_scheduler(optimizer, validated_cfg.scheduler)
+            scheduler = create_scheduler(optimizer, validated_cfg.experiment.scheduler)
             log.info(f"Scheduler created: {scheduler.__class__.__name__}")
         else:
             log.info("No scheduler configured.")
 
         # Callbacks (Optional)
         callbacks_list: List[Any] = []
-        if validated_cfg.callbacks:
+        if validated_cfg.experiment.callbacks:
             log.info("Instantiating callbacks...")
-            for name, cb_conf in validated_cfg.callbacks.items():
-                 if cb_conf and isinstance(cb_conf, (DictConfig, dict)) and '_target_' in cb_conf:
+            for name, cb_conf in validated_cfg.experiment.callbacks.items():
+                 if cb_conf and isinstance(cb_conf, (DictConfig, dict, BaseModel)) and hasattr(cb_conf, '_target_'):
                      try:
                          # Use Hydra's instantiate for callbacks
+                         callback_instance = hydra.utils.instantiate(cb_conf)
+                         callbacks_list.append(callback_instance)
+                         log.info(f"  Instantiated callback '{name}': {type(callback_instance).__name__}")
+                     except Exception as e:
+                         log.error(f"  Failed to instantiate callback '{name}': {e}", exc_info=True)
+                 # Adjusted condition for Pydantic object
+                 elif isinstance(cb_conf, CallbackConfigEntry):
+                     try:
                          callback_instance = hydra.utils.instantiate(cb_conf)
                          callbacks_list.append(callback_instance)
                          log.info(f"  Instantiated callback '{name}': {type(callback_instance).__name__}")
@@ -126,11 +141,9 @@ def main(cfg: DictConfig) -> None:
             val_dataloader=val_loader,
             scheduler=scheduler,
             device=device,
-            config=validated_cfg.training, # Pass the validated TrainingConfig sub-schema
+            config=validated_cfg.experiment.training, # Pass the nested TrainingConfig
             callbacks=callbacks_list,
             tokenizer=tokenizer
-            # Add compile_model etc. if needed, pulling from validated_cfg.training
-            # compile_model=validated_cfg.training.compile_model 
         )
         log.info("Trainer initialized.")
 

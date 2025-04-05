@@ -1,24 +1,39 @@
-# This file ONLY overrides values from the main config (conf/config.yaml)
-# and its defaults.
+# conf/experiment/chatgot_95m_subword.yaml
+defaults:
+  - /model: transformer_model # Load default model into this experiment's scope
+  - /training: default
+  - /data: got_s1_subword
+  - /optimizer: adamw
+  - /scheduler: cosine
+  - /callbacks: default
+  - /generation: default
+  - _self_ # Allows defining overrides below
 
+# Defaults from conf/config.yaml are merged unless overridden here
+
+# --- Overrides for Data Config --- #
 data:
   batch_size: 16
   num_workers: 0
   block_size: 1024
-  # Top-level tokenizer config (might be ignored if defined below)
+  # Override default tokenizer config - assume this tokenizer is already trained
+  # The actual tokenizer logic should handle loading this based on model_path
   tokenizer:
     _target_: craft.data.tokenizers.subword.SubwordTokenizer
+    # REMOVED nested config, provide path directly if tokenizer load supports it
+    # If load expects a config object, keep this structure but ensure it matches load method
     config:
       model_path: outputs/tokenizers/got_full_subword_8k
-      vocab_size: 8000
-  # --- NESTED DATASETS SECTION --- #
+      vocab_size: 8000 # This might be ignored if loading pre-trained
+
+  # Override datasets config
   datasets:
     train:
       dataset:
         _target_: craft.data.dataset.TextDataset
         file_paths:
           - data/raw/got/game_of_thrones.txt
-        block_size: ${data.block_size}
+        block_size: ${experiment.data.block_size}
         # Explicitly define tokenizer config for this dataset
         tokenizer:
           _target_: craft.data.tokenizers.subword.SubwordTokenizer
@@ -31,7 +46,7 @@ data:
         _target_: craft.data.dataset.TextDataset
         file_paths:
           - data/raw/got/game_of_thrones.txt
-        block_size: ${data.block_size}
+        block_size: ${experiment.data.block_size}
         # Explicitly define tokenizer config for this dataset
         tokenizer:
           _target_: craft.data.tokenizers.subword.SubwordTokenizer
@@ -39,53 +54,56 @@ data:
             model_path: outputs/tokenizers/got_full_subword_8k
             vocab_size: 8000
       dataloader: {}
-  # --- END NESTED DATASETS SECTION --- #
 
 # --- Overrides for Model Config --- #
 model:
-  # Override specific model config values inherited from the default model
-  # The _target_ for the model itself comes from conf/config.yaml defaults
+  # Override config params inherited from default model config
   config:
-    # We might not need _target_ here if just overriding values
     d_model: 768
     n_layers: 10
     n_head: 8
     d_hid: 3072
-    max_seq_length: ${data.block_size}
+    max_seq_length: ${experiment.data.block_size}
 
 # --- Overrides for Training Config --- #
 training:
-  # Override specific training values inherited from the default training config
   log_interval: 1
   save_steps_interval: 1000
-  batch_size: ${data.batch_size}
+  batch_size: ${experiment.data.batch_size}
   max_steps: 1000
   warmup_steps: 100
   weight_decay: 0.1
-  sample_start_text: "The night is dark and full of"
+  sample_start_text: The night is dark and full of
+  # Specify any other training overrides here
 
 # --- Overrides for Optimizer Config --- #
 optimizer:
   # Override optimizer params inherited from default optimizer config
   lr: 0.0001
-  weight_decay: ${training.weight_decay}
+  weight_decay: ${experiment.training.weight_decay}
 
 # --- Overrides for Scheduler Config --- #
 scheduler:
   # Override scheduler params inherited from default scheduler config
-  T_max: ${training.max_steps}
-  eta_min: 1e-6
+  T_max: ${experiment.training.max_steps}
+  eta_min: 1.0e-06
 
 # --- Overrides for Callbacks --- #
-# Callbacks section likely defines which callbacks are active
-# The specific targets are defined here, overriding the default callback group
 callbacks:
   tensorboard:
     _target_: craft.training.callbacks.TensorBoardLogger
+    # log_dir: will be derived from output dir
   checkpoint:
     _target_: craft.training.callbacks.CheckpointCallback
+    # Add any checkpoint specific overrides here
   sample_generation:
     _target_: craft.training.callbacks.SampleGenerationCallback
+    # Add any generation specific overrides here
+
+# --- Optional Generation Overrides (if needed) --- #
+# generation:
+#   temperature: 0.7
+#   top_k: 50
 
 # generation settings seem misplaced here, should be top level or specific tool config
 # generation:

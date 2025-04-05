@@ -3,25 +3,10 @@
 # @package _global_
 
 defaults:
-  # Specify configuration groups to compose.
-  # The order matters; later entries override earlier ones.
-  - experiment: null      # Expect override from command line or specific config
-  - model: transformer_model
-  - training: default
-  - data: got_s1_subword
-  - optimizer: adamw
-  - scheduler: cosine # Revert to match available file
-  - callbacks: default    # Default callbacks configuration
-  # - tokenizer: default_hf # REMOVE tokenizer group
-  - _self_              # Allows defining variables directly in this file
-
-# Example top-level configuration parameters (optional)
-# These could also live in their own group files (e.g., conf/paths/default.yaml)
-# paths:
-#   # Default output directory pattern
-#   output_dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}" # Hydra automatically sets this based on hydra.run.dir
-#   # Example: Absolute path (use with caution)
-#   # data_root: /path/to/datasets 
+  - _self_
+  # Experiment config is now mandatory and self-contained
+  - experiment: ???
+  # REMOVED base experiment loading and override logic
 
 # General settings
 project_name: "Craft"
@@ -29,8 +14,8 @@ experiment_name: "default_experiment" # Add experiment name field
 
 # Add other top-level or default settings as needed 
 
-# Configuration for data handling
-data: ??? # Ensure this is resolved by defaults
+# Configuration for data handling - REMOVED `data: ???` as it's handled within experiment
+# data: ??? # Ensure this is resolved by defaults
 
 # Configuration for tokenizer (placeholder)
 # tokenizer: ??? # REMOVE tokenizer placeholder
@@ -56,12 +41,13 @@ hydra:
     dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
 
-# Add a new group for generation parameters
-generation:
-  start_prompt: "The meaning of life is\n"
-  max_new_tokens: 200
-  temperature: 0.8
-  top_k: null # null corresponds to Python None, or you can set an integer like 50 
+# Remove the conflicting top-level generation block
+# # Add a new group for generation parameters
+# generation:
+#   start_prompt: "The meaning of life is\n"
+#   max_new_tokens: 200
+#   temperature: 0.8
+#   top_k: null # null corresponds to Python None, or you can set an integer like 50 
 
 # Seed for reproducibility
 device: auto

@@ -138,6 +138,7 @@ This file serves as the working memory for all active tasks in the project. It's
 
 - ### 🟠 Review `conf` Directory
   - Standardize. Ensure good defaults. Maintain a separation between configs used for tests, experiments, etc. What should the major categories be?
+  - We may need a better way to manage these configs.
 
 - ### 🟠 Add Ability to Train on MNIST
   - This marks a major transition to multimodality. This will also ensure a higher degree of modularity.
@@ -167,7 +168,7 @@ This file serves as the working memory for all active tasks in the project. It's
   - **Goal**: Perform a training run using a small model variant (configured for low-spec devices) on the Game of Thrones Season 1 dataset, utilizing a subword tokenizer.
   - **Context**: This serves as an initial test case for the refactored data pipeline (tokenizer flexibility) and aligns with the goal of optimizing for low-spec devices. Requires GoT S1 dataset prepared with a subword tokenizer (e.g., BPE or SentencePiece).
   - **Depends on**: Refactor Data Pipeline for Tokenizer Flexibility
-  - **Status**: 🟡 In Progress <# Started 2025-04-05 with 1M param model #>
+  - **Status**: 🟡 Active <# Resuming attempt for 95M param model variant on 2025-04-05. Previously started 1M param model. #>
   - **Priority**: Medium (once dependency met)
 
 ### CI/CD & Deployment (Future)

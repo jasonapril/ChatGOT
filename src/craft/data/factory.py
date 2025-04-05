@@ -188,18 +188,19 @@ def prepare_dataloaders_from_config(
 ) -> Tuple[Optional[DataLoader], Optional[DataLoader], Optional[DataLoader], Optional[BaseTokenizer]]:
     """
     Prepares train, validation, and test DataLoaders along with the tokenizer
-    based on a Hydra configuration object.
+    based on a Hydra configuration object (expecting data config under config.experiment.data).
     Raises ValueError if instantiation fails for train or val splits or if required splits are missing.
     """
     train_loader, val_loader, test_loader = None, None, None
     tokenizer = tokenizer_override # Prioritize override
 
-    if "data" not in config:
-        logger.error("Configuration is missing the required 'data' section.")
-        raise ValueError("Configuration is missing the required 'data' section.")
-    data_cfg = config.data
+    # Check for experiment and nested data sections
+    if "experiment" not in config or not hasattr(config.experiment, "data"):
+        logger.error("Configuration is missing the required 'experiment.data' section.")
+        raise ValueError("Configuration is missing the required 'experiment.data' section.")
+    data_cfg = config.experiment.data # <--- Access nested data config
 
-    # Check for datasets section
+    # Check for datasets section within data_cfg
     if "datasets" not in data_cfg:
          raise ValueError("Configuration missing 'data.datasets' section.")
 
@@ -262,17 +263,24 @@ def prepare_dataloaders_from_config(
             try:
                 # IMPORTANT: Create a copy and remove 'tokenizer' if it exists
                 # This prevents passing it as an unexpected keyword arg to the dataset's __init__
-                split_dataset_cfg_for_instantiate = OmegaConf.create(OmegaConf.to_container(split_dataset_cfg_orig, resolve=True)) # Create a resolved copy
-                if 'tokenizer' in split_dataset_cfg_for_instantiate:
-                    del split_dataset_cfg_for_instantiate['tokenizer']
-                    logger.debug(f"Removed 'tokenizer' key before instantiating dataset for split '{split}'.")
+                # split_dataset_cfg_for_instantiate = OmegaConf.create(OmegaConf.to_container(split_dataset_cfg_orig, resolve=True)) # Create a resolved copy
+                # if 'tokenizer' in split_dataset_cfg_for_instantiate:
+                #     del split_dataset_cfg_for_instantiate['tokenizer']
+                #     logger.debug(f"Removed 'tokenizer' key before instantiating dataset for split '{split}'.")
                 
+                # Use the original split dataset config directly
+                split_dataset_cfg_for_instantiate = split_dataset_cfg_orig
+
                 # Check if _target_ exists before attempting instantiation
                 if '_target_' not in split_dataset_cfg_for_instantiate:
                     raise ValueError(f"Dataset configuration for split '{split}' is missing the '_target_' key.")
 
-                # Instantiate Dataset using the modified config
-                dataset = hydra.utils.instantiate(split_dataset_cfg_for_instantiate, _convert_="partial")
+                # Instantiate Dataset using the original config, PASSING the main tokenizer instance
+                dataset = hydra.utils.instantiate(
+                    split_dataset_cfg_for_instantiate, 
+                    tokenizer=tokenizer,  # Pass the instantiated tokenizer
+                    _convert_="partial"
+                )
 
                 # --- Validate Dataset Type ---
                 if not isinstance(dataset, Dataset):
