@@ -19,9 +19,13 @@ class SubwordTokenizer(BaseTokenizer):
         
         logging.info(f"SubwordTokenizer initialized with vocab_size={self.vocab_size}")
         
-    def train(self, text_file: str, output_dir: str) -> None:
-        """Train the tokenizer on the input text file."""
-        logging.info(f"Training SubwordTokenizer on {text_file}")
+    def train(self, files: List[str], output_dir: str) -> None:
+        """Train the tokenizer on a list of input text files."""
+        logging.info(f"Training SubwordTokenizer on {len(files)} files.")
+        if not files:
+            raise ValueError("Input file list cannot be empty for training.")
+        logging.debug(f"Training files: {files}")
+        
         # Initialize a BPE tokenizer
         self.tokenizer = Tokenizer(models.BPE())
         
@@ -40,7 +44,7 @@ class SubwordTokenizer(BaseTokenizer):
         )
         
         # Train the tokenizer
-        self.tokenizer.train(files=[text_file], trainer=trainer)
+        self.tokenizer.train(files=files, trainer=trainer)
         
         # Save the tokenizer
         os.makedirs(output_dir, exist_ok=True)

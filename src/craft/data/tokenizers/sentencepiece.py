@@ -25,17 +25,23 @@ class SentencePieceTokenizer(BaseTokenizer):
         self.sp = None
         self.model_path = None
         
-    def train(self, text_file: str, output_dir: str) -> None:
-        """Train the SentencePiece model on the input text file."""
+    def train(self, files: List[str], output_dir: str) -> None:
+        """Train the SentencePiece model on a list of input text files."""
+        if not files:
+            raise ValueError("Input file list cannot be empty for training.")
+            
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
         
         # Set up model path
         self.model_path = os.path.join(output_dir, self.model_prefix)
         
+        # Join the list of files into a comma-separated string for SentencePiece
+        input_files_str = ",".join(files)
+        
         # Train the model
         spm.SentencePieceTrainer.train(
-            input=text_file,
+            input=input_files_str, # Pass comma-separated string
             model_prefix=self.model_path,
             vocab_size=self.vocab_size,
             character_coverage=self.character_coverage,

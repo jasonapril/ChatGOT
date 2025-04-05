@@ -116,16 +116,22 @@ class TestSentencePieceTokenizer:
         mock_sp_processor_cls.return_value = mock_sp_processor
         
         tokenizer = SentencePieceTokenizer(config=default_sp_config)
-        input_text_file = str(tmp_path / "input.txt")
-        (tmp_path / "input.txt").touch() # Create dummy file
+        # Change to a list of files
+        input_files_list = [str(tmp_path / "input1.txt"), str(tmp_path / "input2.txt")]
+        for f in input_files_list:
+            Path(f).touch() # Create dummy files
         output_dir = str(tmp_path / "sp_output")
         
-        tokenizer.train(input_text_file, output_dir)
+        # Join into comma-separated string for the expected call arg
+        input_files_str = ",".join(input_files_list)
+        
+        # Call train with the list
+        tokenizer.train(input_files_list, output_dir)
         
         # 1. Verify SentencePieceTrainer.train was called correctly
         expected_model_path_prefix = os.path.join(output_dir, default_sp_config['model_prefix'])
         mock_sp_trainer_cls.train.assert_called_once_with(
-            input=input_text_file,
+            input=input_files_str, # Expect comma-separated string
             model_prefix=expected_model_path_prefix,
             vocab_size=default_sp_config['vocab_size'],
             character_coverage=default_sp_config['character_coverage'],

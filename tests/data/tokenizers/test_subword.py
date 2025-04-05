@@ -113,10 +113,10 @@ class TestSubwordTokenizer:
         mock_bpe_trainer_cls.return_value = mock_bpe_trainer
         
         tokenizer = SubwordTokenizer(config=default_subword_config)
-        input_text_file = "dummy_train.txt"
+        input_files = ["dummy_train1.txt", "dummy_train2.txt"]
         output_dir = "dummy_output_dir"
         
-        tokenizer.train(input_text_file, output_dir)
+        tokenizer.train(input_files, output_dir)
         
         # 1. Verify Tokenizer, Model, PreTokenizer, Trainer were instantiated
         mock_bpe_model_cls.assert_called_once()
@@ -130,8 +130,8 @@ class TestSubwordTokenizer:
         # 2. Verify pre_tokenizer was set
         assert mock_hf_tokenizer.pre_tokenizer == mock_byte_level_pre_tokenizer
         
-        # 3. Verify tokenizer.train was called
-        mock_hf_tokenizer.train.assert_called_once_with(files=[input_text_file], trainer=mock_bpe_trainer)
+        # 3. Verify tokenizer.train was called with the list of files
+        mock_hf_tokenizer.train.assert_called_once_with(files=input_files, trainer=mock_bpe_trainer)
         
         # 4. Verify tokenizer.save was called
         expected_save_path = os.path.join(output_dir, "tokenizer.json")
