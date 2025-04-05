@@ -14,6 +14,10 @@ import torch.nn as nn
 from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
 import torch.nn.functional as F
 from omegaconf import DictConfig
+import hydra
+
+# Setup logger for this module
+logger = logging.getLogger(__name__)
 
 # Import from the new location
 # Remove this import to break circular dependency. Checkpointing should be handled externally.
@@ -288,15 +292,44 @@ class GenerativeModel(Model):
         batch_size = input_ids.shape[0]
         device = input_ids.device
         
+        # --- Start: Input Truncation --- #
+        max_input_len = self.max_seq_length - max_new_tokens
+        if max_input_len < 0:
+            # This case is problematic - cannot generate anything if max_new_tokens > max_seq_length
+            # Raise an error or issue a warning?
+            logger.warning(
+                f"max_new_tokens ({max_new_tokens}) is greater than max_seq_length "
+                f"({self.max_seq_length}). Cannot generate any tokens. "
+                f"Returning original input."
+            )
+            # Or maybe allow generating up to max_seq_length if prompt is empty?
+            # For now, let's just return input or maybe truncated input to max_seq_length.
+            # Returning input seems safest.
+            return input_ids 
+            # Alternative: max_input_len = 0 # Allow empty prompt only
+
+        if input_ids.size(1) > max_input_len:
+            logger.warning(
+                f"Input prompt length ({input_ids.size(1)}) exceeds max allowed input length "
+                f"({max_input_len} = max_seq_length {self.max_seq_length} - max_new_tokens {max_new_tokens}). "
+                f"Truncating prompt to last {max_input_len} tokens."
+            )
+            input_ids = input_ids[:, -max_input_len:]
+        # --- End: Input Truncation --- #
+
         generated_tokens = input_ids.clone()
         stop_generation = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
         with torch.no_grad():
             for i in range(max_new_tokens):
-                # 1. Prepare inputs: Truncate if necessary
+                # 1. Prepare inputs: Context window management within the loop
+                # The input to the model should be the current sequence, 
+                # potentially truncated if it exceeds max_seq_length.
                 current_seq_len = generated_tokens.size(1)
                 if current_seq_len > self.max_seq_length:
-                    # Keep only the last max_seq_length tokens
+                    # If sequence grows beyond max length, take the last `max_seq_length` tokens
+                    # Note: This means the effective context might shrink over time
+                    # if max_new_tokens is large. A sliding window approach might be better.
                     model_input = generated_tokens[:, -self.max_seq_length:]
                 else:
                     model_input = generated_tokens
