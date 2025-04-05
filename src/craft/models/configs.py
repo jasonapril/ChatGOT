@@ -29,7 +29,7 @@ class LanguageModelConfig(GenerativeModelConfig):
     """Config for Language Models"""
     model_type: str = Field("language", description="Model type set to language.")
     architecture: Optional[str] = Field(None, description="Name for the specific model architecture (e.g., transformer, rnn).")
-    vocab_size: int = Field(..., description="Size of the vocabulary (required).")
+    vocab_size: Optional[int] = Field(None, description="Size of the vocabulary (often inferred).")
     d_model: int = Field(768, description="Model dimension.")
     n_head: int = Field(12, description="Number of attention heads.")
     d_hid: Optional[int] = Field(None, description="Hidden dimension in feed-forward layers.")
@@ -69,3 +69,15 @@ class MultiModalModelConfig(BaseModelConfig):
     language_config: Optional[LanguageModelConfig] = None 
     vision_config: Optional[VisionModelConfig] = None
     # ... other multimodal-specific fields 
+
+# --- Simple RNN Config --- #
+class SimpleRNNConfig(LanguageModelConfig):
+    """Config for Simple RNN Models"""
+    model_type: str = Field("language", description="Model type set to language.")
+    architecture: str = Field("simple_rnn", description="Architecture set to simple_rnn.")
+    # RNN specific fields
+    hidden_size: int = Field(512, description="Size of the RNN hidden state.")
+    num_layers: int = Field(2, description="Number of RNN layers.")
+    # vocab_size, d_model (used as input_size), dropout etc. are inherited
+    # We might alias d_model to input_size for clarity if needed later.
+    # Ensure d_model is interpreted as input_size for RNN's embedding/input layer. 

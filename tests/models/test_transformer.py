@@ -3,8 +3,10 @@ Unit tests for the TransformerModel class.
 """
 import pytest
 import torch
+from unittest.mock import MagicMock, patch
+from pydantic import ValidationError
 
-from craft.models.base import LanguageModelConfig # Transformer uses LM config
+from craft.models.configs import LanguageModelConfig # Transformer uses LM config
 from craft.models.transformer import TransformerModel
 
 class TestTransformerModel:

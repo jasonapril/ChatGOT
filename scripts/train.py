@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from typing import Optional, Dict, Any, List
 
 # Import dataloader factory directly at the top level
-from craft.data.base import prepare_dataloaders_from_config
+from craft.data import prepare_dataloaders_from_config
 
 # Import utility functions here
 try:
@@ -91,38 +91,25 @@ def main(cfg: DictConfig) -> None:
 
         # --- Create DataLoaders ---
         logger.info("Creating dataloaders...")
-        # Assume data_config is part of validated_cfg now
-        data_config = validated_cfg.data
-        # Instantiate dataloaders using the factory function
-        # Use hydra's get_original_cwd() to resolve relative paths in config
-        original_cwd = hydra.utils.get_original_cwd()
-        # Get num_workers safely from Pydantic model
-        num_workers = data_config.num_workers if hasattr(data_config, 'num_workers') and data_config.num_workers is not None else 0
-
-        train_loader, val_loader, test_loader = prepare_dataloaders_from_config(
-            data_config=data_config,
-            batch_size=validated_cfg.training.batch_size, # Use batch size from training config
-            num_workers=num_workers,
-            original_cwd=original_cwd
-        )
-        if train_loader is None:
-            raise ValueError("Training dataloader could not be created.")
-        logger.info("Dataloaders created.")
+        try:
+            # Pass the main config object directly
+            train_loader, val_loader, test_loader, tokenizer = prepare_dataloaders_from_config(cfg)
+        
+            if train_loader is None:
+                logger.error("Failed to create train dataloader. Exiting.")
+                sys.exit(1)
+            logger.info("Dataloaders created.")
+        except Exception as e:
+            logger.error(f"Failed to create dataloaders: {e}")
+            sys.exit(1)
 
         # --- Load Tokenizer (for saving with checkpoints) ---
-        tokenizer: Optional[BaseTokenizer] = None
-        # Assuming CharLevelTokenizer for GoT example, load from known preprocessed path
-        # Path needs to be relative to the original CWD
-        tokenizer_path = os.path.join(original_cwd, "data", "processed", "got", "char_level", "tokenizer")
-        logger.info(f"Attempting to load tokenizer from preprocessed path: {tokenizer_path}")
-        if os.path.isdir(tokenizer_path):
-            try:
-                tokenizer = CharLevelTokenizer.load(tokenizer_path)
-                logger.info(f"Successfully loaded tokenizer for checkpoint saving: {type(tokenizer).__name__}")
-            except Exception as e:
-                logger.warning(f"Could not load tokenizer from {tokenizer_path}: {e}. Checkpoints will not include tokenizer.")
+        # tokenizer is now returned by prepare_dataloaders_from_config
+        # Ensure it's captured and used below
+        if tokenizer is None:
+             logger.warning("prepare_dataloaders_from_config did not return a tokenizer.")
         else:
-            logger.warning(f"Tokenizer directory not found at {tokenizer_path}. Checkpoints will not include tokenizer.")
+            logger.info(f"Tokenizer returned from data factory: {type(tokenizer).__name__}")
 
         # --- Determine vocab_size (example: infer from dataset or LOADED tokenizer) ---
         # If vocab_size is needed by the model and not set, try to infer it

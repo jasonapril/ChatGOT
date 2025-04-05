@@ -8,7 +8,7 @@ defaults:
   - experiment: null      # Expect override from command line or specific config
   - model: transformer_model
   - training: default
-  - data: got_char_level
+  - data: got_s1_subword
   - optimizer: adamw
   - scheduler: cosine # Revert to match available file
   - callbacks: default    # Default callbacks configuration

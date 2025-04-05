@@ -1,65 +1,97 @@
-# Inherit from base config
-defaults:
-  - _self_
-  - ../data/got_subword_level
-  - ../model/transformer_95m
-  - training/default
+# This file ONLY overrides values from the main config (conf/config.yaml)
+# and its defaults.
 
 data:
-  # Data paths
-  train_path: data/raw/got/game_of_thrones.txt
-  val_path: data/raw/got/game_of_thrones.txt
-  processed_dir: data/processed/got
-
-  # Processing settings
-  block_size: 256
-  train_split: 0.9
-  val_split: 0.1
-  num_workers: 4
-  batch_size: 32
-
-  # Tokenizer settings
+  batch_size: 16
+  num_workers: 0
+  block_size: 1024
+  # Top-level tokenizer config (might be ignored if defined below)
   tokenizer:
-    type: subword
-    vocab_size: 32000
-    pad_token: "<pad>"
-    unk_token: "<unk>"
-    bos_token: "<s>"
-    eos_token: "</s>"
+    _target_: craft.data.tokenizers.subword.SubwordTokenizer
+    config:
+      model_path: outputs/tokenizers/got_full_subword_8k
+      vocab_size: 8000
+  # --- NESTED DATASETS SECTION --- #
+  datasets:
+    train:
+      dataset:
+        _target_: craft.data.dataset.TextDataset
+        file_paths:
+          - data/raw/got/game_of_thrones.txt
+        block_size: ${data.block_size}
+        # Explicitly define tokenizer config for this dataset
+        tokenizer:
+          _target_: craft.data.tokenizers.subword.SubwordTokenizer
+          config:
+            model_path: outputs/tokenizers/got_full_subword_8k
+            vocab_size: 8000
+      dataloader: {}
+    val:
+      dataset:
+        _target_: craft.data.dataset.TextDataset
+        file_paths:
+          - data/raw/got/game_of_thrones.txt
+        block_size: ${data.block_size}
+        # Explicitly define tokenizer config for this dataset
+        tokenizer:
+          _target_: craft.data.tokenizers.subword.SubwordTokenizer
+          config:
+            model_path: outputs/tokenizers/got_full_subword_8k
+            vocab_size: 8000
+      dataloader: {}
+  # --- END NESTED DATASETS SECTION --- #
 
-  # Dataset settings
-  dataset:
-    type: pickled
-    train_file: game_of_thrones_train.pkl
-    val_file: game_of_thrones_val.pkl
-    block_size: 256
-    num_workers: 4
-    batch_size: 32
-
+# --- Overrides for Model Config --- #
 model:
-  vocab_size: 32000  # Match tokenizer vocab size
-  block_size: 256
-  n_layer: 12
-  n_head: 12
-  n_embd: 768
-  dropout: 0.1
-  bias: true
+  # Override specific model config values inherited from the default model
+  # The _target_ for the model itself comes from conf/config.yaml defaults
+  config:
+    # We might not need _target_ here if just overriding values
+    d_model: 768
+    n_layers: 10
+    n_head: 8
+    d_hid: 3072
+    max_seq_length: ${data.block_size}
 
+# --- Overrides for Training Config --- #
 training:
-  batch_size: 32
-  gradient_accumulation_steps: 2
-  learning_rate: 3e-4
+  # Override specific training values inherited from the default training config
+  log_interval: 1
+  save_steps_interval: 1000
+  batch_size: ${data.batch_size}
   max_steps: 1000
   warmup_steps: 100
   weight_decay: 0.1
-  max_grad_norm: 1.0
-  use_amp: true
-  time_save_interval_seconds: 300  # 5 minutes
-  log_interval: 1  # Log every batch
-  generation:
-    prompt: "The night is dark and full of"
-    max_new_tokens: 200
-    temperature: 0.8
-    top_k: 50
-    top_p: 0.9
-    repetition_penalty: 1.1 
+  sample_start_text: "The night is dark and full of"
+
+# --- Overrides for Optimizer Config --- #
+optimizer:
+  # Override optimizer params inherited from default optimizer config
+  lr: 0.0001
+  weight_decay: ${training.weight_decay}
+
+# --- Overrides for Scheduler Config --- #
+scheduler:
+  # Override scheduler params inherited from default scheduler config
+  T_max: ${training.max_steps}
+  eta_min: 1e-6
+
+# --- Overrides for Callbacks --- #
+# Callbacks section likely defines which callbacks are active
+# The specific targets are defined here, overriding the default callback group
+callbacks:
+  tensorboard:
+    _target_: craft.training.callbacks.TensorBoardLogger
+  checkpoint:
+    _target_: craft.training.callbacks.CheckpointCallback
+  sample_generation:
+    _target_: craft.training.callbacks.SampleGenerationCallback
+
+# generation settings seem misplaced here, should be top level or specific tool config
+# generation:
+#   prompt: The night is dark and full of
+#   max_new_tokens: 200
+#   temperature: 0.8
+#   top_k: 50
+#   top_p: 0.9
+#   repetition_penalty: 1.1 

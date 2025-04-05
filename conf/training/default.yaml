@@ -1,4 +1,5 @@
 # conf/training/default.yaml
+
 epochs: 5 # Set to 5 epochs
 use_amp: True
 gradient_accumulation_steps: 2
@@ -15,6 +16,15 @@ sample_max_new_tokens: 100
 sample_temperature: 0.8
 sample_start_text: "The meaning of life is"
 
+# Default training configuration values
+batch_size: 32
+# learning_rate: 3e-4 # Defined in optimizer config
+max_steps: 1000
+warmup_steps: 100
+weight_decay: 0.1 # Note: weight_decay is typically part of the optimizer config
+
+# Redundant generation block removed - it's defined in config.yaml
+
 # REMOVE Redundant generation block (already defined in config.yaml)
 # Generation config used by Trainer._generate_sample_and_log
 generation:
@@ -23,12 +33,4 @@ generation:
   temperature: 0.8
   top_k: 50
   top_p: 0.9
-  repetition_penalty: 1.1
-
-# Default training configuration - REMOVED nested 'training:' key
-# Training settings - these are now top-level within this file
-batch_size: 32
-learning_rate: 3e-4
-max_steps: 1000
-warmup_steps: 100
-weight_decay: 0.1 
+  repetition_penalty: 1.1 

@@ -48,7 +48,17 @@ This document tracks tasks related to the development and improvement of the Flo
 
 ## Upcoming Tasks
 
-### Make System for Goals & Ensure Tasks Align with Goals Even If the Goals Change
+- ### 🟠 Review Flow Alignment & Identify System Improvements
+  - **Goal**: Ensure development practices align with Flow principles and improve the Flow system's effectiveness based on recent work.
+  - **Sub-tasks**:
+    - [x] Review recent debugging work (test fixing) against Flow principles (`flow/flow.md`). ✅
+    - [ ] Review recent debugging work against Flow protocol (`flow/flow.md`), especially `tasks.md` update adherence. ⏳
+    - [ ] Review `flow/meta/` contents for relevance, cruft, and potential refinements.
+    - [ ] Review `system/guidelines_and_conventions.md` for any necessary updates discovered during the review.
+    - [ ] Brainstorm and document specific improvements for the Flow system (e.g., `tasks.md` update triggers, definition of "significant step", logging integration, periodic checks).
+    - [ ] Check `flow/domains/` for potential additions based on recent work (e.g., `pytest_debugging.md`?).
+  - **Status**: 🟡 To Do
+  - **Priority**: Medium
 
 ### Create Short-term Buffer Mechanism
 - **Description**: Implement a system for temporarily storing ideas and thoughts before proper organization
@@ -83,6 +93,8 @@ This document tracks tasks related to the development and improvement of the Flo
 - **Links**: [Guidelines](../system/guidelines.md)
 
 ## User-Added Tasks to Review
+
+### Make System for Goals & Ensure Tasks Align with Goals Even If the Goals Change
 
 ### Define Flow Roles
 - Each Flow project should specify the type of role(s) needed from Flow. For example, the Craft project requires Flow to act as a software developer, so this should be specifed, and we should be linked to that general domain knowledge by the project. Any exisiting domain knowledge and role specifications should be moved out of flow.md or any other system-level files and into their appropriate files.

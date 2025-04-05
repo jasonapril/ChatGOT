@@ -4,7 +4,8 @@ Unit tests for the LanguageModel base class.
 import pytest
 import torch
 
-from craft.models.base import Model, GenerativeModel, LanguageModel, LanguageModelConfig
+from craft.models.base import Model, GenerativeModel, LanguageModel
+from craft.models.configs import LanguageModelConfig
 from .conftest import MockLanguageModel
 
 class TestLanguageModel:

@@ -10,8 +10,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # Import base class, new config type, and registration decorator
-from .base import LanguageModel, LanguageModelConfig 
-# from .factory import register_model # REMOVE import to break cycle
+from .base import LanguageModel # Import only the base model class
+from .configs import LanguageModelConfig # Import the config class from its correct location
+from .registry import register_model # Import decorator from the new registry file
 
 
 class PositionalEncoding(nn.Module):
@@ -58,8 +59,9 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-# Register this model implementation # REMOVE decorator
-# @register_model("language", architecture_name="transformer")
+# Register this model implementation with its specific config class
+# Use the full import path or a consistent alias as the registration name
+@register_model(name="craft.models.transformer.TransformerModel", config_cls=LanguageModelConfig)
 class TransformerModel(LanguageModel):
     """
     Transformer model for character-level language modeling.
@@ -71,22 +73,24 @@ class TransformerModel(LanguageModel):
         """
         Initialize the transformer model using a LanguageModelConfig.
         """
+        # Ensure config is the correct Pydantic type
+        if not isinstance(config, LanguageModelConfig):
+             raise TypeError(f"Expected config to be LanguageModelConfig, got {type(config)}")
+
         super().__init__(config)
         
-        # Extract parameters from the validated Pydantic config
+        # Access parameters directly from the validated config object
         self.vocab_size = config.vocab_size
-        self.d_model = getattr(config, 'd_model', 768)
-        self.n_head = getattr(config, 'n_head', 12)
-        # Get d_hid, applying default only if it's missing OR explicitly None
-        d_hid_from_config = getattr(config, 'd_hid', None)
-        self.d_hid = d_hid_from_config if d_hid_from_config is not None else self.d_model * 4
-        self.n_layers = getattr(config, 'n_layers', 12)
-        self.dropout_rate = getattr(config, 'dropout', 0.1)
-        self.max_seq_length = getattr(config, 'max_seq_length', 1024)
-        self.layer_norm_eps = getattr(config, 'layer_norm_eps', 1e-5)
-        self.activation = getattr(config, 'activation', 'gelu')
-        self.bias = getattr(config, 'bias', True)
-        self.norm_first = getattr(config, 'norm_first', True) # Ensure consistent param
+        self.d_model = config.d_model
+        self.n_head = config.n_head
+        self.d_hid = config.d_hid if config.d_hid is not None else config.d_model * 4
+        self.n_layers = config.n_layers
+        self.dropout_rate = config.dropout
+        self.max_seq_length = config.max_seq_length
+        self.layer_norm_eps = config.layer_norm_eps
+        self.activation = config.activation
+        self.bias = config.bias
+        self.norm_first = config.norm_first
         
         # --- Model Layers --- #
         # Token embedding

@@ -2,8 +2,10 @@
 Unit tests for the GenerativeModel base class.
 """
 import pytest
-
-from craft.models.base import Model, GenerativeModel, GenerativeModelConfig
+from unittest.mock import MagicMock
+from pydantic import ValidationError
+from craft.models.base import Model, GenerativeModel
+from craft.models.configs import GenerativeModelConfig
 from .conftest import MockGenerativeModel
 
 class TestGenerativeModel:

@@ -1,8 +1,34 @@
 # conf/hydra/job_logging/custom.yaml
-# Define only the custom formatters used by Hydra
+version: 1
+disable_existing_loggers: false
 
 formatters:
+  standard:
+    format: '%(asctime)s [%(name)s][%(levelname)s] - %(message)s'
   minimal:
     format: '%(message)s'
-  standard:
-    format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s' 
+
+handlers:
+  # Console handler to show progress on stdout
+  console:
+    class: logging.StreamHandler
+    level: INFO  # Changed back from WARNING to INFO
+    formatter: minimal
+    stream: ext://sys.stdout
+
+  # File handler to save detailed logs
+  file:
+    class: logging.FileHandler
+    level: DEBUG      # Log DEBUG level and above to file
+    formatter: standard # Use standard format for file
+    filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log # Log to <output_dir>/train.log (or similar)
+    encoding: utf-8
+
+root:
+  level: DEBUG # Set root logger level to DEBUG to capture everything
+  handlers: [console, file] # Use both console and file handlers
+
+# Optional: Configure specific loggers if needed (e.g., reduce verbosity of certain libraries)
+# loggers:
+#   some_library:
+#     level: WARNING 

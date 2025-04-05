@@ -4,14 +4,18 @@ Configuration and fixtures for model tests.
 import pytest
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
+from unittest.mock import MagicMock
 
-from craft.models.base import (
-    Model, 
-    GenerativeModel, 
-    LanguageModel, 
-    BaseModelConfig, 
-    GenerativeModelConfig, 
-    LanguageModelConfig
+# Import base model classes
+from craft.models.base import Model, GenerativeModel, LanguageModel, VisionModel, MultiModalModel
+# Import config classes from the correct location
+from craft.models.configs import (
+    BaseModelConfig, # Import the actual base config
+    GenerativeModelConfig,
+    LanguageModelConfig,
+    VisionModelConfig,
+    MultiModalModelConfig
 )
 
 # --- Mock Classes --- #

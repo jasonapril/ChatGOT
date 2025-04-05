@@ -123,6 +123,10 @@ This file serves as the working memory for all active tasks in the project. It's
         - ⏳ Refactor Data Test Configuration (`DataTests`)
         - ⏳ Fix Integration Tests (`tests/integration_tests.py`)
         - ⏳ Set up CI/CD pipeline (GitHub Actions)
+        - ⏳ **Evaluate Smoke Tests and Expand Integration Tests**: 🟡 To Do
+          - **Goal**: Assess the need for a dedicated training smoke test and/or a unified smoke test. Review and expand the existing integration and feature tests for broader coverage.
+          - **Context**: Current smoke tests focus on generation. A quick training check and more comprehensive integration tests would improve robustness.
+          - **Status**: 🟡 To Do
         - 🔍 Planned
 
 - ### 🟡 Review Craft Directory READMEs
@@ -132,25 +136,19 @@ This file serves as the working memory for all active tasks in the project. It's
 
 ## Upcoming Tasks
 
+- ### 🟠 Review `conf` Directory
+  - Standardize. Ensure good defaults. Maintain a separation between configs used for tests, experiments, etc. What should the major categories be?
+
+- ### 🟠 Add Ability to Train on MNIST
+  - This marks a major transition to multimodality. This will also ensure a higher degree of modularity.
+
 - ### 🔴 Decide What to do with Completed Tasks
   - Probably keep them in a log.
-
-- ### 🟠 Review Flow Alignment & Identify System Improvements
-  - **Goal**: Ensure development practices align with Flow principles and improve the Flow system's effectiveness based on recent work.
-  - **Sub-tasks**:
-    - [x] Review recent debugging work (test fixing) against Flow principles (`flow/flow.md`). ✅
-    - [ ] Review recent debugging work against Flow protocol (`flow/flow.md`, `flow/gemini-2.5-pro-exp-03-25.md`), especially `tasks.md` update adherence. ⏳
-    - [ ] Review `flow/meta/` contents for relevance, cruft, and potential refinements.
-    - [ ] Review `system/guidelines_and_conventions.md` for any necessary updates discovered during the review.
-    - [ ] Brainstorm and document specific improvements for the Flow system (e.g., `tasks.md` update triggers, definition of "significant step", logging integration, periodic checks).
-    - [ ] Check `flow/domains/` for potential additions based on recent work (e.g., `pytest_debugging.md`?).
-  - **Status**: 🟡 To Do
-  - **Priority**: Medium
 
 - ### 🟠 Refactor Data Pipeline for Tokenizer Flexibility
   - **Goal**: Modify the data pipeline to support different tokenizers (character, subword, etc.) configured via Hydra, following the strategy outlined in `src/data/base.py`.
   - **Steps**: (See original task for detailed steps)
-  - **Status**: ⏳ To Do (Postponed from previous attempt)
+  - **Status**: ✅ Done <# 2025-04-05: Verified structure and configuration supports flexibility. Tokenizer artifacts moved to outputs/ #>
 
 - ### 🔴 Define Goals
   - We should define the precise goals that we wish to attain with this project, and work backwards from there to ensure that the project's implementations are ideal for fulfilling those goals.
@@ -164,6 +162,13 @@ This file serves as the working memory for all active tasks in the project. It's
 
 - ### 🟡 Improve CLI Generation Tokenization
   - Refactor `src/cli/run.py::generate_text`
+
+- ### 🟠 Train Small Model on GoT S1 (Subword)
+  - **Goal**: Perform a training run using a small model variant (configured for low-spec devices) on the Game of Thrones Season 1 dataset, utilizing a subword tokenizer.
+  - **Context**: This serves as an initial test case for the refactored data pipeline (tokenizer flexibility) and aligns with the goal of optimizing for low-spec devices. Requires GoT S1 dataset prepared with a subword tokenizer (e.g., BPE or SentencePiece).
+  - **Depends on**: Refactor Data Pipeline for Tokenizer Flexibility
+  - **Status**: 🟡 In Progress <# Started 2025-04-05 with 1M param model #>
+  - **Priority**: Medium (once dependency met)
 
 ### CI/CD & Deployment (Future)
    - [ ] Set up basic CI (GitHub Actions?) to run tests on push.
@@ -196,11 +201,12 @@ This file serves as the working memory for all active tasks in the project. It's
 - ### 🟡 Review Legacy Code ✅ 2025-04-01
   - **Goal**: Review `src/` and `scripts/` directories to identify and remove or archive deprecated/legacy code (e.g., potentially unused utilities) after confirming functionality of refactored components (like `src/cli/run.py`).
 
+# Adding previously known completed tasks that seem missing
 - [✅] **Complete Model Architecture Refactoring** (Est. Effort: High) ✅ 2025-03-30 (Assumed completed based on sub-tasks)
 - ### 🟡 Implement Basic Unit Tests ✅ 2025-03-28
 
 ### Test Output Cleanup ✅ 2025-04-03
   - **Goal**: Fix issue where tests create persistent top-level directories.
   - **Context**: Previously labeled Task 3.3.
-  - **Status**: DONE
+  - **Status**: DONE 2025-04-04
   - **Files**: `tests/data/tokenizers/test_subword.py`, `tests/data/tokenizers/test_sentencepiece.py`, `tests/training/test_checkpointing.py`

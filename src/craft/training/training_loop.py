@@ -34,7 +34,7 @@ from ..utils.logging import force_flush_logs, format_time
 from .callbacks import CallbackList
 from ..models.base import GenerativeModel # Import base model for type hinting
 from .progress import ProgressTracker  # Import ProgressTracker
-from .checkpointing import CheckpointManager # Import CheckpointManager
+from .checkpointing import CheckpointManager, TrainingState # Import CheckpointManager and TrainingState
 
 class TrainingLoop:
     """Handles the core training loop logic."""
@@ -192,12 +192,12 @@ class TrainingLoop:
                     # Increment global step *after* a successful optimizer step
                     global_step += 1
 
-                    # --- Periodic Checkpoint Save --- 
+                    # --- Periodic Checkpoint Save ---
                     if self.checkpoint_manager and self.save_steps_interval > 0 and global_step > 0 and global_step % self.save_steps_interval == 0:
                         filename = f"checkpoint_step_{global_step}.pt"
                         self.logger.info(f"[TrainingLoop] Step {global_step}: Triggering checkpoint save (filename: {filename})")
-                        
-                        # --- Construct state dictionary (Final Check) --- 
+
+                        # --- Construct state dictionary (Final Check) ---
                         serializable_config = self.config # Start with original config
                         try:
                             # Try OmegaConf resolution if available
@@ -213,28 +213,30 @@ class TrainingLoop:
                                if cb.__class__.__name__ == 'TensorBoardLogger' and hasattr(cb, 'resolved_log_dir'):
                                    tb_log_dir = cb.resolved_log_dir
                                    break
-                                   
-                        state = {
-                            'epoch': current_epoch,
-                            'global_step': global_step,
-                            'model_state_dict': self.model.state_dict(),
-                            'optimizer_state_dict': self.optimizer.state_dict(),
-                            'best_val_metric': float('inf'), # Placeholder for step checkpoint
-                            'metrics': {'loss': loss_val, 'lr': self.optimizer.param_groups[0]['lr'] if self.optimizer else None},
-                            'config': serializable_config,
-                            'tensorboard_log_dir': tb_log_dir
-                        }
-                        if self.scheduler is not None:
-                            state['scheduler_state_dict'] = self.scheduler.state_dict()
-                        if hasattr(self, 'scaler') and self.scaler is not None: 
-                            state['scaler_state_dict'] = self.scaler.state_dict()
-                        # --- End construct state (Final Check) --- 
-                        
+
+                        # --- Create TrainingState object (INSTEAD OF DICT) --- #
+                        current_metrics = {'loss': loss_val, 'lr': self.optimizer.param_groups[0]['lr'] if self.optimizer else None}
+                        state = TrainingState(
+                            epoch=current_epoch,
+                            global_step=global_step,
+                            model_state_dict=self.model.state_dict(),
+                            optimizer_state_dict=self.optimizer.state_dict() if self.optimizer else None,
+                            scheduler_state_dict=self.scheduler.state_dict() if self.scheduler else None,
+                            scaler_state_dict=self.scaler.state_dict() if hasattr(self, 'scaler') and self.scaler is not None else None,
+                            best_val_metric=float('inf'), # Placeholder, step checkpoints aren't 'best' based on val
+                            metrics=current_metrics,
+                            config=serializable_config,
+                            tensorboard_log_dir=tb_log_dir,
+                            # callbacks_state=self.callbacks.state_dict() if hasattr(self.callbacks, 'state_dict') else None # Optional future addition
+                            # tokenizer_path=self.checkpoint_manager.get_tokenizer_path(global_step) # Needs CheckpointManager method
+                        )
+                        # --- End create TrainingState object --- #
+
                         # Correct call signature for CheckpointManager.save_checkpoint
                         self.checkpoint_manager.save_checkpoint(
-                            state=state,
-                            filename=filename, 
-                            metrics=state['metrics'], # Pass metrics from state
+                            state=state, # Pass the TrainingState instance now
+                            filename=filename,
+                            metrics=state.metrics, # Pass metrics from state
                             is_best=False # Not based on validation
                         )
                     # --- End Periodic Checkpoint Save ---

@@ -176,27 +176,27 @@ class Trainer:
         training_loop = TrainingLoop(
             model=self.model,
             optimizer=self.optimizer,
+            train_dataloader=self.train_dataloader, # Pass the dataloader
             scheduler=self.scheduler,
             device=self.device,
             use_amp=self.use_amp,
-            scaler=self.scaler,
             gradient_accumulation_steps=self.gradient_accumulation_steps,
             max_grad_norm=self.max_grad_norm,
             log_interval=self.log_interval,
             callbacks=self.callbacks,
-            global_step=self.global_step, # Pass initial global step
-            epoch=self.epoch, # Pass starting epoch
-            max_steps=self.max_steps, # Pass max_steps
-            # compile_model=self.compile_model # Removed, handled internally
+            # Pass config as dict, loops expects Dict[str, Any]
+            config=self.config.model_dump() if isinstance(self.config, TrainingConfig) else self.config,
+            checkpoint_manager=self.checkpoint_manager,
+            save_steps_interval=self.save_steps_interval, # Pass interval
+            max_steps=self.max_steps # Pass max_steps
         )
-        training_loop.model_to_device() # Ensure model is on correct device before loop
+        # Ensure model is on the correct device *before* initializing TrainingLoop
+        # self.model.to(self.device) # Already done in Trainer.__init__
 
         try:
             for epoch in range(self.epoch, self.num_epochs):
                 self.epoch = epoch
                 self.callbacks.on_epoch_begin(epoch=epoch)
-
-                # Removed TrainingLoop instantiation from here
 
                 # Create progress tracker, considering max_steps for display
                 # max_steps = getattr(self.config, 'max_steps', None) # Now self.max_steps
@@ -218,11 +218,9 @@ class Trainer:
 
                 # Use the single training_loop instance created outside the loop
                 train_metrics = training_loop.train_epoch(
-                    # Pass dataloader directly
-                    dataloader=self.train_dataloader,
                     current_epoch=epoch,
-                    progress=progress,
                     global_step=self.global_step,
+                    progress=progress,
                     loaded_global_step=self.global_step if self.resume_from_checkpoint and epoch == (self.global_step // steps_in_epoch) else None
                 )
 

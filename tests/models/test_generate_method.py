@@ -3,9 +3,11 @@ Unit tests for the .generate() method of GenerativeModel.
 """
 import pytest
 import torch
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from pydantic import ValidationError
 
-from craft.models.base import GenerativeModelConfig
+from craft.models.configs import GenerativeModelConfig
+from craft.models.base import GenerativeModel
 from .conftest import MockGenerativeModel
 
 class TestGenerateMethod:

@@ -1,5 +1,9 @@
 # conf/training/minimal_test.yaml
 
+defaults:
+  - default # Inherit from default training config
+  - _self_  # Allow this file to override defaults
+
 # Override data block size for reduced memory
 data:
   block_size: 256

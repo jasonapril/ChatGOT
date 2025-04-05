@@ -1,21 +1,19 @@
 # conf/data/got_s1_subword.yaml
 # Configuration for loading GoT Season 1 text data and using a Subword BPE tokenizer.
 
-# Inherit some settings from top-level data config if defined there
-defaults:
-  - /data/default_data_settings # Assumes a file with batch_size, num_workers etc. exists
-  - _self_
-
-# Override or define specific settings
+# Define settings directly
+batch_size: 16 # Added back: Required by DataConfig schema
+num_workers: 0 # Example num workers
 block_size: 1024 # Or inherit via ${data.block_size} if defined in default_data_settings
 
 # --- Tokenizer Configuration ---
 tokenizer:
   _target_: craft.data.tokenizers.subword.SubwordTokenizer
-  # Path where the TRAINED tokenizer model is saved/loaded from
-  model_path: data/tokenizers/got_s1_subword_8k
   # Configuration used during tokenizer TRAINING (and needed for loading info)
   config:
+    # Path where the TRAINED tokenizer model is saved/loaded from (Passed via config)
+    # --- Pointing this base config to the FULL dataset tokenizer --- #
+    model_path: outputs/tokenizers/got_full_subword_8k
     vocab_size: 8000
     # Default special tokens will be used unless overridden here or during training script run
     # pad_token: "<pad>"
@@ -23,45 +21,26 @@ tokenizer:
     # bos_token: "<s>"
     # eos_token: "</s>"
 
-# --- Dataset Split Configurations ---
-# Using TextDataset which loads raw text and tokenizes on the fly
-# Pointing train and val to the same S1 files for now.
-# Consider creating actual train/val splits of the S1 data later.
+# --- Dataset Split Configurations (Nested) --- #
+datasets:
+  train:
+    dataset:
+      _target_: craft.data.dataset.TextDataset # Assumes this class exists
+      # --- Use the FULL dataset path here too --- #
+      file_paths:
+        - data/raw/got/game_of_thrones.txt
+      block_size: ${data.block_size}
+      tokenizer: ${data.tokenizer} # Use the tokenizer defined above
+    dataloader: {} # Add empty dataloader section
 
-train:
-  dataset:
-    _target_: craft.data.dataset.TextDataset # Assumes this class exists
-    # List of raw text files for training data
-    file_paths:
-      - data/raw/got/got_s01e01.txt
-      - data/raw/got/got_s01e02.txt
-      - data/raw/got/got_s01e03.txt
-      - data/raw/got/got_s01e04.txt
-      - data/raw/got/got_s01e05.txt
-      - data/raw/got/got_s01e06.txt
-      - data/raw/got/got_s01e07.txt
-      - data/raw/got/got_s01e08.txt
-      - data/raw/got/got_s01e09.txt
-      - data/raw/got/got_s01e10.txt
-    block_size: ${data.block_size}
-    tokenizer: ${data.tokenizer} # Use the tokenizer defined above
+  val:
+    dataset:
+      _target_: craft.data.dataset.TextDataset # Assumes this class exists
+      # --- Use the FULL dataset path here too --- #
+      file_paths:
+        - data/raw/got/game_of_thrones.txt
+      block_size: ${data.block_size}
+      tokenizer: ${data.tokenizer} # Use the tokenizer defined above
+    dataloader: {} # Add empty dataloader section
 
-val:
-  dataset:
-    _target_: craft.data.dataset.TextDataset # Assumes this class exists
-    # Using the same files for validation for now
-    file_paths:
-      - data/raw/got/got_s01e01.txt
-      - data/raw/got/got_s01e02.txt
-      - data/raw/got/got_s01e03.txt
-      - data/raw/got/got_s01e04.txt
-      - data/raw/got/got_s01e05.txt
-      - data/raw/got/got_s01e06.txt
-      - data/raw/got/got_s01e07.txt
-      - data/raw/got/got_s01e08.txt
-      - data/raw/got/got_s01e09.txt
-      - data/raw/got/got_s01e10.txt
-    block_size: ${data.block_size}
-    tokenizer: ${data.tokenizer} # Use the tokenizer defined above
-
-test: null # No test set defined for now 
+# test: null # No test set defined for now 

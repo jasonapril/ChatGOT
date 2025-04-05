@@ -5,7 +5,7 @@ model_type: language # Corrected: Should be the general type
 
 # Instantiate the config object first
 config:
-  _target_: src.models.base.LanguageModelConfig
+  _target_: craft.models.configs.LanguageModelConfig
   architecture: transformer # This defines the specific architecture
   model_type: ${model.model_type} # Propagate top-level type into config object
   vocab_size: null      # Add placeholder for vocab_size

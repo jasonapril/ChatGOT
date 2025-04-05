@@ -64,6 +64,8 @@ class DataConfig(BaseModel):
     # Define the structure for individual dataset splits (train/val/test)
     class DatasetSplitConfig(BaseModel):
         dataset: Dict[str, Any] # Expects a dictionary, target is inside
+        # Add optional field for dataloader-specific overrides
+        dataloader: Optional[Dict[str, Any]] = Field(None, description="Optional DataLoader specific settings (e.g., batch_size, shuffle)")
         # We might want to make this more specific later, e.g.:
         # class DatasetEntry(BaseModel):
         #     target: str = Field(..., validation_alias='_target_')
