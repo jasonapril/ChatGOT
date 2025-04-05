@@ -11,10 +11,14 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Type
 
 import torch
 import torch.nn as nn
-from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
+# Remove Pydantic imports if no longer needed directly
+# from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
 import torch.nn.functional as F
 from omegaconf import DictConfig
 import hydra
+
+# Import the config class from the new location
+from craft.models.configs import BaseModelConfig # Adjust if other configs are needed directly
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
@@ -25,62 +29,62 @@ logger = logging.getLogger(__name__)
 
 
 # Pydantic ModelConfig Base
-class BaseModelConfig(BaseModel):
-    """
-    Base Pydantic configuration class for all models.
-    Provides automatic validation and type hints.
-    Uses model_config for Pydantic V2 settings.
-    """
-    model_config = ConfigDict(extra='allow') # Keep allow for flexibility
-    model_type: str = Field("base", description="The type of the model (e.g., language, vision).")
-
-    # Common config fields can be added here if needed
-    # e.g., vocab_size: Optional[int] = None
-    # e.g., embedding_dim: Optional[int] = None
-
-class GenerativeModelConfig(BaseModelConfig):
-    """Config for Generative Models"""
-    model_type: str = Field("generative", description="Model type set to generative.")
-    max_seq_length: int = Field(1024, description="Maximum sequence length the model can handle")
-
-class LanguageModelConfig(GenerativeModelConfig):
-    """Config for Language Models"""
-    model_type: str = Field("language", description="Model type set to language.")
-    architecture: Optional[str] = Field(None, description="Name for the specific model architecture (e.g., transformer, rnn).")
-    vocab_size: int = Field(..., description="Size of the vocabulary (required).")
-    d_model: int = Field(768, description="Model dimension.")
-    n_head: int = Field(12, description="Number of attention heads.")
-    d_hid: Optional[int] = Field(None, description="Hidden dimension in feed-forward layers.")
-    n_layers: int = Field(12, description="Number of transformer layers.")
-    dropout: float = Field(0.1, description="Dropout probability.")
-    bias: bool = Field(True, description="Whether to use bias in linear layers.")
-    layer_norm_eps: float = Field(1e-5, description="Epsilon for layer normalization.")
-    activation: str = Field('gelu', description="Activation function.")
-    norm_first: bool = Field(True, description="Apply layer norm before attention/FFN.")
-
-    # Pydantic V2 validator for d_hid
-    @field_validator('d_hid', mode='before')
-    @classmethod
-    def set_d_hid_default(cls, v, info):
-        """Set default d_hid = d_model * 4 if not provided."""
-        # info.data should contain the raw input data being validated
-        if v is None and 'd_model' in info.data:
-            d_model = info.data.get('d_model')
-            # Use default d_model if not in data but defined in class
-            if d_model is None and 'd_model' in cls.model_fields:
-                 d_model = cls.model_fields['d_model'].default
-            
-            if isinstance(d_model, int):
-                return d_model * 4
-        return v # Return original value if not calculated
-
-class VisionModelConfig(BaseModelConfig):
-    # ... (Additional fields specific to VisionModelConfig)
-    pass
-
-class MultiModalModelConfig(BaseModelConfig):
-    # ... (Additional fields specific to MultiModalModelConfig)
-    pass
+# class BaseModelConfig(BaseModel):
+#     """
+#     Base Pydantic configuration class for all models.
+#     Provides automatic validation and type hints.
+#     Uses model_config for Pydantic V2 settings.
+#     """
+#     model_config = ConfigDict(extra='allow') # Keep allow for flexibility
+#     model_type: str = Field("base", description="The type of the model (e.g., language, vision).")
+#
+#     # Common config fields can be added here if needed
+#     # e.g., vocab_size: Optional[int] = None
+#     # e.g., embedding_dim: Optional[int] = None
+#
+# class GenerativeModelConfig(BaseModelConfig):
+#     """Config for Generative Models"""
+#     model_type: str = Field("generative", description="Model type set to generative.")
+#     max_seq_length: int = Field(1024, description="Maximum sequence length the model can handle")
+#
+# class LanguageModelConfig(GenerativeModelConfig):
+#     """Config for Language Models"""
+#     model_type: str = Field("language", description="Model type set to language.")
+#     architecture: Optional[str] = Field(None, description="Name for the specific model architecture (e.g., transformer, rnn).")
+#     vocab_size: int = Field(..., description="Size of the vocabulary (required).")
+#     d_model: int = Field(768, description="Model dimension.")
+#     n_head: int = Field(12, description="Number of attention heads.")
+#     d_hid: Optional[int] = Field(None, description="Hidden dimension in feed-forward layers.")
+#     n_layers: int = Field(12, description="Number of transformer layers.")
+#     dropout: float = Field(0.1, description="Dropout probability.")
+#     bias: bool = Field(True, description="Whether to use bias in linear layers.")
+#     layer_norm_eps: float = Field(1e-5, description="Epsilon for layer normalization.")
+#     activation: str = Field('gelu', description="Activation function.")
+#     norm_first: bool = Field(True, description="Apply layer norm before attention/FFN.")
+#
+#     # Pydantic V2 validator for d_hid
+#     @field_validator('d_hid', mode='before')
+#     @classmethod
+#     def set_d_hid_default(cls, v, info):
+#         """Set default d_hid = d_model * 4 if not provided."""
+#         # info.data should contain the raw input data being validated
+#         if v is None and 'd_model' in info.data:
+#             d_model = info.data.get('d_model')
+#             # Use default d_model if not in data but defined in class
+#             if d_model is None and 'd_model' in cls.model_fields:
+#                  d_model = cls.model_fields['d_model'].default
+#             
+#             if isinstance(d_model, int):
+#                 return d_model * 4
+#         return v # Return original value if not calculated
+#
+# class VisionModelConfig(BaseModelConfig):
+#     # ... (Additional fields specific to VisionModelConfig)
+#     pass
+#
+# class MultiModalModelConfig(BaseModelConfig):
+#     # ... (Additional fields specific to MultiModalModelConfig)
+#     pass
 
 
 # --- Base Model Class --- #
@@ -133,8 +137,12 @@ class Model(nn.Module, ABC):
     def save(self, path: str, **kwargs):
         """
         Save the model's state_dict and configuration to a file using torch.save.
-        Intended for saving the model architecture and weights, not the full training state.
-        Use CheckpointManager for saving full training checkpoints.
+        
+        **Purpose:** This method is intended for saving the final model artifact 
+        (weights and configuration) for inference or sharing, NOT for saving the 
+        full training state required for resuming training.
+        
+        **For resuming training, use the `CheckpointManager` class.**
 
         Args:
             path: Path to save the checkpoint file (.pt or .pth recommended).
@@ -158,8 +166,13 @@ class Model(nn.Module, ABC):
              strict: bool = True) -> Dict[str, Any]:
         """
         Load the model's state_dict from a file saved by `Model.save`.
-        This method assumes the model architecture (instantiated via config) matches the saved state.
-        It does NOT load optimizer or scheduler states. Use CheckpointManager for that.
+        
+        **Purpose:** This method loads model weights and configuration for inference 
+        or fine-tuning. It assumes the model architecture (instantiated via config) 
+        matches the saved state.
+        
+        **It does NOT load optimizer, scheduler, or other training states.**
+        **For resuming training, use the `CheckpointManager` class.**
 
         Args:
             path: Path to the checkpoint file.
@@ -244,12 +257,7 @@ class GenerativeModel(Model):
     def __init__(self, config: BaseModelConfig): # Accept BaseModelConfig initially
         super().__init__(config)
         
-        # Check if the stored config is the correct type *after* base init
-        if not isinstance(self.config, GenerativeModelConfig):
-            logging.warning(f"GenerativeModel initialized with config type {type(self.config)}, expected GenerativeModelConfig or subclass. Re-check factory logic.")
-            # Raise error? Or try to proceed? Raising might be better.
-            raise TypeError(f"Configuration error: Expected GenerativeModelConfig, got {type(self.config)}")
-        
+        # It's safe to assume self.config is GenerativeModelConfig or subclass here due to factory
         self.max_seq_length = getattr(self.config, 'max_seq_length', 1024)
 
     # Remove @abstractmethod decorator and provide implementation
@@ -419,12 +427,8 @@ class LanguageModel(GenerativeModel):
     Base class for language models.
     Checks config type.
     """
-    def __init__(self, config: LanguageModelConfig): # Expects LanguageModelConfig specifically
+    def __init__(self, config: BaseModelConfig): # Expects BaseModelConfig specifically
         super().__init__(config)
-        
-        if not isinstance(self.config, LanguageModelConfig):
-            logging.error("LanguageModel received incorrect config type despite type hint.")
-            raise TypeError(f"Configuration error: Expected LanguageModelConfig, got {type(self.config)}")
     
     def calculate_perplexity(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
@@ -449,9 +453,9 @@ class VisionModel(Model):
     Abstract base class for vision models in Craft.
     """
     
-    def __init__(self, config: VisionModelConfig):
-        if not isinstance(config, VisionModelConfig):
-            raise ValueError("VisionModel requires a VisionModelConfig instance.")
+    def __init__(self, config: BaseModelConfig):
+        if not isinstance(config, BaseModelConfig):
+            raise ValueError("VisionModel requires a BaseModelConfig instance.")
         super().__init__(config)
 
 
@@ -460,9 +464,9 @@ class MultiModalModel(Model):
     Abstract base class for multi-modal models in Craft.
     """
     
-    def __init__(self, config: MultiModalModelConfig):
-        if not isinstance(config, MultiModalModelConfig):
-            raise ValueError("MultiModalModel requires a MultiModalModelConfig instance.")
+    def __init__(self, config: BaseModelConfig):
+        if not isinstance(config, BaseModelConfig):
+            raise ValueError("MultiModalModel requires a BaseModelConfig instance.")
         super().__init__(config)
 
 

@@ -5,13 +5,14 @@ import logging
 
 from craft.training.trainer import Trainer
 from craft.training.callbacks import CallbackList # Import needed for mock
-from craft.training.checkpointing import CheckpointManager # Import needed for mock
+from craft.training.checkpointing import CheckpointManager, TrainingState # Import needed for mock
 from craft.config.schemas import TrainingConfig # Import TrainingConfig
 
 # Need to patch classes initialized *inside* the train method
 @patch('craft.training.trainer.TrainingLoop')
 @patch('craft.training.trainer.Evaluator')
 @patch('craft.training.trainer.ProgressTracker')
+# @patch('craft.training.trainer.CheckpointManager') # REMOVED
 class TestTrainerTrain:
     """Tests for the Trainer.train() method."""
 
@@ -23,9 +24,8 @@ class TestTrainerTrain:
                               ):
         """Fixture to create a Trainer instance with mocks for train() testing."""
         # Use patches from the class decorator for components used *during* train
-        # Patch components used during *init* separately
+        # Patch components used during *init* separately (if not class-level patched)
         with patch('craft.training.trainer.logging.getLogger') as mock_log, \
-             patch('craft.training.trainer.CheckpointManager') as mock_cm, \
              patch('craft.training.trainer.torch.amp.GradScaler'), \
              patch('craft.training.trainer.torch.device') as mock_dev:
 
@@ -37,35 +37,38 @@ class TestTrainerTrain:
             mock_callbacks_list_instance = MagicMock(spec=CallbackList)
             mock_callbacks_list_instance.callbacks = [] # Ensure it has the list attribute
 
-            # Create a minimal valid TrainingConfig for init
-            minimal_config = TrainingConfig(batch_size=2, num_epochs=2) # Set epochs in config
+            # --- Create TrainingConfig for init --- #
+            # Revert to the minimal config
+            minimal_config = TrainingConfig(
+                batch_size=2, 
+                num_epochs=2
+            )
 
             trainer = Trainer(
                 model=mock_model,
                 train_dataloader=mock_dataloader,
                 optimizer=mock_optimizer,
-                # callbacks=None, # REMOVED: Handled by config/init
-                config=minimal_config # Pass the valid config
-                # num_epochs=2, # REMOVED: Controlled by config
-                # val_dataloader=None, # REMOVED: Handled by config/init
-                # checkpoint_dir=None # REMOVED: Handled by config/init
+                config=minimal_config # Pass the config enabling checkpointing
             )
             # Manually set the mocked CallbackList instance AFTER init
             trainer.callbacks = mock_callbacks_list_instance
-            # Manually mock checkpoint manager AFTER init
-            trainer.checkpoint_manager = mock_cm.return_value
+            # No longer need to manually mock checkpoint manager - patch handles it
+            # trainer.checkpoint_manager = mock_cm.return_value
 
             yield trainer # Yield the configured trainer
 
     def test_train_basic_loop(self,
-                              mock_progress_tracker, # Patched at class level
-                              mock_evaluator, # Patched at class level
-                              mock_training_loop, # Patched at class level
+                              # Removed mock_checkpoint_manager_constructor
+                              mock_progress_tracker,
+                              mock_evaluator,
+                              mock_training_loop,
                               trainer_for_train_test # Use the fixture
                              ):
         """Test the basic training loop structure and callback calls."""
         # --- Setup --- #
         trainer = trainer_for_train_test
+        # Manually assign a mock CM for this test to mock load_checkpoint
+        trainer.checkpoint_manager = MagicMock(spec=CheckpointManager)
         num_epochs = trainer.num_epochs # 2
         # Need a way to determine steps per epoch, mock dataloader length
         # Access mock_dataloader from the fixture
@@ -89,6 +92,7 @@ class TestTrainerTrain:
         mock_loop_instance.train_epoch.side_effect = train_epoch_side_effect
 
         # Mock checkpoint manager's load method if resume is attempted (should not be by default)
+        # This should now work as trainer.checkpoint_manager is a mock
         trainer.checkpoint_manager.load_checkpoint.return_value = None
 
         # Assign the mocked ProgressTracker instance if needed (Trainer should create its own)
@@ -119,20 +123,29 @@ class TestTrainerTrain:
         # Update is called inside train_epoch, which is mocked, so we don't check it here
 
     def test_train_with_validation(self,
-                                   mock_progress_tracker, # Patched at class level
-                                   mock_evaluator, # Patched at class level
-                                   mock_training_loop, # Patched at class level
+                                   # Removed mock_checkpoint_manager_constructor
+                                   mock_progress_tracker,
+                                   mock_evaluator,
+                                   mock_training_loop,
                                    trainer_for_train_test # Use the fixture
                                   ):
         """Test the training loop including validation and best checkpoint saving."""
         # --- Setup --- #
         trainer = trainer_for_train_test
+        # --- Manually create and assign a mock CheckpointManager --- #
+        mock_checkpoint_manager_instance = MagicMock(spec=CheckpointManager)
+        # Add the checkpoint_dir attribute needed by the save logic
+        mock_checkpoint_manager_instance.checkpoint_dir = "/fake/mock/dir"
+        trainer.checkpoint_manager = mock_checkpoint_manager_instance
+
         # Modify trainer settings for validation
         trainer.num_epochs = 2
         trainer.eval_interval = 1 # Evaluate every epoch
+        trainer.save_interval = 1 # <<< SET SAVE INTERVAL TO 1 TO TRIGGER SAVE
         trainer.val_dataloader = MagicMock(spec=torch.utils.data.DataLoader)
-        trainer.checkpoint_dir = "/fake/dir" # Enable checkpointing
         trainer.best_val_metric = float('inf')
+        # Ensure train dataloader has a length for step calculation
+        trainer.train_dataloader.__len__.return_value = 10
 
         num_epochs = trainer.num_epochs
         steps_per_epoch = len(trainer.train_dataloader)
@@ -180,16 +193,38 @@ class TestTrainerTrain:
         assert mock_eval_instance.evaluate.call_count == num_epochs
 
         # Check checkpoint saving
-        # Should be called only once after epoch 0 when loss improved
-        trainer.checkpoint_manager.save_checkpoint.assert_called_once()
-        # Check args of the save call
-        save_args, save_kwargs = trainer.checkpoint_manager.save_checkpoint.call_args
-        assert save_kwargs['current_epoch'] == 0 # Saved after epoch 0 (CHECK KEY NAME)
-        assert save_kwargs['global_step'] == steps_per_epoch # Global step after epoch 0
-        assert save_kwargs['best_val_metric'] == 0.5 # The new best metric
-        # Check combined metrics passed (train + val for epoch 0)
-        expected_metrics = {**train_metrics_epoch_0, **val_metrics_epoch_0}
-        assert save_kwargs['metrics'] == expected_metrics # CHECK METRICS
+        # With save_interval=1 and num_epochs=2, it should be called twice.
+        assert mock_checkpoint_manager_instance.save_checkpoint.call_count == 2
+        
+        # Examine the calls
+        call_list = mock_checkpoint_manager_instance.save_checkpoint.call_args_list
+
+        # --- Check call 1 (after epoch 0, should be best) ---
+        args_epoch0, kwargs_epoch0 = call_list[0]
+        saved_state_epoch0 = kwargs_epoch0.get('state')
+        assert isinstance(saved_state_epoch0, TrainingState)
+        assert saved_state_epoch0.epoch == 0
+        assert saved_state_epoch0.global_step == steps_per_epoch
+        assert saved_state_epoch0.best_val_metric == 0.5
+        expected_metrics_epoch0 = {**train_metrics_epoch_0, **val_metrics_epoch_0}
+        assert saved_state_epoch0.metrics == expected_metrics_epoch0
+        assert kwargs_epoch0.get('is_best') is True
+        assert "epoch_0" in kwargs_epoch0.get('filename', '')
+        assert f"step_{steps_per_epoch}" in kwargs_epoch0.get('filename', '')
+
+        # --- Check call 2 (after epoch 1, should NOT be best) ---
+        args_epoch1, kwargs_epoch1 = call_list[1]
+        saved_state_epoch1 = kwargs_epoch1.get('state')
+        assert isinstance(saved_state_epoch1, TrainingState)
+        assert saved_state_epoch1.epoch == 1
+        assert saved_state_epoch1.global_step == steps_per_epoch * 2
+        # best_val_metric in state reflects the *current* best at time of save
+        assert saved_state_epoch1.best_val_metric == 0.5 
+        expected_metrics_epoch1 = {**train_metrics_epoch_1, **val_metrics_epoch_1}
+        assert saved_state_epoch1.metrics == expected_metrics_epoch1
+        assert kwargs_epoch1.get('is_best') is False # Crucial check
+        assert "epoch_1" in kwargs_epoch1.get('filename', '')
+        assert f"step_{steps_per_epoch * 2}" in kwargs_epoch1.get('filename', '')
 
         # Check final state
         assert trainer.epoch == num_epochs - 1 # Epoch index starts at 0
@@ -202,6 +237,7 @@ class TestTrainerTrain:
         assert trainer.metrics == expected_final_metrics
 
     def test_train_handles_exception(self,
+                                      # Removed mock_checkpoint_manager_constructor
                                       mock_progress_tracker,
                                       mock_evaluator,
                                       mock_training_loop,

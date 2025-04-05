@@ -1,6 +1,7 @@
 """
-Data module initialization.
-Exposes key components for data loading and processing.
+Data loading and processing utilities for Craft.
+
+Exposes key classes and functions for dataset handling.
 """
 from typing import Dict
 from torch.utils.data import DataLoader
@@ -8,18 +9,32 @@ from torch.utils.data import DataLoader
 # Define Type Alias here to avoid circular imports
 DataLoadersDict = Dict[str, DataLoader]
 
-from .base import BaseDataset, create_dataset_from_config, create_data_loaders_from_config
-from .dataset import PickledDataset
-# from .processors import prepare_data # Example import if needed
-# from .tokenizers import BaseTokenizer, CharTokenizer, SubwordTokenizer # Example imports if needed
+# Import key classes and functions to be available directly under craft.data
+from .base import BaseDataset
+# Import factory functions from the new location
+from .factory import (
+    create_dataset,
+    create_data_loaders_from_config, 
+    create_data_manager_from_config,
+    prepare_dataloaders_from_config,
+    DataManager
+)
 
+# Import specific dataset implementations if they are meant to be directly accessible
+# Example: from .dataset import CharDataset
+
+# Define what gets imported with "from craft.data import *"
 __all__ = [
-    "BaseDataset",
-    "PickledDataset",
+    'BaseDataset',
+    'DataManager',
+    'create_dataset',
+    'create_data_loaders_from_config',
+    'create_data_manager_from_config',
+    'prepare_dataloaders_from_config',
+    # Add other exported classes/functions like specific datasets if needed
+    # 'CharDataset',
+    "DataLoadersDict",
     # "TextFileDataset",
-    "create_dataset_from_config",
-    "create_data_loaders_from_config", # Added new factory function
-    "DataLoadersDict", # Keep in __all__
     # "prepare_data",
     # "BaseTokenizer",
     # "CharTokenizer",

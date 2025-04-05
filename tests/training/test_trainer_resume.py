@@ -4,8 +4,9 @@ from unittest.mock import MagicMock, patch
 import logging
 
 from craft.training.trainer import Trainer
-from craft.training.checkpointing import CheckpointManager # Import needed for mock
+from craft.training.checkpointing import CheckpointManager, CheckpointLoadError # Import needed for mock
 from craft.config.schemas import TrainingConfig # Import TrainingConfig
+from craft.training.checkpointing import TrainingState # Import TrainingState
 
 class TestTrainerResume:
     """Tests for Trainer checkpoint resuming logic."""
@@ -37,27 +38,31 @@ class TestTrainerResume:
         """Test successful resumption from a checkpoint."""
         # --- Setup --- #
         resume_path = "/path/to/checkpoint"
-        state = {
-            'epoch': 5,
-            'global_step': 1000,
-            'best_val_metric': 0.5,
-            'metrics': {'loss': 0.6}
-        }
-        trainer_instance.checkpoint_manager.load_checkpoint.return_value = state
+        # Mock load_checkpoint to return a TrainingState object, not a dict
+        loaded_state_obj = TrainingState(
+            epoch=5,
+            global_step=1000,
+            best_val_metric=0.5,
+            metrics={'loss': 0.6},
+            model_state_dict={}, # Add dummy required field
+            optimizer_state_dict={} # Add dummy required field
+        )
+        trainer_instance.checkpoint_manager.load_checkpoint.return_value = loaded_state_obj
         trainer_instance.resume_from_checkpoint = resume_path # Set path to trigger resume
         trainer_instance.logger = MagicMock() # Mock logger for assertion
 
         # --- Action --- #
         trainer_instance._resume_from_checkpoint()
-
+    
         # --- Assertions --- #
         trainer_instance.checkpoint_manager.load_checkpoint.assert_called_once_with(resume_path)
-        assert trainer_instance.epoch == state['epoch']
-        assert trainer_instance.global_step == state['global_step']
-        assert trainer_instance.best_val_metric == state['best_val_metric']
-        assert trainer_instance.metrics == state['metrics']
+        # Check that trainer attributes are updated
+        assert trainer_instance.epoch == loaded_state_obj.epoch
+        assert trainer_instance.global_step == loaded_state_obj.global_step
+        assert trainer_instance.best_val_metric == loaded_state_obj.best_val_metric
+        assert trainer_instance.metrics == loaded_state_obj.metrics
         trainer_instance.logger.info.assert_called_once_with(
-            f"Resumed trainer state from checkpoint at epoch {state['epoch']}, step {state['global_step']}"
+            f"Resumed trainer state from checkpoint at epoch {loaded_state_obj.epoch}, step {loaded_state_obj.global_step}"
         )
 
     def test_resume_failure(self, trainer_instance):

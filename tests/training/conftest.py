@@ -9,6 +9,10 @@ import logging
 import time
 from craft.config.schemas import TrainingConfig
 from craft.data.tokenizers.base import BaseTokenizer
+from craft.data.base import BaseDataset
+from craft.data.factory import create_data_loaders_from_config
+from pathlib import Path
+import os
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -20,6 +24,11 @@ except ImportError:
 # Import Callback for spec
 from craft.training.callbacks import Callback
 
+
+# Helper function moved here
+# def create_dummy_checkpoint(path: Path, data: dict):
+#     os.makedirs(path.parent, exist_ok=True)
+#     torch.save(data, path)
 
 # --- Fixtures specific to tests/training --- 
 # These augment or specialize fixtures from the root conftest.py
@@ -134,13 +143,15 @@ def mock_progress_tracker_instance():
     def increment_step_side_effect(*args, **kwargs):
         nonlocal current_step_counter
         current_step_counter += 1
-        instance_mock.current_step = current_step_counter 
+        instance_mock.current_step = current_step_counter
         return current_step_counter
     instance_mock.increment_step.side_effect = increment_step_side_effect
-    instance_mock.add_metrics = MagicMock(name="instance_mock.add_metrics") 
-    instance_mock.get_average_metrics = MagicMock(return_value={}, name="instance_mock.get_average_metrics") 
+    instance_mock.add_metrics = MagicMock(name="instance_mock.add_metrics")
+    instance_mock.get_average_metrics = MagicMock(return_value={}, name="instance_mock.get_average_metrics")
     instance_mock.log = MagicMock(name="instance_mock.log")
     instance_mock.update = MagicMock(name="instance_mock.update")
+    instance_mock.start = MagicMock(name="instance_mock.start")
+    instance_mock.close = MagicMock(name="instance_mock.close")
     instance_mock.current_step = 0 # Initialize attributes
     instance_mock.current_epoch = 0
     return instance_mock

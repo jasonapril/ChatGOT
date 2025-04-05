@@ -10,11 +10,55 @@ import os
 import torch
 import logging
 import shutil
-from typing import Dict, Any, Optional, List
+import re # Import regex
+import glob # Keep glob for potential use, though maybe not needed after refactor
+from typing import Dict, Any, Optional, List, Tuple
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
 from pathlib import Path
 from ..data.tokenizers.base import BaseTokenizer
+from dataclasses import dataclass, asdict # Import dataclasses
+from ..training.callbacks.base import CallbackList # Ensure CallbackList is imported if used directly
+
+# Define custom exception for checkpoint loading errors
+class CheckpointLoadError(Exception):
+    """Custom exception for checkpoint loading errors."""
+    pass
+
+# Define TrainingState dataclass
+@dataclass
+class TrainingState:
+    """Dataclass to hold the state relevant for checkpointing."""
+    epoch: int
+    global_step: int
+    model_state_dict: Dict[str, Any]
+    optimizer_state_dict: Optional[Dict[str, Any]] = None
+    scheduler_state_dict: Optional[Dict[str, Any]] = None
+    scaler_state_dict: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None
+    callbacks_state: Optional[Dict[str, Any]] = None
+    tokenizer_path: Optional[str] = None
+    best_val_metric: Optional[float] = None
+    metrics: Optional[Dict[str, Any]] = None
+    tensorboard_log_dir: Optional[str] = None
+
+    # Add a class method to load from a dictionary, handling missing keys
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TrainingState":
+        return cls(
+            model_state_dict=data.get('model_state_dict'), # Required, should raise error if missing later?
+            optimizer_state_dict=data.get('optimizer_state_dict'), # Required
+            epoch=data.get('epoch', 0),
+            global_step=data.get('global_step', 0),
+            scheduler_state_dict=data.get('scheduler_state_dict'),
+            scaler_state_dict=data.get('scaler_state_dict'),
+            config=data.get('config'),
+            metrics=data.get('metrics', {}),
+            best_val_metric=data.get('best_val_metric', float('inf')),
+            tensorboard_log_dir=data.get('tensorboard_log_dir'),
+            callbacks_state=data.get('callbacks_state'),
+            tokenizer_path=data.get('tokenizer_path')
+        )
 
 class CheckpointManager:
     """Manages saving and loading model checkpoints."""
@@ -26,30 +70,38 @@ class CheckpointManager:
         callbacks: Optional[List[Any]] = None,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         scaler: Optional[torch.amp.GradScaler] = None,
-        config: Optional[Dict[str, Any]] = None,
         device: Optional[torch.device] = None,
         tokenizer: Optional[BaseTokenizer] = None,
         keep_last_n: int = 3,
-        keep_best_n: int = 1
+        keep_best_n: int = 1,
+        config: Optional[Dict[str, Any]] = None, # Keep config dict for saving
+        checkpoint_dir: Optional[str] = None,
+        checkpoint_prefix: str = "checkpoint",
+        max_checkpoints_to_keep: int = 5,
+        save_best_only: bool = False,
     ):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.scaler = scaler
-        self.config = config
-        self.checkpoint_dir = os.getcwd()
+        self.checkpoint_dir = Path(checkpoint_dir or os.path.join(os.getcwd(), "checkpoints"))
         self.callbacks = callbacks
         self.logger = logging.getLogger(self.__class__.__name__)
         self.device = device
         self.tokenizer = tokenizer
         self.keep_last_n = keep_last_n
         self.keep_best_n = keep_best_n
+        self.config = config or {} # Store config dict
+        self.checkpoint_prefix = checkpoint_prefix
+        self.max_checkpoints_to_keep = max_checkpoints_to_keep
+        self.save_best_only = save_best_only
 
         # Ensure the main checkpoint directory exists
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
         self.logger.info(f"CheckpointManager using directory: {self.checkpoint_dir}")
 
         # Track saved checkpoints
-        self.saved_checkpoints = []
+        self.saved_checkpoints: List[Tuple[str, bool]] = [] # List of (path, is_best)
         self.best_checkpoints = []
 
     def _get_tensorboard_log_dir(self) -> Optional[str]:
@@ -77,14 +129,19 @@ class CheckpointManager:
 
     def save_checkpoint(
         self,
-        state: Dict[str, Any],
-        filename: str,
-        metrics: Optional[Dict[str, float]] = None,
+        state: TrainingState, # Use TrainingState type hint
+        filename: str, 
+        metrics: Optional[Dict[str, float]] = None, # Metrics can still be passed separately for logging/best logic
         is_best: bool = False
     ) -> None:
         """Saves a checkpoint of the model and training state using a state dict.
            Handles tokenizer saving internally using self.tokenizer.
         """
+        # Skip saving regular checkpoints if save_best_only is True and this is not the best
+        if self.save_best_only and not is_best:
+            self.logger.debug(f"Skipping saving non-best checkpoint {filename} due to save_best_only=True.")
+            return
+            
         self.logger.info(f"[CheckpointManager] Received save request for filename: {filename}")
 
         # Ensure the save directory exists (using self.checkpoint_dir)
@@ -96,21 +153,35 @@ class CheckpointManager:
         self.logger.info(f"[CheckpointManager] Attempting to save checkpoint state to: {save_path}")
 
         try:
-            # Save the provided state dictionary
-            torch.save(state, save_path)
+            # Convert TrainingState object to dictionary before saving
+            state_dict_to_save = asdict(state) 
+            # Filter out None values if desired, although torch.save handles them
+            # state_dict_to_save = {k: v for k, v in asdict(state).items() if v is not None}
+            torch.save(state_dict_to_save, save_path)
             self.logger.info(f"[CheckpointManager] Successfully saved checkpoint state to {save_path}")
             
             # --- Save Tokenizer (using self.tokenizer) --- #
             if self.tokenizer is not None:
+                # Determine tokenizer save path based on global_step from the state
+                tokenizer_save_dir_name = f"tokenizer_step_{state.global_step}" 
+                tokenizer_save_path = Path(self.checkpoint_dir) / tokenizer_save_dir_name
                 self.logger.info(f"[CheckpointManager] Tokenizer object type: {type(self.tokenizer)}")
-                tokenizer_save_path = Path(self.checkpoint_dir) / "tokenizer" 
-                self.logger.info(f"[CheckpointManager] Attempting to save tokenizer using save to: {tokenizer_save_path}")
+                self.logger.info(f"[CheckpointManager] Attempting to save tokenizer to: {tokenizer_save_path}")
                 try:
                     # Ensure the directory exists
                     tokenizer_save_path.mkdir(parents=True, exist_ok=True)
                     # Use the .save() method appropriate for our custom tokenizers
                     self.tokenizer.save(str(tokenizer_save_path))
                     self.logger.info(f"[CheckpointManager] Successfully saved tokenizer to {tokenizer_save_path}")
+                    # Add tokenizer path to the state dict *before* saving checkpoint, if possible?
+                    # Or save it separately? Current logic saves checkpoint first.
+                    # We need to ensure the *loaded* checkpoint *knows* about the tokenizer path.
+                    # Let's modify the state *before* saving the main checkpoint file.
+                    state_dict_to_save['tokenizer_path'] = tokenizer_save_dir_name
+                    # Re-save the checkpoint with the tokenizer path included
+                    torch.save(state_dict_to_save, save_path)
+                    self.logger.info(f"[CheckpointManager] Re-saved checkpoint {save_path} to include tokenizer path: {tokenizer_save_dir_name}")
+
                 except AttributeError as ae:
                      # Log if .save() is missing, though it should exist for BaseTokenizer subclasses
                      self.logger.error(f"[CheckpointManager] Tokenizer object {type(self.tokenizer)} lacks the 'save' method. Error: {ae}", exc_info=True)
@@ -120,71 +191,119 @@ class CheckpointManager:
                  self.logger.warning("[CheckpointManager] self.tokenizer is None, skipping tokenizer save.")
             # --- End Save Tokenizer --- #
 
-            # Manage saved checkpoints (track based on filename pattern)
-            self._add_saved_checkpoint(str(save_path))
-            # --- Simplified best checkpoint tracking --- 
+            # Add to tracking list (only non-best, numbered checkpoints)
+            # Also track if save_best_only=True, otherwise cleanup might remove best 
+            if "best.pt" not in filename: # Check filename pattern
+                 self._add_saved_checkpoint(str(save_path), is_best)
+            
+            # Handle best checkpoint link/copy
             if is_best:
                 best_path = Path(self.checkpoint_dir) / "best.pt"
-                shutil.copyfile(save_path, best_path)
+                # Use copy2 to preserve metadata if preferred, or copyfile for simplicity
+                shutil.copyfile(save_path, best_path) 
                 self.logger.info(f"Saved new best checkpoint link to {best_path} based on metrics: {metrics}")
-                # Update internal list of best checkpoints
-                self._add_best_checkpoint(str(best_path)) # Add the best.pt link
+                # No need to track best.pt in a separate list for cleanup
 
         except Exception as e:
             self.logger.error(f"Failed to save checkpoint {filename}: {e}", exc_info=True)
             # Return None or raise? For now, log and continue if possible
             return None 
 
-    def _add_saved_checkpoint(self, checkpoint_path: str):
-        """Adds a checkpoint path to the tracking list and manages cleanup."""
-        # Simple tracking: add all non-best checkpoints to one list
-        if "best.pt" not in checkpoint_path:
-            self.saved_checkpoints.append(checkpoint_path)
-            self.saved_checkpoints.sort(key=os.path.getmtime) # Keep sorted by time
-            self._manage_checkpoints(self.saved_checkpoints, self.keep_last_n)
-
-    def _add_best_checkpoint(self, checkpoint_path: str):
-        """Adds a best checkpoint path and manages cleanup."""
-        # Track best checkpoints separately
-        self.best_checkpoints.append(checkpoint_path)
-        self.best_checkpoints.sort(key=os.path.getmtime) # Keep sorted by time
-        self._manage_checkpoints(self.best_checkpoints, self.keep_best_n)
-
-    def _manage_checkpoints(self, checkpoint_list: List[str], keep_n: int):
-        """Removes older checkpoints if the list exceeds keep_n."""
-        if keep_n <= 0: # Keep all if keep_n is non-positive
-            return
-        
-        while len(checkpoint_list) > keep_n:
-            path_to_remove = checkpoint_list.pop(0) # Remove the oldest
+    def _parse_checkpoint_name(self, filename: str) -> Optional[Tuple[int, int]]:
+        """Parses epoch and step from a checkpoint filename.
+           Assumes pattern like 'epoch=E-step=S.pt' or similar prefixes.
+        """
+        match = re.search(r"epoch=(\d+).*step=(\d+).*.pt", Path(filename).name)
+        if match:
             try:
-                if os.path.exists(path_to_remove):
-                    os.remove(path_to_remove)
-                    self.logger.info(f"Removed old checkpoint: {path_to_remove}")
-                # REMOVED Tokenizer deletion logic
+                epoch = int(match.group(1))
+                step = int(match.group(2))
+                return epoch, step
+            except (ValueError, IndexError):
+                self.logger.warning(f"Could not parse epoch/step from filename: {filename}")
+        return None
 
+    def _add_saved_checkpoint(self, checkpoint_path: str, is_best: bool):
+        """Adds a checkpoint path to the tracking list and manages cleanup."""
+        self.saved_checkpoints.append((checkpoint_path, is_best))
+        # Sort based on parsed epoch/step, then manage cleanup
+        self.saved_checkpoints.sort(key=lambda p: self._parse_checkpoint_name(p[0]) or (-1, -1))
+        self._manage_checkpoints()
+
+    def _manage_checkpoints(self):
+        """Manages checkpoint retention based on epoch/step and max_checkpoints_to_keep."""
+        if self.max_checkpoints_to_keep <= 0:
+            return # Keep all checkpoints
+
+        # Separate best checkpoints from regular ones for sorting
+        best_checkpoints = [cp for cp in self.saved_checkpoints if cp[1]]
+        regular_checkpoints = [cp for cp in self.saved_checkpoints if not cp[1]]
+
+        # Sort regular checkpoints based on parsed epoch/step (most recent first)
+        sorted_regular = sorted(
+            regular_checkpoints, 
+            key=lambda cp: self._parse_checkpoint_name(os.path.basename(cp[0])) or (-1, -1), # Handle None case
+            reverse=True
+        )
+
+        # Determine how many regular checkpoints to keep
+        num_to_keep = self.max_checkpoints_to_keep
+        checkpoints_to_delete = sorted_regular[num_to_keep:]
+
+        # Delete the oldest regular checkpoints
+        for path, _ in checkpoints_to_delete:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    self.logger.info(f"Removed old checkpoint: {path}")
+                    # Also remove associated tokenizer dir if it exists
+                    parsed_name = self._parse_checkpoint_name(os.path.basename(path))
+                    if parsed_name:
+                        tokenizer_dir_name = f"tokenizer_step_{parsed_name[1]}"
+                        tokenizer_dir_path = os.path.join(os.path.dirname(path), tokenizer_dir_name)
+                        if os.path.isdir(tokenizer_dir_path):
+                            import shutil # Use shutil for directory removal
+                            shutil.rmtree(tokenizer_dir_path)
+                            self.logger.info(f"Removed associated tokenizer dir: {tokenizer_dir_path}")
             except OSError as e:
-                self.logger.error(f"Error removing old checkpoint {path_to_remove}: {e}") 
-    # --- End Restored Methods --- 
+                self.logger.error(f"Error removing checkpoint file {path}: {e}")
 
-    def load_checkpoint(self, path: str) -> Optional[Dict[str, Any]]:
-        """Loads the trainer state from a checkpoint file (absolute path expected)."""
-        # Path is now expected to be absolute
-        if not os.path.exists(path):
-            self.logger.error(f"Checkpoint file not found: {path}")
-            return None
+        # Update the list of saved checkpoints (keep all 'best' and the retained regular ones)
+        self.saved_checkpoints = best_checkpoints + sorted_regular[:num_to_keep]
 
-        loaded_state = {}
+    def load_checkpoint(self, path: Optional[str] = None, map_location: Optional[str] = None) -> Optional[TrainingState]:
+        """Loads the trainer state from a checkpoint file (absolute path expected).
+           Raises FileNotFoundError if the path doesn't exist.
+           Raises CheckpointLoadError for other loading issues.
+        """
+        load_path_str = path # Keep original string if provided
+        # Use lower() for case-insensitive comparison for "latest"
+        if load_path_str is None or load_path_str.lower() == "latest":
+            # Find the latest checkpoint based on parsed name
+            checkpoints = self._get_sorted_checkpoints()
+            if not checkpoints:
+                self.logger.warning("No checkpoints found to load.")
+                return None # Explicitly return None if no checkpoints are found
+            load_path_str = checkpoints[-1][0] # Path (string) of the latest checkpoint
+
+        # Convert to Path object for internal use
+        load_path = Path(load_path_str)
+
         try:
-            # Load checkpoint onto the correct device directly
-            # Set weights_only=False to allow loading non-tensor objects like OmegaConf config
-            self.logger.warning("Loading checkpoint with weights_only=False. Ensure the checkpoint source is trusted.")
-            checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+            if not load_path.exists(): # Use Path.exists()
+                self.logger.error(f"Checkpoint file not found: {load_path}")
+                # Raise FileNotFoundError instead of returning None
+                raise FileNotFoundError(f"Checkpoint file not found: {load_path}")
 
-            # Load model state
-            if 'model_state_dict' in checkpoint:
+            self.logger.info(f"Loading checkpoint from: {load_path}")
+            # Pass the Path object directly to torch.load
+            checkpoint_dict = torch.load(load_path, map_location=map_location or self.device, weights_only=False)
+
+            # Load state dicts into respective objects
+            # Model
+            if 'model_state_dict' in checkpoint_dict:
                 # Handle potential DataParallel/DDP wrapping
-                state_dict = checkpoint['model_state_dict']
+                state_dict = checkpoint_dict['model_state_dict']
                 # Simple check for keys starting with 'module.'
                 if any(key.startswith('module.') for key in state_dict.keys()):
                     self.logger.info("Detected 'module.' prefix in checkpoint state_dict, attempting to load into unwrapped model.")
@@ -195,153 +314,114 @@ class CheckpointManager:
                     self.model.load_state_dict(state_dict)
             else:
                 self.logger.warning("Checkpoint does not contain 'model_state_dict'.")
+                raise CheckpointLoadError(f"Checkpoint {load_path} is missing required key: 'model_state_dict'")
 
-            # Load optimizer state
-            if 'optimizer_state_dict' in checkpoint:
-                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            # Optimizer
+            if 'optimizer_state_dict' in checkpoint_dict:
+                self.optimizer.load_state_dict(checkpoint_dict['optimizer_state_dict'])
             else:
                 self.logger.warning("Checkpoint does not contain 'optimizer_state_dict'. Optimizer state not loaded.")
+                # Decide if this should be fatal? Maybe not if only evaluating.
+                # raise CheckpointLoadError(f"Checkpoint {load_path} is missing required key: 'optimizer_state_dict'")
 
-            # Load scheduler state
-            if self.scheduler and 'scheduler_state_dict' in checkpoint:
-                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            # Scheduler
+            if self.scheduler and 'scheduler_state_dict' in checkpoint_dict:
+                self.scheduler.load_state_dict(checkpoint_dict['scheduler_state_dict'])
             elif self.scheduler:
                 self.logger.warning("Checkpoint does not contain 'scheduler_state_dict'. Scheduler state not loaded.")
 
-            # Load scaler state for AMP
-            if self.scaler and 'scaler_state_dict' in checkpoint:
-                self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            # Scaler
+            if self.scaler and 'scaler_state_dict' in checkpoint_dict:
+                self.scaler.load_state_dict(checkpoint_dict['scaler_state_dict'])
             elif self.scaler:
                 self.logger.warning("Checkpoint does not contain 'scaler_state_dict'. AMP scaler state not loaded.")
 
-            # Extract state information to return
-            loaded_state['epoch'] = checkpoint.get('epoch', 0)
-            loaded_state['global_step'] = checkpoint.get('global_step', 0)
-            loaded_state['best_val_metric'] = checkpoint.get('best_val_metric', float('inf'))
-            loaded_state['metrics'] = checkpoint.get('metrics', {})
-            loaded_state['config'] = checkpoint.get('config')
-            loaded_state['tensorboard_log_dir'] = checkpoint.get('tensorboard_log_dir')
-            
-            self.logger.info(f"Successfully loaded checkpoint from {path}")
-            return loaded_state
+            # --- Load Tokenizer --- #
+            if self.tokenizer is not None:
+                tokenizer_path_in_ckpt = checkpoint_dict.get('tokenizer_path')
+                if tokenizer_path_in_ckpt:
+                    # Construct absolute path from checkpoint dir and relative path in checkpoint
+                    tokenizer_abs_path = load_path.parent / tokenizer_path_in_ckpt
+                    self.logger.info(f"Attempting to load tokenizer from path specified in checkpoint: {tokenizer_abs_path}")
+                    
+                    if tokenizer_abs_path.exists() and tokenizer_abs_path.is_dir():
+                        try:
+                            # Assuming tokenizer has a .load() method accepting the directory path
+                            self.tokenizer.load(str(tokenizer_abs_path))
+                            self.logger.info(f"Successfully loaded tokenizer state from {tokenizer_abs_path}")
+                        except AttributeError as ae:
+                            self.logger.warning(f"Tokenizer object {type(self.tokenizer)} lacks the required 'load' method. Tokenizer state not loaded. Error: {ae}", exc_info=True)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load tokenizer state from {tokenizer_abs_path}: {e}. Continuing checkpoint load.", exc_info=True)
+                    else:
+                        self.logger.warning(f"Tokenizer directory '{tokenizer_abs_path}' specified in checkpoint not found. Skipping tokenizer load.")
+                else:
+                    self.logger.warning("Checkpoint does not contain 'tokenizer_path'. Tokenizer state not loaded.")
+            else:
+                self.logger.info("No tokenizer instance in CheckpointManager, skipping tokenizer load.")
+            # --- End Load Tokenizer --- #
 
-        except FileNotFoundError:
-            self.logger.error(f"Checkpoint file not found during load attempt: {path}")
-            return None
+            # Callbacks state
+            if self.callbacks and "callbacks_state" in checkpoint_dict and checkpoint_dict["callbacks_state"] is not None:
+                try:
+                    self.callbacks.load_state_dict(checkpoint_dict["callbacks_state"])
+                    self.logger.info("Loaded callbacks state.")
+                except Exception as e:
+                    self.logger.error(f"Failed to load callbacks state: {e}")
+            elif self.callbacks and "callbacks_state" not in checkpoint_dict:
+                self.logger.warning("Callbacks state not found in checkpoint.")
+
+            # Create and return TrainingState object from the loaded dictionary
+            loaded_state_obj = TrainingState.from_dict(checkpoint_dict)
+
+            self.logger.info(f"Successfully loaded checkpoint from {load_path} into TrainingState object.")
+
+            # --- Callbacks Hook --- #
+            if self.callbacks:
+                # Pass the fully constructed TrainingState object to the callback
+                self.callbacks.on_load_checkpoint(trainer_state=loaded_state_obj)
+
+            return loaded_state_obj
+
+        except FileNotFoundError: # Specific handling for file not found
+            self.logger.error(f"Checkpoint file not found during load attempt: {load_path}")
+            raise # Re-raise the FileNotFoundError
         except Exception as e:
-            self.logger.error(f"Failed to load checkpoint from {path}: {e}", exc_info=True)
-            return None 
+            self.logger.error(f"Failed to load checkpoint from {load_path}: {e}", exc_info=True)
+            # Raise CheckpointLoadError for other errors
+            raise CheckpointLoadError(f"Failed to load checkpoint from {load_path}: {e}") from e
 
-# --- Module-Level Helper Functions ---
-# Moved from checkpoint_utils.py
+    def _get_sorted_checkpoints(self) -> List[Tuple[str, int, int]]:
+        """Gets checkpoint files from the directory, sorted by epoch and step."""
+        # Use Path.glob for better reliability
+        checkpoint_files = list(self.checkpoint_dir.glob(f"{self.checkpoint_prefix}_*.pt"))
 
-def get_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
-    """
-    Get the path to the latest checkpoint in a directory.
+        parsed_checkpoints = []
+        for f_path in checkpoint_files: # f_path is a Path object
+            f = str(f_path) # Convert to string for storage/return
+            parsed = self._parse_checkpoint_name(f_path.name) # Parse the name part
+            if parsed: # Only include successfully parsed names
+                parsed_checkpoints.append((f, parsed[0], parsed[1])) # (path_str, epoch, step)
 
-    Args:
-        checkpoint_dir: Directory containing checkpoint files
+        # Sort by epoch, then step (ascending)
+        parsed_checkpoints.sort(key=lambda x: (x[1], x[2]))
+        return parsed_checkpoints
 
-    Returns:
-        Path to the latest checkpoint or None if no checkpoint is found
-    """
-    if not os.path.exists(checkpoint_dir):
-        logging.warning(f"Checkpoint directory not found: {checkpoint_dir}")
-        return None
-
-    try:
-        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(('.pt', '.pth'))]
-    except OSError as e:
-        logging.error(f"Error listing directory {checkpoint_dir}: {e}")
-        return None
-
-    if not checkpoint_files:
-        logging.warning(f"No checkpoint files (.pt or .pth) found in {checkpoint_dir}")
-        return None
-
-    try:
-        # Sort checkpoint files by modification time
-        checkpoint_files.sort(key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)), reverse=True)
-    except FileNotFoundError:
-        # Handle race condition: file deleted between listdir and getmtime
-        logging.warning(f"File not found during sorting in {checkpoint_dir}, possibly deleted. Retrying...")
-        # Simple retry: could implement more robust logic
-        return get_latest_checkpoint(checkpoint_dir) 
-    except Exception as e:
-        logging.error(f"Error sorting checkpoint files in {checkpoint_dir}: {e}")
-        return None
-
-    latest_checkpoint = os.path.join(checkpoint_dir, checkpoint_files[0])
-    logging.info(f"Latest checkpoint found: {latest_checkpoint}")
-    return latest_checkpoint
-
-def count_checkpoints(checkpoint_dir: str) -> int:
-    """
-    Count the number of checkpoint files (.pt or .pth) in a directory.
-
-    Args:
-        checkpoint_dir: Directory containing checkpoint files
-
-    Returns:
-        Number of checkpoint files
-    """
-    if not os.path.exists(checkpoint_dir):
-        logging.warning(f"Checkpoint directory not found: {checkpoint_dir}")
-        return 0
-
-    try:
-        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(('.pt', '.pth'))]
-        return len(checkpoint_files)
-    except OSError as e:
-        logging.error(f"Error accessing checkpoint directory {checkpoint_dir}: {e}")
-        return 0
-
-def clean_old_checkpoints(checkpoint_dir: str, keep: int = 5) -> None:
-    """
-    Remove old checkpoint files (.pt or .pth), keeping only the most recent ones.
-
-    Args:
-        checkpoint_dir: Directory containing checkpoint files
-        keep: Number of most recent checkpoints to keep (must be >= 0)
-    """
-    if keep < 0:
-        logging.warning(f"Invalid value for 'keep' ({keep}). Must be non-negative. Not cleaning checkpoints.")
-        return
+    def _parse_checkpoint_name(self, filename: str) -> Optional[Tuple[int, int]]:
+        """Parses epoch and step from a checkpoint filename."""
+        # Matches patterns like: checkpoint_epoch_1_step_100.pt, checkpoint_step_500_best.pt, checkpoint_step_1000.pt
+        # Allows optional '_best'
+        match_epoch_step = re.match(rf"{self.checkpoint_prefix}_epoch_(\d+)_step_(\d+)(?:_best)?\.pt", filename)
+        match_step_only = re.match(rf"{self.checkpoint_prefix}_step_(\d+)(?:_best)?\.pt", filename)
         
-    if not os.path.exists(checkpoint_dir):
-        logging.warning(f"Checkpoint directory not found: {checkpoint_dir}. Cannot clean.")
-        return
-
-    try:
-        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(('.pt', '.pth'))]
-    except OSError as e:
-        logging.error(f"Error listing directory {checkpoint_dir} for cleaning: {e}")
-        return
-
-    if len(checkpoint_files) <= keep:
-        logging.info(f"Found {len(checkpoint_files)} checkpoints in {checkpoint_dir}. No cleaning needed (keeping {keep}).")
-        return
-
-    try:
-        # Sort checkpoint files by modification time
-        checkpoint_files.sort(key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)), reverse=True)
-    except FileNotFoundError:
-        # Handle race condition: file deleted between listdir and getmtime
-        logging.warning(f"File not found during sorting in {checkpoint_dir} for cleaning, possibly deleted. Skipping cleaning cycle.")
-        return
-    except Exception as e:
-        logging.error(f"Error sorting checkpoint files in {checkpoint_dir} for cleaning: {e}")
-        return
-
-    # Remove old checkpoint files
-    files_to_remove = checkpoint_files[keep:]
-    logging.info(f"Cleaning {len(files_to_remove)} old checkpoints from {checkpoint_dir} (keeping {keep}).")
-    for checkpoint_file in files_to_remove:
-        checkpoint_path = os.path.join(checkpoint_dir, checkpoint_file)
-        try:
-            os.remove(checkpoint_path)
-            logging.debug(f"Removed old checkpoint: {checkpoint_path}") # Use debug level for successful removal
-        except FileNotFoundError:
-            logging.warning(f"Attempted to remove {checkpoint_path}, but it was already deleted.")
-        except Exception as e:
-            logging.error(f"Failed to remove checkpoint {checkpoint_path}: {str(e)}") 
+        if match_epoch_step:
+            epoch = int(match_epoch_step.group(1))
+            step = int(match_epoch_step.group(2))
+            return epoch, step
+        elif match_step_only:
+             epoch = 0 # Assign epoch 0 if only step is present
+             step = int(match_step_only.group(1))
+             return epoch, step
+        else:
+            self.logger.debug(f"Could not parse epoch/step from filename: {filename}") # Debug level might be better
+            return None

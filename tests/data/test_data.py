@@ -20,8 +20,9 @@ import numpy as np
 import shutil
 from torch.utils.data import DataLoader
 
-# Corrected import
-from craft.data.base import BaseDataset, create_dataset_from_config
+# Import from base and new factory location
+from craft.data.base import BaseDataset 
+from craft.data.factory import create_dataset_from_config 
 from craft.data.dataset import PickledDataset
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))

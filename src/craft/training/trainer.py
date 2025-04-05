@@ -16,12 +16,13 @@ from omegaconf import OmegaConf
 
 from .training_loop import TrainingLoop
 from .evaluation import Evaluator
-from .checkpointing import CheckpointManager
-from .callbacks import CallbackList
+from .checkpointing import CheckpointManager, TrainingState, CheckpointLoadError
+from .callbacks import CallbackList, TensorBoardLogger
 from .generation import TextGenerator
 from .progress import ProgressTracker
 from craft.data.tokenizers.base import BaseTokenizer
 from ..config.schemas import TrainingConfig
+from ..utils.logging import setup_logging
 
 class Trainer:
     """Main trainer class that coordinates all training components."""
@@ -135,25 +136,35 @@ class Trainer:
         try:
             state = self.checkpoint_manager.load_checkpoint(self.resume_from_checkpoint)
             if state:
-                self.epoch = state.get('epoch', 0)
-                self.global_step = state.get('global_step', 0)
-                self.best_val_metric = state.get('best_val_metric', float('inf'))
-                self.metrics = state.get('metrics', {})
-                # Store the loaded TensorBoard path
-                self.loaded_tb_log_dir = state.get('tensorboard_log_dir') 
+                # Update Trainer state from loaded TrainingState
+                self.epoch = state.epoch
+                self.global_step = state.global_step
+                self.best_val_metric = state.best_val_metric if state.best_val_metric is not None else float('inf')
+                self.metrics = state.metrics or {}
+                self.loaded_tb_log_dir = state.tensorboard_log_dir
                 self.logger.info(f"Resumed trainer state from checkpoint at epoch {self.epoch}, step {self.global_step}")
                 if self.loaded_tb_log_dir:
                     self.logger.info(f"Loaded TensorBoard log directory: {self.loaded_tb_log_dir}")
             else:
-                 self.logger.error(f"Checkpoint load returned None state. Cannot resume state.")
-                 # Decide how to handle: raise error, start fresh?
-                 # Starting fresh for now
-                 self.resume_from_checkpoint = None # Clear flag
-
+                 # If load returns None (e.g., no checkpoints found for 'latest')
+                 self.logger.error(f"Checkpoint load returned None. Cannot resume state from {self.resume_from_checkpoint}.")
+                 self.resume_from_checkpoint = None # Clear flag so we start fresh
+                 raise CheckpointLoadError("Checkpoint load returned None state.") # Raise an error to indicate failure
+        except FileNotFoundError as e: # Catch specifically FileNotFoundError
+             self.logger.error(f"Checkpoint file not found during resume: {e}")
+             self.resume_from_checkpoint = None
+             self.logger.warning("Cleared resume_from_checkpoint flag.")
+             raise e # Re-raise the error so the test can catch it
+        except CheckpointLoadError as e:
+            self.logger.error(f"Checkpoint load error during resume: {e}")
+            self.resume_from_checkpoint = None 
+            self.logger.warning("Cleared resume_from_checkpoint flag due to load failure.")
+            raise e # Re-raise the error
         except Exception as e:
-            self.logger.error(f"Failed to resume from checkpoint: {e}")
-            # Optionally re-raise or handle more gracefully
-            raise
+            self.logger.error(f"An unexpected error occurred during resume from checkpoint: {e}", exc_info=True)
+            self.resume_from_checkpoint = None
+            self.logger.warning("Cleared resume_from_checkpoint flag due to unexpected error.")
+            raise e # Re-raise unexpected errors
 
     def train(self):
         """Main training loop."""
@@ -224,42 +235,71 @@ class Trainer:
                      self.logger.info(f"Reached max_steps ({self.max_steps}) after epoch {epoch+1}. Stopping training.")
                      break # Exit the epoch loop
                 
-                # Evaluation - Use self.eval_interval derived from config
+                # Evaluation block
+                is_best = False # Default to False if no evaluation
+                val_metrics = {} # Default to empty if no evaluation
                 if self.val_dataloader is not None and self.eval_interval > 0 and (epoch + 1) % self.eval_interval == 0:
                     evaluator = Evaluator(
                         model=self.model,
                         val_dataloader=self.val_dataloader,
                         device=self.device,
-                        config=self.config, # Pass TrainingConfig here too if needed
+                        config=self.config,
                         use_amp=self.use_amp,
                         callbacks=self.callbacks
                     )
                     val_metrics = evaluator.evaluate()
-                    
-                    # Update best metric
-                    current_val_loss = val_metrics.get('loss', float('inf')) # Safely get loss
-                    if current_val_loss < self.best_val_metric:
+                    current_val_loss = val_metrics.get('loss', float('inf'))
+                    is_best = current_val_loss < self.best_val_metric
+                    if is_best:
                         self.best_val_metric = current_val_loss
-                        if self.checkpoint_dir:
-                            # Use the manager's dir
-                            save_path = os.path.join(self.checkpoint_manager.checkpoint_dir, f"checkpoint_step_{self.global_step}_best.pt") # Indicate best
-                            self.logger.info(f"New best validation metric: {self.best_val_metric:.4f}. Saving checkpoint to {save_path}")
-                            self.checkpoint_manager.save_checkpoint(
-                                path=save_path, 
-                                current_epoch=self.epoch, 
-                                global_step=self.global_step,
-                                best_val_metric=self.best_val_metric,
-                                metrics={**train_metrics, **val_metrics},
-                                is_best=True 
-                            )
+                        self.logger.info(f"New best validation metric: {self.best_val_metric:.4f} at epoch {epoch+1}, step {self.global_step}")
+                        # No separate save call here anymore
+
+                # --- Save Checkpoint based on Interval (Simplified) --- #
+                # Call save if interval is met. Pass the is_best status determined during eval.
+                if self.save_interval > 0 and (epoch + 1) % self.save_interval == 0:
+                    filename = f"checkpoint_epoch_{self.epoch}_step_{self.global_step}.pt"
+                    self.logger.info(f"Save interval reached. Saving checkpoint {filename} (is_best={is_best})")
+                    
+                    # --- Create TrainingState object --- #
+                    current_state = TrainingState(
+                        model_state_dict=self.model.state_dict(), # Get current model state
+                        optimizer_state_dict=self.optimizer.state_dict() if self.optimizer else None,
+                        scheduler_state_dict=self.scheduler.state_dict() if self.scheduler else None,
+                        scaler_state_dict=self.scaler.state_dict() if self.scaler and self.scaler.is_enabled() else None,
+                        epoch=self.epoch,
+                        global_step=self.global_step,
+                        best_val_metric=self.best_val_metric,
+                        metrics={**train_metrics, **val_metrics}, # Combined metrics
+                        config=self.config.model_dump() if self.config else {},
+                        # TODO: Add other relevant states like RNG states, callback states?
+                    )
+                    
+                    # --- Call CheckpointManager with the state --- #
+                    self.checkpoint_manager.save_checkpoint(
+                        state=current_state,
+                        filename=filename, 
+                        is_best=is_best
+                    )
+                # --- End Simplified Save Check --- #
 
                 self.callbacks.on_epoch_end(epoch=epoch, logs=train_metrics)
                 
+                # Check for stop signal from callbacks
+                if self._stop_training:
+                    self.logger.info("Stopping training based on callback signal.")
+                    break
+                    
+            # After loop finishes normally
+            if not self._stop_training:
+                 self.logger.info("Training finished after completing specified epochs/steps.")
+
         except Exception as e:
             self.logger.error(f"Training failed: {e}", exc_info=True) # Log traceback
             raise
         finally:
             self.callbacks.on_train_end()
+            self.logger.info("--- Training Run Ended ---")
             
         return self.metrics
 
