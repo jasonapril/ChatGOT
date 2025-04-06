@@ -114,7 +114,7 @@ class TestSubwordTokenizer:
         
         tokenizer = SubwordTokenizer(config=default_subword_config)
         input_files = ["dummy_train1.txt", "dummy_train2.txt"]
-        output_dir = "dummy_output_dir"
+        output_dir = "dummy_output_dir" # TODO: Use tmp_path
         
         tokenizer.train(input_files, output_dir)
         

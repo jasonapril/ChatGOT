@@ -33,6 +33,8 @@ class TestTrainerGenerate:
         mock_config_obj.log_interval = 10
         mock_config_obj.eval_interval = 100
         mock_config_obj.save_interval = 500
+        mock_config_obj.time_save_interval_seconds = None
+        mock_config_obj.time_eval_interval_seconds = None
         mock_config_obj.save_steps_interval = 0
         mock_config_obj.checkpoint_dir = None
         mock_config_obj.keep_last = None

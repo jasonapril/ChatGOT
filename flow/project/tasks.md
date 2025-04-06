@@ -211,3 +211,15 @@ This file serves as the working memory for all active tasks in the project. It's
   - **Context**: Previously labeled Task 3.3.
   - **Status**: DONE 2025-04-04
   - **Files**: `tests/data/tokenizers/test_subword.py`, `tests/data/tokenizers/test_sentencepiece.py`, `tests/training/test_checkpointing.py`
+
+### **[P2 - Medium]** Task: Improve test coverage for configuration loading and component instantiation #testing #config #ci
+*   Status: `🟢 Active`
+*   Goal: Prevent runtime errors related to Hydra config, Pydantic validation, and component setup (factories, callbacks).
+*   Details:
+    *   Add integration tests for `main.py` using `hydra.experimental.compose`.
+    *   Add tests for factory functions with realistic `DictConfig`.
+    *   Add tests verifying callback instantiation loop.
+    *   Add tests for checkpoint save/resume.
+
+### **[P1 - High]** Task: Resume training chatgot_95m_subword (Subword Tokenizer)
+*   Status: `🚧 Blocked` (Blocked by configuration/runtime errors)

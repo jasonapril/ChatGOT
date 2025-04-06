@@ -130,30 +130,32 @@ def test_create_data_loaders_train_val(processed_data_dir):
     data_path, _, seq_length, _ = processed_data_dir
     
     cfg_dict = {
-        "data": {
-            "datasets": {
-                "train": {
-                    "dataset": {
-                        "_target_": "craft.data.dataset.PickledDataset",
-                        "file_path": str(data_path / "train.pkl"),
-                        "block_size": seq_length
+        "experiment": {
+            "data": {
+                "datasets": {
+                    "train": {
+                        "dataset": {
+                            "_target_": "craft.data.dataset.PickledDataset",
+                            "file_path": str(data_path / "train.pkl"),
+                            "block_size": seq_length
+                        },
+                        "dataloader": {
+                            "batch_size": 4,
+                            "shuffle": True,
+                            "num_workers": 0
+                        }
                     },
-                    "dataloader": {
-                        "batch_size": 4,
-                        "shuffle": True,
-                        "num_workers": 0
-                    }
-                },
-                "val": {
-                    "dataset": {
-                        "_target_": "craft.data.dataset.PickledDataset",
-                        "file_path": str(data_path / "val.pkl"),
-                        "block_size": seq_length
-                    },
-                    "dataloader": {
-                        "batch_size": 8,
-                        "shuffle": False,
-                        "num_workers": 0
+                    "val": {
+                        "dataset": {
+                            "_target_": "craft.data.dataset.PickledDataset",
+                            "file_path": str(data_path / "val.pkl"),
+                            "block_size": seq_length
+                        },
+                        "dataloader": {
+                            "batch_size": 8,
+                            "shuffle": False,
+                            "num_workers": 0
+                        }
                     }
                 }
             }
@@ -181,19 +183,21 @@ def test_create_data_loaders_train_val_test(processed_data_dir):
     data_path, _, seq_length, _ = processed_data_dir
     
     cfg_dict = {
-        "data": {
-            "datasets": {
-                "train": { # Required
-                     "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "train.pkl"), "block_size": seq_length},
-                     "dataloader": {"batch_size": 4}
-                },
-                 "val": { # Required
-                     "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "val.pkl"), "block_size": seq_length},
-                     "dataloader": {"batch_size": 4}
-                },
-                "test": { # Optional
-                     "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "test.pkl"), "block_size": seq_length},
-                     "dataloader": {"batch_size": 4, "shuffle": False} # Explicit shuffle False
+        "experiment": {
+            "data": {
+                "datasets": {
+                    "train": { # Required
+                        "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "train.pkl"), "block_size": seq_length},
+                        "dataloader": {"batch_size": 4}
+                    },
+                    "val": { # Required
+                        "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "val.pkl"), "block_size": seq_length},
+                        "dataloader": {"batch_size": 4}
+                    },
+                    "test": { # Optional
+                        "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "test.pkl"), "block_size": seq_length},
+                        "dataloader": {"batch_size": 4, "shuffle": False} # Explicit shuffle False
+                    }
                 }
             }
         }
@@ -224,16 +228,16 @@ def test_create_data_loaders_missing_split_config(tmp_path):
     with open(dummy_val_file, 'wb') as f: pickle.dump(dummy_data, f)
 
     # Config missing 'val' dataset key entirely
-    cfg_missing_val_key = OmegaConf.create({"data": {"datasets": {"train": {
+    cfg_missing_val_key = OmegaConf.create({"experiment": {"data": {"datasets": {"train": {
         "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(dummy_train_file), "block_size": block_size},
         "dataloader": {}
-    }}}})
+    }}}}})
 
     # Config missing 'train' dataset key entirely
-    cfg_missing_train_key = OmegaConf.create({"data": {"datasets": {"val": {
+    cfg_missing_train_key = OmegaConf.create({"experiment": {"data": {"datasets": {"val": {
         "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(dummy_val_file), "block_size": block_size},
         "dataloader": {}
-    }}}})
+    }}}}})
 
     # The factory currently does NOT raise an error if 'train' or 'val' keys are completely missing.
     # It only raises if they exist but are misconfigured, or if loading fails later.
@@ -257,15 +261,17 @@ def test_create_data_loaders_missing_target(processed_data_dir):
     """Test error handling for missing _target_ in required dataset config."""
     data_path, _, seq_length, _ = processed_data_dir
     cfg_dict = {
-        "data": {
-            "datasets": {
-                "train": {
-                     "dataset": {"file_path": str(data_path / "train.pkl"), "block_size": seq_length}, # Missing _target_
-                     "dataloader": {"batch_size": 4}
-                },
-                 "val": {
-                     "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "val.pkl"), "block_size": seq_length},
-                     "dataloader": {"batch_size": 4}
+        "experiment": {
+            "data": {
+                "datasets": {
+                    "train": {
+                        "dataset": {"file_path": str(data_path / "train.pkl"), "block_size": seq_length}, # Missing _target_
+                        "dataloader": {"batch_size": 4}
+                    },
+                    "val": {
+                        "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "val.pkl"), "block_size": seq_length},
+                        "dataloader": {"batch_size": 4}
+                    }
                 }
             }
         }
@@ -283,29 +289,31 @@ def test_create_data_loaders_with_tokenizer(processed_data_dir):
     
     # MockTokenizer is defined at module level and should be complete now
     cfg_dict = {
-        "data": {
-            "tokenizer": {
-                "_target_": f"{__name__}.MockTokenizer", 
-                "vocab_size": 150
-            },
-            "datasets": {
-                "train": {
-                    "dataset": {
-                        "_target_": "craft.data.dataset.PickledDataset",
-                        "file_path": str(data_path / "train.pkl"),
-                        "block_size": seq_length,
-                        "tokenizer": "${data.tokenizer}" # Test interpolation
-                    },
-                    "dataloader": {"batch_size": 4}
+        "experiment": {
+            "data": {
+                "tokenizer": {
+                    "_target_": f"{__name__}.MockTokenizer",
+                    "vocab_size": 150
                 },
-                "val": {
-                    "dataset": {
-                        "_target_": "craft.data.dataset.PickledDataset",
-                        "file_path": str(data_path / "val.pkl"),
-                        "block_size": seq_length,
-                        "tokenizer": "${data.tokenizer}"
+                "datasets": {
+                    "train": {
+                        "dataset": {
+                            "_target_": "craft.data.dataset.PickledDataset",
+                            "file_path": str(data_path / "train.pkl"),
+                            "block_size": seq_length,
+                            "tokenizer": "${experiment.data.tokenizer}" # Update interpolation path
+                        },
+                        "dataloader": {"batch_size": 4}
                     },
-                    "dataloader": {"batch_size": 4}
+                    "val": {
+                        "dataset": {
+                            "_target_": "craft.data.dataset.PickledDataset",
+                            "file_path": str(data_path / "val.pkl"),
+                            "block_size": seq_length,
+                            "tokenizer": "${experiment.data.tokenizer}" # Update interpolation path
+                        },
+                        "dataloader": {"batch_size": 4}
+                    }
                 }
             }
         }
@@ -322,32 +330,31 @@ def test_create_data_loaders_tokenizer_override(processed_data_dir):
     """Test overriding tokenizer config with a pre-instantiated one."""
     data_path, _, seq_length, _ = processed_data_dir
     cfg_dict = {
-        "data": {
-            "tokenizer": { # Top-level tokenizer (should be overridden)
-                "_target_": "tests.data.test_datasets.MockTokenizer",
-                "vocab_size": 100 
-            },
-            "datasets": {
-                "train": {
-                    "dataset": {
-                        "_target_": "craft.data.dataset.PickledDataset",
-                        "file_path": str(data_path / "train.pkl"),
-                        "block_size": seq_length,
-                        "tokenizer": { # Override tokenizer for this split
-                            "_target_": "tests.data.test_datasets.MockTokenizer",
-                            "vocab_size": 200 
-                        }
-                    },
-                    "dataloader": {"batch_size": 4}
+        "experiment": {
+            "data": {
+                "tokenizer": { # Top-level tokenizer (should be overridden by override_tokenizer)
+                    "_target_": "tests.data.test_datasets.MockTokenizer",
+                    "vocab_size": 100
                 },
-                "val": {
-                    "dataset": {
-                        "_target_": "craft.data.dataset.PickledDataset",
-                        "file_path": str(data_path / "val.pkl"),
-                        "block_size": seq_length
-                        # No tokenizer override, should use top-level one
+                "datasets": {
+                    "train": {
+                        "dataset": {
+                            "_target_": "craft.data.dataset.PickledDataset",
+                            "file_path": str(data_path / "train.pkl"),
+                            "block_size": seq_length,
+                            # No explicit tokenizer here, override should be used
+                        },
+                        "dataloader": {"batch_size": 4}
                     },
-                    "dataloader": {"batch_size": 4}
+                    "val": {
+                        "dataset": {
+                            "_target_": "craft.data.dataset.PickledDataset",
+                            "file_path": str(data_path / "val.pkl"),
+                            "block_size": seq_length
+                            # No explicit tokenizer here, override should be used
+                        },
+                        "dataloader": {"batch_size": 4}
+                    }
                 }
             }
         }

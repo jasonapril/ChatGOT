@@ -1,6 +1,6 @@
 import logging
 import torch
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from .base import Callback
 # Assume TextGenerator lives elsewhere, e.g., in craft.training.generation
@@ -18,106 +18,157 @@ class SampleGenerationCallback(Callback):
     """
     def __init__(self, step_interval: Optional[int] = None,
                  epoch_interval: Optional[int] = None,
-                 prompt: str = "The meaning of life is",
+                 start_prompt: str = "The meaning of life is ",
                  max_new_tokens: int = 50,
-                 temperature: float = 0.7):
+                 temperature: float = 0.8,
+                 # Add other generation params if needed (top_k, top_p, etc.)
+                 ):
         """
         Args:
             step_interval (Optional[int]): Generate samples every N steps. If None, disabled.
             epoch_interval (Optional[int]): Generate samples every N epochs. If None, disabled.
-            prompt (str): The prompt to use for generation.
+            start_prompt (str): The prompt to use for generation.
             max_new_tokens (int): Maximum number of new tokens to generate.
             temperature (float): Sampling temperature.
         """
         super().__init__()
-        if step_interval is None and epoch_interval is None:
-            self.logger.warning("SampleGenerationCallback initialized but both step_interval and epoch_interval are None. Callback will be inactive.")
         self.step_interval = step_interval
         self.epoch_interval = epoch_interval
-        self.prompt = prompt
+        self.start_prompt = start_prompt
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
-        self.generator = None
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.generator = None # Generator will be created when needed
+        self.initialized = False # Flag to track generator initialization
 
-    def set_trainer(self, trainer):
-        """Set the trainer and initialize the TextGenerator."""
-        super().set_trainer(trainer)
-        # Initialize the TextGenerator only if the model supports generation
-        if hasattr(trainer.model, 'generate') and callable(getattr(trainer.model, 'generate')):
-            # Pass the whole dataset object, TextGenerator will look for tokenizer/decode on it
-            self.generator = TextGenerator(
-                model=trainer.model,
-                device=trainer.device,
-                config=getattr(trainer, 'config', {}), # Pass trainer config (or empty dict)
-                dataset=getattr(trainer, 'dataset', None) # Pass trainer dataset (or None)
-            )
-            if self.generator.dataset is None:
-                 self.logger.warning(
-                    "SampleGenerationCallback: Trainer has no 'dataset' attribute. "
-                    "Encoding/Decoding for sample generation will fail."
+        if self.step_interval is None and self.epoch_interval is None:
+            # Clarified warning message
+            self.logger.warning("SampleGenerationCallback initialized with step_interval=None and epoch_interval=None. "
+                              "Callback will not trigger based on steps or epochs. "
+                              "(Time-based triggering might still be active via TrainingLoop)." )
+
+    def on_train_begin(self, trainer, logs=None):
+        super().on_train_begin(trainer)
+        # Defer generator creation until we have the trainer and its device/model/dataset
+        if self.trainer and hasattr(self.trainer, 'model') and hasattr(self.trainer, 'device') and hasattr(self.trainer, 'train_dataloader') and hasattr(self.trainer.train_dataloader, 'dataset'):
+             try:
+                 # Pass the necessary components to TextGenerator
+                 # TextGenerator expects model, device, config (dict), dataset (with tokenizer/decode)
+                 # Also explicitly pass the trainer's tokenizer
+                 self.generator = TextGenerator(
+                     model=self.trainer.model,
+                     device=self.trainer.device,
+                     dataset=self.trainer.train_dataloader.dataset, # Pass dataset object
+                     config={} # Pass empty config for now
                  )
-            # Warning for missing tokenizer is now handled within TextGenerator's __init__ or generate_text
+                 self.logger.info("TextGenerator initialized within SampleGenerationCallback.")
+             except AttributeError as e:
+                 self.logger.error(f"Failed to initialize TextGenerator: Missing required trainer/dataloader/dataset attribute ({e})")
+             except Exception as e:
+                 self.logger.error(f"Failed to initialize TextGenerator: {e}", exc_info=True)
         else:
-            self.generator = None
-            self.logger.warning(
-                f"SampleGenerationCallback: Model {type(trainer.model).__name__} does not have a .generate() method. "
-                "Sample generation will be disabled."
-            )
+             self.logger.error("Cannot initialize TextGenerator: Trainer or its model/device/train_dataloader/dataset is not available.")
 
-    def _generate_samples(self, step_or_epoch_info: str):
-        """Internal method to generate and log samples."""
-        if not self.generator or not self.prompt:
-            # Log a warning only if intervals are set, otherwise it's expected
-            if self.step_interval is not None or self.epoch_interval is not None:
-                 self.logger.warning(f"Sample generation requested ({step_or_epoch_info}), but generator is not initialized or prompt is missing.")
-            return
+    def _initialize_generator(self, trainer) -> bool:
+        """Attempts to initialize the TextGenerator."""
+        self.logger.info("Initializing TextGenerator for sample generation.")
+        if not trainer or not trainer.train_dataloader or not trainer.train_dataloader.dataset or not hasattr(trainer, 'model') or not hasattr(trainer, 'device'):
+            self.logger.error("Trainer is missing required attributes (model, device, train_dataloader with dataset) for TextGenerator initialization.")
+            return False
+        
+        # --- Get Components from Trainer --- # 
+        model = trainer.model
+        device = trainer.device
+        dataset = trainer.train_dataloader.dataset
+        explicit_tokenizer = getattr(trainer, 'tokenizer', None) # Get tokenizer directly from trainer
 
-        self.logger.info(f"--- Generating Sample ({step_or_epoch_info}) ---")
-        self.logger.info(f"Prompt: {self.prompt}")
-
-        model_training_state = None # Initialize to handle potential errors before assignment
+        self.logger.debug(f"_initialize_generator: Received dataset object ID: {id(dataset)}")
+        self.logger.debug(f"_initialize_generator: Dataset object type: {type(dataset)}")
+        if explicit_tokenizer:
+            self.logger.debug(f"_initialize_generator: Received explicit tokenizer from trainer: {type(explicit_tokenizer)} (ID: {id(explicit_tokenizer)})")
+        else:
+            self.logger.debug("_initialize_generator: No explicit tokenizer found on trainer.")
+        # --------------------------------- #
+            
         try:
-            # Ensure model is in eval mode for generation
-            model_training_state = self.trainer.model.training
-            self.trainer.model.eval()
+            # Pass the trainer's model, device, dataset, and *explicit tokenizer*.
+            self.generator = TextGenerator(
+                model=model,
+                device=device,
+                dataset=dataset, # Pass dataset for potential fallback or info
+                tokenizer=explicit_tokenizer, # Pass the explicit tokenizer
+                config={} # Pass empty config for now
+            )
+            self.logger.info(f"TextGenerator initialized within SampleGenerationCallback. Explicit tokenizer used: {bool(explicit_tokenizer)}")
+            self.initialized = True
+            return True
+        except AttributeError as e:
+            self.logger.error(
+                f"Failed to initialize TextGenerator: Missing required attribute in Trainer (e.g., model, device, train_dataloader): {e}",
+                exc_info=True
+            )
+            self.generator = None # Ensure generator is None if init fails
+        except Exception as e: # Catch other potential errors during init
+            self.logger.error(f"Failed to initialize TextGenerator: {e}", exc_info=True)
+            self.generator = None
 
-            with torch.no_grad():
-                generated_texts = self.generator.generate_text(
-                    prompt=self.prompt,
-                    max_new_tokens=self.max_new_tokens,
-                    temperature=self.temperature,
-                    num_return_sequences=1 # Only generate one sample for logging
-                )
+        return False
 
-            # Log the generated sample (assuming generate_text returns a list)
+    def on_epoch_end(self, trainer, epoch: int, train_metrics: dict, val_metrics: dict, logs: Optional[Dict] = None) -> None:
+        """Generate samples at the end of an epoch if interval matches."""
+        # Check interval
+        if self.epoch_interval and (epoch + 1) % self.epoch_interval == 0:
+            self.generate_samples(trainer, f"Epoch {epoch + 1}")
+            self.logger.info("Finished generating samples.")
+
+    def on_step_end(self, step: int, logs: Optional[Dict] = None) -> None:
+        """Generate samples at the end of a step if interval matches."""
+        # Get global_step from logs if available, otherwise use step
+        global_step = logs.get('global_step', step)
+        if self.step_interval and (global_step + 1) % self.step_interval == 0:
+            self.generate_samples(self.trainer, f"Step {global_step + 1}")
+            self.logger.info("Finished generating samples.")
+
+    def generate_samples(self, trainer, trigger_event: str) -> None:
+        """Generates and logs sample text."""
+        # Attempt initialization if generator is None or not initialized
+        if not self.generator or not self.initialized: # Check both flags
+            self.logger.debug("Generator not ready, attempting initialization in generate_samples.")
+            if not self._initialize_generator(trainer):
+                 self.logger.error("TextGenerator could not be initialized. Cannot generate samples.")
+                 return
+            # Check again after attempt
+            if not self.generator:
+                 self.logger.error("TextGenerator is still None after initialization attempt. Cannot generate samples.")
+                 return
+            else:
+                 self.logger.debug("TextGenerator successfully initialized by generate_samples.")
+
+        # Proceed only if generator is valid
+        self.logger.info(f"--- Generating Sample ({trigger_event}) ---")
+        self.logger.info(f"Prompt: {self.start_prompt}")
+        try:
+            # Use parameters stored in the callback instance
+            generated_texts = self.generator.generate_text(
+                prompt=self.start_prompt,
+                max_new_tokens=self.max_new_tokens,
+                temperature=self.temperature,
+                # Pass other params if added to __init__
+            )
             if generated_texts:
+                # Log only the first generated sequence if multiple
                 self.logger.info(f"Generated: {generated_texts[0]}")
             else:
-                self.logger.warning("Generation produced no output.")
-
+                self.logger.warning("Sample generation produced no output.")
+        except AttributeError as e:
+             # Catch specific errors like missing tokenizer methods
+             self.logger.error(f"Error during sample generation (AttributeError): {e}. Check if tokenizer is correctly initialized and has required methods.", exc_info=True)
         except Exception as e:
             self.logger.error(f"Error during sample generation: {e}", exc_info=True)
         finally:
-            # Restore model training state only if it was successfully retrieved
-            if model_training_state is not None and self.trainer.model:
-                self.trainer.model.train(mode=model_training_state)
-        self.logger.info(f"--- End Sample Generation ({step_or_epoch_info}) ---")
-
-
-    def on_step_end(self, step, logs=None):
-        """Generate samples at specified step intervals."""
-        if self.step_interval is not None and (step + 1) % self.step_interval == 0:
-            self._generate_samples(f"Step {step + 1}")
-
-    def on_epoch_end(self, trainer, epoch, logs=None):
-        """Generate samples at specified epoch intervals."""
-        if self.epoch_interval is not None and (epoch + 1) % self.epoch_interval == 0:
-            self._generate_samples(f"Epoch {epoch + 1}")
+            self.logger.info(f"--- End Sample Generation ({trigger_event}) ---")
 
     # Implement other abstract methods as no-ops
-    def on_train_begin(self, trainer, logs=None):
-        pass # Generator is initialized in set_trainer
-
     def on_train_end(self, trainer, logs=None):
         pass
 

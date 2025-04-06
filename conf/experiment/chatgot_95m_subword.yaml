@@ -93,9 +93,6 @@ callbacks:
   tensorboard:
     _target_: craft.training.callbacks.TensorBoardLogger
     # log_dir: will be derived from output dir
-  checkpoint:
-    _target_: craft.training.callbacks.CheckpointCallback
-    # Add any checkpoint specific overrides here
   sample_generation:
     _target_: craft.training.callbacks.SampleGenerationCallback
     # Add any generation specific overrides here

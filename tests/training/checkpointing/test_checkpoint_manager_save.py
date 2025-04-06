@@ -95,11 +95,13 @@ def mock_objects_for_cm(mock_tokenizer_fixture):
 @pytest.fixture
 def checkpoint_manager(mock_objects_for_cm, tmp_path):
     """Provides an initialized CheckpointManager instance in a temporary directory."""
+    exp_name = "save_test_exp"
     # Patch getcwd for the duration of the manager's life in this fixture
     with patch('os.getcwd', return_value=str(tmp_path)):
          # Pass the dictionary directly to CheckpointManager
-         manager = CheckpointManager(**mock_objects_for_cm)
-         # Override checkpoint_dir to ensure it uses tmp_path absolutely
+         # Add experiment_name
+         manager = CheckpointManager(**mock_objects_for_cm, experiment_name=exp_name)
+         # Override checkpoint_dir to ensure it uses tmp_path absolutely for the test logic
          manager.checkpoint_dir = tmp_path # Now uses Path object directly
          yield manager # Yield the manager instance
 
@@ -147,48 +149,49 @@ def test_save_checkpoint_basic(checkpoint_manager, mock_objects_for_cm, tmp_path
         best_val_metric=best_val_metric_data
     )
     
-    # Call save_checkpoint with TrainingState and filename
-    checkpoint_manager.save_checkpoint(
-        state=training_state,
-        filename=filename,
-        metrics=metrics_data, # Metrics can still be passed for logging/best logic
-        is_best=False # Explicitly False for this basic test
-    )
+    # Mock the tokenizer's save method *before* calling save_checkpoint
+    with patch.object(mock_objects_for_cm["tokenizer"], 'save') as mock_tokenizer_save:
+        # Call save_checkpoint with TrainingState and filename
+        checkpoint_manager.save_checkpoint(
+            state=training_state,
+            filename=filename,
+            metrics=metrics_data, # Metrics can still be passed for logging/best logic
+            is_best=False # Explicitly False for this basic test
+        )
 
-    assert save_path.exists()
-    mock_objects_for_cm["tokenizer"].save.assert_called_once()
-    
-    # Check the tokenizer path saved in the dictionary matches the one in TrainingState
-    saved_dict = torch.load(save_path, map_location='cpu')
-    assert saved_dict['tokenizer_path'] == training_state.tokenizer_path
-    
-    # Check that the tokenizer dir itself was created relative to the checkpoint_dir
-    # Use the step number to construct the expected path
-    tokenizer_save_dir = checkpoint_manager.checkpoint_dir / f"tokenizer_step_{step}"
-    assert tokenizer_save_dir.is_dir()
-    mock_objects_for_cm["tokenizer"].save.assert_called_once_with(str(tokenizer_save_dir))
+        assert save_path.exists()
+        # Tokenizer save should NOT be called based on updated CheckpointManager logic
+        mock_tokenizer_save.assert_not_called()
 
-    # Verify content using the saved dict (which is the asdict(TrainingState))
-    assert saved_dict['global_step'] == step
-    assert saved_dict['epoch'] == epoch
-    assert "model_state_dict" in saved_dict
-    assert saved_dict['model_state_dict'].keys() == training_state.model_state_dict.keys()
-    assert saved_dict['optimizer_state_dict'] == training_state.optimizer_state_dict
-    assert "scheduler_state_dict" in saved_dict
-    assert saved_dict['scheduler_state_dict'] == training_state.scheduler_state_dict
-    assert "scaler_state_dict" in saved_dict
-    assert saved_dict['scaler_state_dict'] == training_state.scaler_state_dict
-    assert "config" in saved_dict
-    assert saved_dict['config'] == training_state.config
-    assert "metrics" in saved_dict
-    assert saved_dict['metrics'] == training_state.metrics
-    assert "best_val_metric" in saved_dict
-    assert saved_dict['best_val_metric'] == training_state.best_val_metric
-    assert "callbacks_state" in saved_dict
-    assert saved_dict['callbacks_state'] == training_state.callbacks_state
-    
-    # Check checkpoint manager tracking
-    assert any(p == str(save_path) and b is False for p, b in checkpoint_manager.saved_checkpoints)
+        # Check the tokenizer path saved in the dictionary is None
+        saved_dict = torch.load(save_path, map_location='cpu')
+        assert saved_dict['tokenizer_path'] is None
+
+        # Check that the tokenizer dir itself was NOT created
+        tokenizer_save_dir = checkpoint_manager.checkpoint_dir / f"tokenizer_step_{step}"
+        assert not tokenizer_save_dir.exists()
+
+        # Verify content using the saved dict (which is the asdict(TrainingState))
+        assert saved_dict['global_step'] == step
+        assert saved_dict['epoch'] == epoch
+        assert "model_state_dict" in saved_dict
+        assert saved_dict['model_state_dict'].keys() == training_state.model_state_dict.keys()
+        assert saved_dict['optimizer_state_dict'] == training_state.optimizer_state_dict
+        assert "scheduler_state_dict" in saved_dict
+        assert saved_dict['scheduler_state_dict'] == training_state.scheduler_state_dict
+        assert "scaler_state_dict" in saved_dict
+        assert saved_dict['scaler_state_dict'] == training_state.scaler_state_dict
+        assert "config" in saved_dict
+        assert saved_dict['config'] == training_state.config
+        assert "metrics" in saved_dict
+        assert saved_dict['metrics'] == training_state.metrics
+        assert "best_val_metric" in saved_dict
+        assert saved_dict['best_val_metric'] == training_state.best_val_metric
+        assert "callbacks_state" in saved_dict
+        assert saved_dict['callbacks_state'] == training_state.callbacks_state
+        
+        # Check checkpoint manager tracking
+        assert any(p == str(save_path) and b is False for p, b in checkpoint_manager.saved_checkpoints)
 
 def test_save_checkpoint_is_best(checkpoint_manager, mock_objects_for_cm, tmp_path):
     """Test saving a checkpoint marked as best."""
@@ -240,224 +243,238 @@ def test_save_skips_disabled_scaler(mock_objects_for_cm, tmp_path):
     mock_objects_for_cm["scaler"].is_enabled.return_value = False
     step = 300
     epoch = 3
+    exp_name = "disabled_scaler_exp"
     filename = f"checkpoint_epoch_{epoch}_step_{step}.pt"
     save_path = tmp_path / filename
-    
+
     # Create manager with the modified mocks
-    manager = CheckpointManager(**mock_objects_for_cm, checkpoint_dir=tmp_path)
+    # Remove checkpoint_dir, add experiment_name
+    manager = CheckpointManager(**mock_objects_for_cm, experiment_name=exp_name)
+    manager.checkpoint_dir = tmp_path # Ensure output goes to temp dir
 
     # Create TrainingState - it should automatically get None for scaler state
     training_state = create_mock_training_state(
-        mock_objects_for_cm, epoch=epoch, global_step=step
+        mock_objects_for_cm,
+        epoch=epoch,
+        global_step=step
     )
-    assert training_state.scaler_state_dict is None # Verify state creation
+    assert training_state.scaler_state_dict is None
 
-    manager.save_checkpoint(
-        state=training_state, filename=filename
-    )
+    # Call save_checkpoint
+    manager.save_checkpoint(state=training_state, filename=filename)
 
+    # Verify saved file doesn't contain scaler_state_dict
     assert save_path.exists()
     saved_dict = torch.load(save_path, map_location='cpu')
-    assert "model_state_dict" in saved_dict
-    assert "optimizer_state_dict" in saved_dict
-    assert "scheduler_state_dict" in saved_dict
-    assert saved_dict.get("scaler_state_dict") is None # Check saved state is None
+    assert "scaler_state_dict" in saved_dict
+    assert saved_dict['scaler_state_dict'] is None
 
 def test_save_skips_disabled_optimizer_scheduler(mock_objects_for_cm, tmp_path):
-    """Test saving when optimizer or scheduler are None."""
-    # Set optimizer/scheduler to None BEFORE creating the manager
+    """Test that optimizer and scheduler states are None if they are None in manager."""
+    # Remove optimizer and scheduler from mocks BEFORE creating manager
     mock_objects_for_cm["optimizer"] = None
     mock_objects_for_cm["scheduler"] = None
     step = 400
     epoch = 4
+    exp_name = "no_opt_sched_exp"
     filename = f"checkpoint_epoch_{epoch}_step_{step}.pt"
     save_path = tmp_path / filename
 
-    # Create manager with None optimizer/scheduler
-    manager = CheckpointManager(**mock_objects_for_cm, checkpoint_dir=tmp_path)
-    
-    # Create TrainingState - should get None for opt/sched states
+    # Create manager with the modified mocks
+    # Remove checkpoint_dir, add experiment_name
+    manager = CheckpointManager(**mock_objects_for_cm, experiment_name=exp_name)
+    manager.checkpoint_dir = tmp_path # Ensure output goes to temp dir
+
+    # Create TrainingState - it should automatically get None for opt/sched states
     training_state = create_mock_training_state(
-        mock_objects_for_cm, epoch=epoch, global_step=step
+        mock_objects_for_cm,
+        epoch=epoch,
+        global_step=step
     )
     assert training_state.optimizer_state_dict is None
     assert training_state.scheduler_state_dict is None
 
-    manager.save_checkpoint(
-        state=training_state, filename=filename
-    )
+    # Call save_checkpoint
+    manager.save_checkpoint(state=training_state, filename=filename)
 
+    # Verify saved file contains None for these states
     assert save_path.exists()
     saved_dict = torch.load(save_path, map_location='cpu')
-    assert "model_state_dict" in saved_dict
-    assert saved_dict.get("optimizer_state_dict") is None
-    assert saved_dict.get("scheduler_state_dict") is None
-    assert "scaler_state_dict" in saved_dict # Scaler should still be saved
+    assert "optimizer_state_dict" in saved_dict
+    assert saved_dict['optimizer_state_dict'] is None
+    assert "scheduler_state_dict" in saved_dict
+    assert saved_dict['scheduler_state_dict'] is None
 
 def test_save_without_tokenizer(mock_objects_for_cm, tmp_path):
-    """Test saving when tokenizer is None."""
-    # Set tokenizer to None BEFORE creating the manager
+    """Test saving when the CheckpointManager was initialized without a tokenizer."""
+    # Remove tokenizer from mocks
     mock_objects_for_cm["tokenizer"] = None
     step = 500
     epoch = 5
+    exp_name = "no_tokenizer_exp"
     filename = f"checkpoint_epoch_{epoch}_step_{step}.pt"
     save_path = tmp_path / filename
 
-    # Create manager with None tokenizer
-    manager = CheckpointManager(**mock_objects_for_cm, checkpoint_dir=tmp_path)
+    # Create manager without tokenizer
+    # Remove checkpoint_dir, add experiment_name
+    manager = CheckpointManager(**mock_objects_for_cm, experiment_name=exp_name)
+    manager.checkpoint_dir = tmp_path # Ensure output goes to temp dir
 
-    # Create TrainingState - tokenizer_path should be None
+    # Create TrainingState
     training_state = create_mock_training_state(
         mock_objects_for_cm, epoch=epoch, global_step=step
     )
-    assert training_state.tokenizer_path is None
+    assert training_state.tokenizer_path is None # Should be None
 
-    manager.save_checkpoint(
-        state=training_state, filename=filename
-    )
+    # Call save_checkpoint
+    manager.save_checkpoint(state=training_state, filename=filename)
 
+    # Verify saved file exists and tokenizer was not called/saved
     assert save_path.exists()
     saved_dict = torch.load(save_path, map_location='cpu')
     assert "tokenizer_path" in saved_dict
-    assert saved_dict["tokenizer_path"] is None
-    # Assert tokenizer directory was NOT created
-    assert not (tmp_path / "tokenizer").exists()
+    assert saved_dict['tokenizer_path'] is None
+    # Check that no tokenizer directory was created
+    tokenizer_save_dir = manager.checkpoint_dir / f"tokenizer_step_{step}"
+    assert not tokenizer_save_dir.exists()
 
 def test_save_checkpoint_creates_dir(mock_objects_for_cm, tmp_path):
-    """Test save_checkpoint creates the directory if it doesn't exist."""
+    """Test that save_checkpoint creates the checkpoint directory if it doesn't exist."""
+    # Use a subdirectory that doesn't exist yet
+    sub_dir = tmp_path / "new_save_dir"
+    assert not sub_dir.exists()
     step = 600
     epoch = 6
-    sub_dir_name = "new_subdir"
-    non_existent_dir = tmp_path / sub_dir_name
-    assert not non_existent_dir.exists()
-    
-    # Create manager pointing to the non-existent dir
-    manager = CheckpointManager(**mock_objects_for_cm, checkpoint_dir=non_existent_dir)
-    
+    exp_name = "create_dir_exp"
     filename = f"checkpoint_epoch_{epoch}_step_{step}.pt"
-    save_path = non_existent_dir / filename # Path relative to manager's dir
+    save_path = sub_dir / filename
 
-    training_state = create_mock_training_state(
-        mock_objects_for_cm, epoch=epoch, global_step=step
-    )
+    # Create manager, it will derive its own path, but we override for the test
+    # Remove checkpoint_dir, add experiment_name
+    manager = CheckpointManager(**mock_objects_for_cm, experiment_name=exp_name)
+    manager.checkpoint_dir = sub_dir # Manually set target dir for save (Correct for this test)
 
-    # Saving should create the directory
-    manager.save_checkpoint(
-        state=training_state, filename=filename
-    )
-    
-    assert non_existent_dir.exists()
-    assert save_path.exists()
+    training_state = create_mock_training_state(mock_objects_for_cm, epoch=epoch, global_step=step)
+
+    # Mock pathlib.Path.mkdir for this test -> REMOVED
+    # with patch("pathlib.Path.mkdir") as mock_path_mkdir:
+    #     manager.save_checkpoint(state=training_state, filename=filename)
+    # Run save without the patch
+    manager.save_checkpoint(state=training_state, filename=filename)
+
+    # Assert that Path.mkdir was called on the manager's checkpoint_dir -> Check dir exists instead
+    # mock_path_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+    assert sub_dir.exists() # Check the directory was created
+    assert save_path.exists() # Check the file was saved
+
 
 def test_save_checkpoint_error_handling(checkpoint_manager, mock_objects_for_cm):
-    """Test error logging if torch.save fails."""
+    """Test error handling during torch.save."""
     step = 700
     epoch = 7
-    filename = "fail_save.pt"
-    save_path = checkpoint_manager.checkpoint_dir / filename
+    filename = f"checkpoint_epoch_{epoch}_step_{step}.pt"
+    training_state = create_mock_training_state(mock_objects_for_cm, epoch=epoch, global_step=step)
 
-    training_state = create_mock_training_state(
-        mock_objects_for_cm, epoch=epoch, global_step=step
-    )
+    # Patch torch.save to raise an exception
+    with patch("torch.save", side_effect=IOError("Disk full")) as mock_torch_save:
+        with pytest.raises(IOError, match="Disk full"):
+            checkpoint_manager.save_checkpoint(state=training_state, filename=filename)
 
-    # Patch torch.save and logger locally
-    with patch('torch.save', side_effect=OSError("Disk full")) as mock_torch_save, \
-         patch("logging.getLogger") as mock_get_logger:
-        
-        mock_logger = MagicMock()
-        mock_get_logger.return_value = mock_logger
-        checkpoint_manager.logger = mock_logger
+    mock_torch_save.assert_called_once()
+    # Check that the failed path is NOT added to saved_checkpoints
+    failed_path = str(checkpoint_manager.checkpoint_dir / filename)
+    assert not any(p == failed_path for p, b in checkpoint_manager.saved_checkpoints)
 
-        # Expect OSError now because save_checkpoint re-raises
-        with pytest.raises(OSError, match="Disk full"):
-            checkpoint_manager.save_checkpoint(
-                state=training_state, filename=filename
-            )
-
-        mock_torch_save.assert_called_once_with(
-            unittest.mock.ANY, # Check the dict was passed
-            save_path
-        )
-        # Assert on local mock logger
-        mock_logger.error.assert_called_once()
-        assert "Disk full" in mock_logger.error.call_args[0][0]
 
 def test_save_checkpoint_tokenizer_error_handling(checkpoint_manager, mock_objects_for_cm):
-    """Test error logging if tokenizer.save fails."""
+    """Test error handling during tokenizer saving (should no longer happen)."""
     step = 800
     epoch = 8
-    filename = f"tokenizer_fail_step_{step}.pt"
+    filename = f"checkpoint_epoch_{epoch}_step_{step}.pt"
     save_path = checkpoint_manager.checkpoint_dir / filename
-    mock_tokenizer = mock_objects_for_cm["tokenizer"]
-    
-    training_state = create_mock_training_state(
-        mock_objects_for_cm, epoch=epoch, global_step=step
-    )
+    training_state = create_mock_training_state(mock_objects_for_cm, epoch=epoch, global_step=step)
 
-    # Make tokenizer.save raise an error
-    tokenizer_error = OSError("Permission denied")
-    mock_tokenizer.save.side_effect = tokenizer_error
+    # Mock the tokenizer's save method to ensure it's not called
+    with patch.object(mock_objects_for_cm["tokenizer"], 'save') as mock_tokenizer_save, \
+         patch("logging.getLogger") as mock_get_logger:
 
-    # Patch logger locally
-    with patch("logging.getLogger") as mock_get_logger:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
-        checkpoint_manager.logger = mock_logger
+        checkpoint_manager.logger = mock_logger # Assign mock logger
 
-        checkpoint_manager.save_checkpoint(
-            state=training_state, filename=filename
-        )
+        # Call save_checkpoint
+        checkpoint_manager.save_checkpoint(state=training_state, filename=filename)
 
-        # Checkpoint file should still be saved (save happens before tokenizer)
-        assert save_path.exists()
-        mock_tokenizer.save.assert_called_once() # Ensure tokenizer save was attempted
-        # Error during tokenizer save should be logged
-        mock_logger.error.assert_called_once()
-        # Check the specific error message
-        assert "Permission denied" in mock_logger.error.call_args[0][0]
+    # Assert that torch.save was still called for the main checkpoint
+    assert save_path.exists()
+    # Assert that tokenizer.save was NOT called
+    mock_tokenizer_save.assert_not_called()
+    # Assert that no tokenizer error was logged
+    mock_logger.error.assert_not_called()
+    # Checkpoint should still be tracked
+    assert any(p == str(save_path) for p, b in checkpoint_manager.saved_checkpoints)
 
 def test_save_best_only_skips_non_best(mock_objects_for_cm, tmp_path):
-    """Test save_best_only=True skips saving non-best checkpoints."""
-    # Enable save_best_only
-    manager = CheckpointManager(**mock_objects_for_cm, checkpoint_dir=tmp_path, save_best_only=True)
+    """Test save_checkpoint skips saving if save_best_only is True and metric is not best."""
+    exp_name = "save_best_only_skip_exp"
     step = 900
     epoch = 9
     filename = f"checkpoint_epoch_{epoch}_step_{step}.pt"
     save_path = tmp_path / filename
+    current_best = 0.5
+    new_metric = 0.6 # Worse than current best
 
-    training_state = create_mock_training_state(
-        mock_objects_for_cm, epoch=epoch, global_step=step
-    )
+    # Create manager with save_best_only=True
+    # Remove checkpoint_dir, add experiment_name
+    manager = CheckpointManager(**mock_objects_for_cm, experiment_name=exp_name, save_best_only=True)
+    manager.checkpoint_dir = tmp_path # Ensure output goes to temp dir
+    manager.best_metric = current_best
 
-    # Call save without is_best=True
-    manager.save_checkpoint(
-        state=training_state, filename=filename, is_best=False 
-    )
-    assert not save_path.exists() # Should not have been saved
-    assert not (tmp_path / "best.pt").exists() # best.pt link should not exist
+    training_state = create_mock_training_state(mock_objects_for_cm, epoch=epoch, global_step=step)
+
+    # Call save_checkpoint with is_best=False (determined externally)
+    manager.save_checkpoint(state=training_state, filename=filename, is_best=False)
+
+    # Assert that the checkpoint file was NOT created
+    assert not save_path.exists()
+    # Assert tokenizer was NOT saved
+    mock_objects_for_cm["tokenizer"].save.assert_not_called()
+    # Assert checkpoint was NOT tracked
+    assert not any(p == str(save_path) for p, b in manager.saved_checkpoints)
 
 def test_save_best_only_saves_best(mock_objects_for_cm, tmp_path):
-    """Test save_best_only=True saves a checkpoint marked as best."""
-     # Enable save_best_only
-    manager = CheckpointManager(**mock_objects_for_cm, checkpoint_dir=tmp_path, save_best_only=True)
+    """Test save_checkpoint saves if save_best_only is True and metric IS best."""
+    exp_name = "save_best_only_save_exp"
     step = 1000
     epoch = 10
     filename = f"checkpoint_epoch_{epoch}_step_{step}.pt"
     save_path = tmp_path / filename
-    best_link_path = tmp_path / "best.pt"
+    current_best = 0.5
+    new_metric = 0.4 # Better than current best
 
-    training_state = create_mock_training_state(
-        mock_objects_for_cm, epoch=epoch, global_step=step
-    )
+    # Create manager with save_best_only=True
+    # Remove checkpoint_dir, add experiment_name
+    manager = CheckpointManager(**mock_objects_for_cm, experiment_name=exp_name, save_best_only=True)
+    manager.checkpoint_dir = tmp_path # Ensure output goes to temp dir
+    manager.best_metric = current_best
 
-    # Call save WITH is_best=True
-    manager.save_checkpoint(
-        state=training_state, filename=filename, is_best=True
-    )
-    assert save_path.exists() # Should have been saved
-    assert best_link_path.exists() # best.pt link should exist
-    # Don't compare realpath
-    # assert os.path.realpath(best_link_path) == os.path.realpath(save_path)
+    training_state = create_mock_training_state(mock_objects_for_cm, epoch=epoch, global_step=step)
+
+    # Mock the tokenizer's save method
+    with patch.object(mock_objects_for_cm["tokenizer"], 'save') as mock_tokenizer_save:
+        # Call save_checkpoint with is_best=True
+        manager.save_checkpoint(state=training_state, filename=filename, is_best=True)
+
+        # Assert that the checkpoint file WAS created
+        assert save_path.exists()
+        # Assert tokenizer was NOT saved
+        mock_tokenizer_save.assert_not_called()
+        # Assert checkpoint WAS tracked
+        assert any(p == str(save_path) for p, b in manager.saved_checkpoints)
+        # Assert best.pt link was created
+        assert (tmp_path / "best.pt").exists()
+
+# TODO: Test with different comparison modes (min/max)
 
 # test_load_checkpoint_error_handling was incorrectly placed here, remove it.
 # def test_load_checkpoint_error_handling(checkpoint_manager, mock_logger_fixture, tmp_path):

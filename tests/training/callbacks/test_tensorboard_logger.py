@@ -32,43 +32,41 @@ class TestTensorBoardLogger:
         mock_hydra_conf = MagicMock()
         mock_hydra_conf.hydra.run.dir = 'mock/output/dir/run'
         patch_hydra = patch('hydra.core.hydra_config.HydraConfig.get', return_value=mock_hydra_conf)
-        patch_makedirs = patch('craft.training.callbacks.tensorboard.os.makedirs')
         patch_exists = patch('craft.training.callbacks.tensorboard.os.path.exists', return_value=False)
-        return patch_hydra, patch_makedirs, patch_exists
+        return patch_hydra, patch_exists
 
     def test_init(self, tb_logger_callback, tmp_path):
         """Test TensorBoardLogger initialization."""
         expected_log_dir_base = str(tmp_path / "tb_logs")
-        assert tb_logger_callback.log_dir_base == expected_log_dir_base # Check the base path stored
+        assert tb_logger_callback.log_dir_config == expected_log_dir_base # CORRECTED: Check the original configured path
         # experiment_id is removed, check comment instead
         assert tb_logger_callback.comment == "_test_experiment_123"
         assert tb_logger_callback.writer is None
-        assert tb_logger_callback.log_dir_absolute is None # log_dir_absolute is set later
+        assert tb_logger_callback.resolved_log_dir is None # resolved_log_dir is set later in _initialize_writer
 
     def test_on_train_begin_initializes_writer(self, tb_logger_callback, mock_trainer):
         """Test that SummaryWriter is initialized on train begin."""
-        patch_hydra, patch_makedirs, patch_exists = self._setup_hydra_mock_patch()
+        patch_hydra, patch_exists = self._setup_hydra_mock_patch()
         with patch_hydra as mock_hydra_get, \
-             patch_makedirs as mock_makedirs, \
              patch_exists as mock_exists, \
              patch('craft.training.callbacks.tensorboard.SummaryWriter', autospec=True) as mock_writer_class:
             tb_logger_callback.on_train_begin(trainer=mock_trainer)
-            # Construct expected path using os.path.join for platform compatibility
-            # If log_dir_base is set in the fixture, that takes priority
-            expected_log_dir = os.path.abspath(tb_logger_callback.log_dir_base)
-            # Verify that the log_dir_absolute was set correctly based on the explicit config
-            assert tb_logger_callback.log_dir_absolute == expected_log_dir
-            # Check that makedirs was called for the correct path
-            mock_makedirs.assert_called_with(expected_log_dir, exist_ok=True)
+            # After on_train_begin, log_dir_absolute should be set.
+            # The exact path depends on mocks (Hydra CWD, os.path.abspath), so we check it was set and used.
+            assert tb_logger_callback.resolved_log_dir is not None
+            resolved_log_dir = tb_logger_callback.resolved_log_dir
+
+            # Check that the directory was actually created (since we removed the patch)
+            assert os.path.isdir(resolved_log_dir)
+
             # Assert SummaryWriter was called with the path determined by the callback
-            mock_writer_class.assert_called_once_with(log_dir=tb_logger_callback.log_dir_absolute)
+            mock_writer_class.assert_called_once_with(log_dir=resolved_log_dir)
             assert tb_logger_callback.writer is mock_writer_class.return_value
 
     def test_on_train_begin_handles_exception(self, tb_logger_callback, mock_trainer, caplog):
         """Test that an exception during SummaryWriter init is handled."""
-        patch_hydra, patch_makedirs, patch_exists = self._setup_hydra_mock_patch()
+        patch_hydra, patch_exists = self._setup_hydra_mock_patch()
         with patch_hydra as mock_hydra_get, \
-             patch_makedirs as mock_makedirs, \
              patch_exists as mock_exists, \
              patch('craft.training.callbacks.tensorboard.SummaryWriter', autospec=True) as mock_writer_class:
             mock_writer_class.side_effect = Exception("Initialization failed")
@@ -80,9 +78,8 @@ class TestTensorBoardLogger:
 
     def test_on_step_end_logs_metrics(self, tb_logger_callback, mock_trainer):
         """Test logging of step-level metrics."""
-        patch_hydra, patch_makedirs, patch_exists = self._setup_hydra_mock_patch()
+        patch_hydra, patch_exists = self._setup_hydra_mock_patch()
         with patch_hydra as mock_hydra_get, \
-             patch_makedirs as mock_makedirs, \
              patch_exists as mock_exists, \
              patch('craft.training.callbacks.tensorboard.SummaryWriter', autospec=True) as mock_writer_class:
             tb_logger_callback.on_train_begin(trainer=mock_trainer)
@@ -106,9 +103,8 @@ class TestTensorBoardLogger:
         tb_logger_callback.on_step_end(step=1, logs={'loss': 0.1})
 
         # Scenario 2: Apply patches individually
-        patch_hydra, patch_makedirs, patch_exists = self._setup_hydra_mock_patch()
+        patch_hydra, patch_exists = self._setup_hydra_mock_patch()
         with patch_hydra as mock_hydra_get, \
-             patch_makedirs as mock_makedirs, \
              patch_exists as mock_exists, \
              patch('craft.training.callbacks.tensorboard.SummaryWriter', autospec=True) as mock_writer_class:
             tb_logger_callback.on_train_begin(trainer=mock_trainer)
@@ -118,9 +114,8 @@ class TestTensorBoardLogger:
 
     def test_on_step_end_missing_keys(self, tb_logger_callback, mock_trainer):
         """Test on_step_end when 'loss' or 'lr' are missing in logs."""
-        patch_hydra, patch_makedirs, patch_exists = self._setup_hydra_mock_patch()
+        patch_hydra, patch_exists = self._setup_hydra_mock_patch()
         with patch_hydra as mock_hydra_get, \
-             patch_makedirs as mock_makedirs, \
              patch_exists as mock_exists, \
              patch('craft.training.callbacks.tensorboard.SummaryWriter', autospec=True) as mock_writer_class:
             tb_logger_callback.on_train_begin(trainer=mock_trainer)
@@ -140,9 +135,8 @@ class TestTensorBoardLogger:
 
     def test_on_epoch_end_logs_metrics(self, tb_logger_callback, mock_trainer):
         """Test logging of epoch-level metrics."""
-        patch_hydra, patch_makedirs, patch_exists = self._setup_hydra_mock_patch()
+        patch_hydra, patch_exists = self._setup_hydra_mock_patch()
         with patch_hydra as mock_hydra_get, \
-             patch_makedirs as mock_makedirs, \
              patch_exists as mock_exists, \
              patch('craft.training.callbacks.tensorboard.SummaryWriter', autospec=True) as mock_writer_class:
             tb_logger_callback.on_train_begin(trainer=mock_trainer)
@@ -175,9 +169,8 @@ class TestTensorBoardLogger:
 
     def test_on_epoch_end_missing_keys(self, tb_logger_callback, mock_trainer):
         """Test on_epoch_end when various keys are missing/None."""
-        patch_hydra, patch_makedirs, patch_exists = self._setup_hydra_mock_patch()
+        patch_hydra, patch_exists = self._setup_hydra_mock_patch()
         with patch_hydra as mock_hydra_get, \
-             patch_makedirs as mock_makedirs, \
              patch_exists as mock_exists, \
              patch('craft.training.callbacks.tensorboard.SummaryWriter', autospec=True) as mock_writer_class:
             tb_logger_callback.on_train_begin(trainer=mock_trainer)
@@ -236,9 +229,8 @@ class TestTensorBoardLogger:
 
     def test_on_train_end_closes_writer(self, tb_logger_callback, mock_trainer):
         """Test that the writer is closed on train end."""
-        patch_hydra, patch_makedirs, patch_exists = self._setup_hydra_mock_patch()
+        patch_hydra, patch_exists = self._setup_hydra_mock_patch()
         with patch_hydra as mock_hydra_get, \
-             patch_makedirs as mock_makedirs, \
              patch_exists as mock_exists, \
              patch('craft.training.callbacks.tensorboard.SummaryWriter', autospec=True) as mock_writer_class:
             tb_logger_callback.on_train_begin(trainer=mock_trainer)

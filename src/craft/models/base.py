@@ -270,7 +270,8 @@ class GenerativeModel(Model):
         top_p: Optional[float] = None, # Changed default to None
         repetition_penalty: float = 1.0,
         eos_token_id: Optional[int] = None, # Added EOS token handling
-        verbose: bool = False
+        verbose: bool = False,
+        **kwargs: Any # <-- Add **kwargs here
     ) -> torch.Tensor:
         """
         Generate sequences auto-regressively from the model.

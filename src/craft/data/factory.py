@@ -263,22 +263,23 @@ def prepare_dataloaders_from_config(
             try:
                 # IMPORTANT: Create a copy and remove 'tokenizer' if it exists
                 # This prevents passing it as an unexpected keyword arg to the dataset's __init__
-                # split_dataset_cfg_for_instantiate = OmegaConf.create(OmegaConf.to_container(split_dataset_cfg_orig, resolve=True)) # Create a resolved copy
-                # if 'tokenizer' in split_dataset_cfg_for_instantiate:
-                #     del split_dataset_cfg_for_instantiate['tokenizer']
-                #     logger.debug(f"Removed 'tokenizer' key before instantiating dataset for split '{split}'.")
-                
-                # Use the original split dataset config directly
-                split_dataset_cfg_for_instantiate = split_dataset_cfg_orig
+                # Ensure we resolve interpolations FIRST, then create a copy to modify
+                resolved_cfg_container = OmegaConf.to_container(split_dataset_cfg_orig, resolve=True)
+                split_dataset_cfg_for_instantiate = OmegaConf.create(resolved_cfg_container)
+
+                if 'tokenizer' in split_dataset_cfg_for_instantiate:
+                    del split_dataset_cfg_for_instantiate['tokenizer']
+                    logger.debug(f"Removed 'tokenizer' key before instantiating dataset for split '{split}'.")
+                else:
+                    logger.debug(f"No 'tokenizer' key found in resolved dataset config for split '{split}'.")
 
                 # Check if _target_ exists before attempting instantiation
                 if '_target_' not in split_dataset_cfg_for_instantiate:
                     raise ValueError(f"Dataset configuration for split '{split}' is missing the '_target_' key.")
 
-                # Instantiate Dataset using the original config, PASSING the main tokenizer instance
+                # Instantiate Dataset using the MODIFIED config (tokenizer removed)
                 dataset = hydra.utils.instantiate(
-                    split_dataset_cfg_for_instantiate, 
-                    tokenizer=tokenizer,  # Pass the instantiated tokenizer
+                    split_dataset_cfg_for_instantiate,
                     _convert_="partial"
                 )
 

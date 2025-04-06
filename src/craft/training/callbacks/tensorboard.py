@@ -23,20 +23,24 @@ class TensorBoardLogger(Callback):
 
     Logs loss, learning rate, and other specified metrics during training.
     """
-    def __init__(self, log_dir: Optional[str] = None, comment: str = ""):
+    def __init__(self, log_dir: Optional[str] = None, comment: str = "", flush_secs: int = 120):
         """
+        Initializes the TensorBoardLogger.
+
         Args:
-            log_dir (Optional[str]): Directory where TensorBoard logs will be saved.
-                                     If None, defaults to "runs/<current_datetime_hostname>" or
-                                     uses the Hydra output directory if available.
+            log_dir (Optional[str]): Specific directory to save TensorBoard logs.
+                                     If None, defaults to './tensorboard_logs/<timestamp>'
+                                     or tries to use 'tensorboard/' under Hydra run dir.
             comment (str): Comment to append to the default log_dir.
+            flush_secs (int): How often, in seconds, to flush the pending events and summaries to disk.
         """
         super().__init__()
-        self.log_dir_base = log_dir
         self.comment = comment
-        self.writer: Optional[SummaryWriter] = None
-        self.log_dir_absolute: Optional[str] = None # Store the final absolute path
-        self.experiment_name: Optional[str] = None # Store experiment name from trainer config
+        self.flush_secs = flush_secs
+        self.writer = None
+        self.log_dir_config = log_dir # Store the configured log_dir
+        self.resolved_log_dir = None # Will be set in _initialize_writer
+        # self.hparams_logged = False # Removed hparams logic for simplicity
 
         if not _TENSORBOARD_AVAILABLE:
             self.logger.warning("TensorBoard not found. Install tensorboard (e.g., pip install tensorboard) to use TensorBoardLogger.")
@@ -61,45 +65,50 @@ class TensorBoardLogger(Callback):
         self.logger.info(f"Externally setting TensorBoard log directory to: {path}")
         self.log_dir_absolute = path
 
-    def _initialize_writer(self):
-        """Initializes the TensorBoard SummaryWriter."""
-        # For testing/simplicity, prioritize the explicitly provided log_dir_base
-        if self.log_dir_base:
-            log_dir = os.path.abspath(self.log_dir_base)
-            self.logger.info(f"Using explicitly configured log_dir for TensorBoard: {log_dir}")
+    def _initialize_writer(self) -> None:
+        """Initializes the SummaryWriter."""
+        if self.writer:
+            return
+
+        effective_log_dir = self.log_dir_config # Prioritize explicitly passed log_dir
+
+        if effective_log_dir:
+            self.logger.info(f"Using configured log_dir: {effective_log_dir}")
         else:
-            # Fallback to Hydra logic only if log_dir_base is not provided
-            log_dir = None
+            # Fallback logic if no explicit log_dir was passed via config/injection
+            self.logger.warning("No explicit log_dir provided.")
+            hydra_run_dir = None
             try:
-                hydra_cfg = HydraConfig.get()
-                hydra_run_dir = hydra_cfg.hydra.run.dir
-                log_dir = os.path.join(hydra_run_dir, "tensorboard") 
-                self.logger.info(f"Using Hydra run directory for TensorBoard logs: {log_dir}")
-            except ValueError: 
-                self.logger.info("HydraConfig not available and no explicit log_dir provided.")
-            except Exception as e: 
-                self.logger.warning(f"Could not get Hydra run directory: {e}. Falling back.")
+                hydra_run_dir = HydraConfig.get().run.dir
+                effective_log_dir = os.path.join(hydra_run_dir, "tensorboard")
+                self.logger.info(f"Attempting to use Hydra run directory: {effective_log_dir}")
+            except Exception:
+                self.logger.error("Could not get Hydra run directory. Using default log directory: ./tensorboard_logs/<timestamp>")
+                effective_log_dir = os.path.join(".", "tensorboard_logs", f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{self.comment}")
+        
+        # Resolve the path correctly, avoiding abspath if already absolute (e.g., from Hydra)
+        if os.path.isabs(effective_log_dir):
+            self.resolved_log_dir = effective_log_dir
+        else:
+            # If relative, make it absolute relative to the original CWD if possible
+            try:
+                from hydra.utils import get_original_cwd
+                original_cwd = get_original_cwd()
+                self.resolved_log_dir = os.path.abspath(os.path.join(original_cwd, effective_log_dir))
+            except ImportError:
+                 self.logger.warning("Hydra utils not found, resolving path relative to current working directory.")
+                 self.resolved_log_dir = os.path.abspath(effective_log_dir)
+            except Exception as e:
+                 self.logger.warning(f"Could not get original CWD ({e}), resolving path relative to current working directory.")
+                 self.resolved_log_dir = os.path.abspath(effective_log_dir)
 
-            if log_dir is None:
-                # Removed fallback logic using experiment_name as it was unreliable
-                self.logger.error(
-                    "Cannot initialize TensorBoard: No explicit 'log_dir' provided in config "
-                    "and could not determine Hydra run directory."
-                )
-                return # Cannot initialize writer
-
-        # Store the final determined path
-        self.log_dir_absolute = log_dir
+        self.logger.info(f"TensorBoard logs will be saved to: {self.resolved_log_dir}")
+        os.makedirs(self.resolved_log_dir, exist_ok=True)
 
         try:
-            # Ensure the directory exists
-            if not os.path.exists(self.log_dir_absolute):
-                os.makedirs(self.log_dir_absolute, exist_ok=True)
-                self.logger.info(f"Created TensorBoard log directory: {self.log_dir_absolute}")
-
             # Initialize the writer
-            self.writer = SummaryWriter(log_dir=self.log_dir_absolute)
-            self.logger.info(f"TensorBoard SummaryWriter initialized. Logging to: {self.log_dir_absolute}")
+            self.writer = SummaryWriter(log_dir=self.resolved_log_dir)
+            self.logger.info(f"TensorBoard SummaryWriter initialized. Logging to: {self.resolved_log_dir}")
         except Exception as e:
             self.logger.error(f"Failed to initialize SummaryWriter: {e}", exc_info=True)
             self.writer = None # Ensure writer is None if init fails

@@ -1,43 +1,61 @@
 """
-Text Generation Wrapper Class
-===========================
+Text Generation Module
+======================
 
-This module provides the TextGenerator class, which wraps a model 
-(typically one with a built-in .generate() method, like from Hugging Face)
-and a dataset/tokenizer to provide a convenient interface for generation.
-
-Note: Standalone sampling, beam search, and batch generation functions
-have been moved to sampling.py, beam_search.py, and batch_generation.py respectively.
+This module provides classes and functions for generating text sequences using trained models.
+It supports various sampling strategies like greedy, temperature, top-k, and top-p sampling.
 """
 
 import torch
 import logging
 import time  # Import the time module
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
+from unittest.mock import MagicMock
+from ..data.tokenizers.base import BaseTokenizer
 
 class TextGenerator:
-    """Handles text generation by wrapping a model with a .generate() method."""
-    
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        device: torch.device,
-        config: Dict[str, Any], # General config if needed
-        dataset: Any,  # Dataset or object with decode method and char_to_idx/tokenizer
-        # vocab_path: Optional[str] = None # Likely not needed if dataset handles vocab
-    ):
+    """Generates text using a trained model."""
+
+    def __init__(self, model: torch.nn.Module, device: torch.device, dataset: Optional[Any] = None, tokenizer: Optional[BaseTokenizer] = None, config: Optional[Union[Dict[str, Any], "DictConfig"]] = None):
+        """
+        Initializes the TextGenerator.
+
+        Args:
+            model (torch.nn.Module): The model to use for generation.
+            device (torch.device): The device to run generation on.
+            dataset (Optional[Any]): The dataset object, used for encoding/decoding if tokenizer not provided explicitly.
+            tokenizer (Optional[BaseTokenizer]): Explicit tokenizer to use. If provided, this takes precedence over dataset.tokenizer.
+            config (Optional[Union[Dict[str, Any], "DictConfig"]]): Configuration dictionary (optional).
+        """
         self.model = model
         self.device = device
-        self.config = config
-        self.dataset = dataset
-        # self.vocab_path = vocab_path
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.dataset = dataset # Store dataset for potential fallback
+        self.tokenizer = tokenizer # Prioritize explicitly passed tokenizer
+        self.config = config or {}
+        self.logger = logging.getLogger(__name__)
 
-        if not hasattr(model, 'generate'):
-             self.logger.warning(
-                 f"Model {type(model).__name__} does not have a standard `.generate()` method. "
-                 "TextGenerator class may not work as expected. Consider using standalone generation functions."
-             )
+        # Move model to the specified device
+        self.model.to(self.device)
+        self.model.eval() # Set model to evaluation mode
+
+        # Warn if model doesn't have a generate method (unless it's mocked)
+        if not hasattr(model, 'generate') and not isinstance(model, MagicMock):
+            self.logger.warning(
+                "The provided model does not have a 'generate' method. "
+                "Text generation capabilities might be limited or unavailable."
+            )
+        
+        self.logger.info(f"TextGenerator initialized. Using device: {self.device}")
+        if self.tokenizer:
+            self.logger.info(f"Using explicitly provided tokenizer: {type(self.tokenizer)}")
+        elif self.dataset:
+            ds_tokenizer = getattr(self.dataset, 'tokenizer', None)
+            if ds_tokenizer:
+                self.logger.info(f"Using tokenizer found in dataset: {type(ds_tokenizer)}")
+            else:
+                 self.logger.info("No explicit tokenizer provided, will rely on dataset for encoding/decoding if possible.")
+        else:
+             self.logger.warning("No explicit tokenizer or dataset provided.")
 
     def generate_text(
         self,
@@ -83,20 +101,66 @@ class TextGenerator:
         self.model.eval()
         
         try:
-            # --- Encoding --- #
+            # 1. Determine input_ids from start_prompt
             input_ids = None
-            if hasattr(self.dataset, 'tokenizer') and hasattr(self.dataset.tokenizer, 'encode'):
-                # Prefer tokenizer if available
-                encoded_prompt = self.dataset.tokenizer.encode(start_prompt, return_tensors="pt")
-                input_ids = encoded_prompt.to(self.device)
-                self.logger.debug(f"Encoded prompt using tokenizer: {input_ids.shape}")
-            elif hasattr(self.dataset, 'char_to_idx') and self.dataset.char_to_idx:
-                # Fallback to char-level if tokenizer unavailable
-                input_ids_list = [self.dataset.char_to_idx.get(char, 0) for char in start_prompt] # Assume 0 for <unk>
-                input_ids = torch.tensor([input_ids_list], dtype=torch.long, device=self.device)
-                self.logger.debug(f"Encoded prompt using char_to_idx: {input_ids.shape}")
+            encoding_source = "None"
+            prompt_to_encode = start_prompt or "" # Ensure non-None prompt
+            
+            # --- Select Tokenizer --- # 
+            tokenizer_to_use = None
+            if self.tokenizer: # Prioritize explicit tokenizer
+                tokenizer_to_use = self.tokenizer
+                encoding_source = "explicit self.tokenizer"
+            elif self.dataset and hasattr(self.dataset, 'tokenizer'):
+                tokenizer_to_use = self.dataset.tokenizer
+                encoding_source = "dataset.tokenizer"
             else:
-                raise ValueError("Dataset must provide either a tokenizer with an encode method or a char_to_idx mapping.")
+                self.logger.debug("No explicit or dataset tokenizer available.")
+            
+            self.logger.debug(f"Attempting encoding using: {encoding_source}")
+            # --- Encoding Logic --- #
+            if tokenizer_to_use and hasattr(tokenizer_to_use, 'encode') and callable(getattr(tokenizer_to_use, 'encode')):
+                try:
+                    encoded = tokenizer_to_use.encode(prompt_to_encode)
+                    self.logger.debug(f"generate_text: {encoding_source}.encode result: {encoded}")
+                    self.logger.debug(f"generate_text: {encoding_source}.encode result type: {type(encoded)}")
+                    if isinstance(encoded, list):
+                        if encoded and isinstance(encoded[0], list): # batch encoding?
+                             input_ids = torch.tensor(encoded[0], dtype=torch.long).unsqueeze(0)
+                        else: # single sequence
+                             input_ids = torch.tensor(encoded, dtype=torch.long).unsqueeze(0)
+                        self.logger.debug(f"Encoded using {encoding_source}. input_ids: {input_ids}")
+                    else:
+                        self.logger.warning(f"{encoding_source}.encode did not return a list, got: {type(encoded)}. input_ids remains None.")
+                except Exception as e:
+                    self.logger.warning(f"{encoding_source}.encode failed: {e}. Trying char_to_idx fallback.")
+                    input_ids = None # Ensure reset
+            elif self.dataset and hasattr(self.dataset, 'char_to_idx') and self.dataset.char_to_idx:
+                # Fallback to char_to_idx from dataset
+                self.logger.debug("Falling back to dataset.char_to_idx for encoding.")
+                try:
+                    input_ids = torch.tensor(
+                         [self.dataset.char_to_idx.get(ch, self.dataset.char_to_idx.get('<unk>', 0)) for ch in prompt_to_encode],
+                         dtype=torch.long
+                     ).unsqueeze(0)
+                    encoding_source = "dataset.char_to_idx"
+                    self.logger.debug(f"Encoded using {encoding_source}. input_ids: {input_ids}")
+                except Exception as e:
+                    self.logger.error(f"Error during char_to_idx encoding: {e}")
+                    input_ids = None
+            else:
+                # No encoding method available
+                self.logger.error("Cannot encode prompt: No usable tokenizer (explicit or in dataset) or char_to_idx mapping found.")
+                raise ValueError("Dataset must provide either a callable tokenizer.encode method or a char_to_idx mapping.")
+
+            # Move input_ids to the correct device
+            if input_ids is not None:
+                input_ids = input_ids.to(self.device)
+            else:
+                # Handle case where encoding completely failed
+                 self.logger.error("Input encoding failed, cannot proceed with generation.")
+                 # Return error message in a list, similar to decode error handling
+                 return [f"[Generation Error: Input encoding failed for prompt '{start_prompt}']"] 
 
             # --- Determine Special Token IDs --- #
             # Priority: Explicitly passed > Tokenizer > Model Config > Char Fallback (EOS only)
@@ -157,6 +221,9 @@ class TextGenerator:
                  generation_kwargs.pop("top_k", None)
                  generation_kwargs.pop("top_p", None)
             
+            # Remove internal 'prompt' if it exists in kwargs before passing to model
+            generation_kwargs.pop("prompt", None) 
+            
             # Add pad/eos only if they are valid IDs
             if eff_pad_token_id is not None:
                  generation_kwargs["pad_token_id"] = eff_pad_token_id
@@ -168,10 +235,26 @@ class TextGenerator:
             # --- Generate sequences --- #
             start_time = time.time()
             with torch.no_grad():
-                output_sequences = self.model.generate(
-                    input_ids=input_ids,
-                    **generation_kwargs
+                # Ensure input_ids are on the correct device
+                input_ids_tensor = input_ids.to(self.device)
+                self.logger.debug(f"Input tensor shape for generate: {input_ids_tensor.shape}")
+
+                # Use the generation_kwargs prepared *before* the no_grad block
+                outputs = self.model.generate(
+                    input_ids=input_ids_tensor,
+                    **generation_kwargs 
                 )
+                self.logger.debug(f"Model output tensor shape: {outputs.shape}")
+
+                # outputs includes the prompt; extract only the generated part
+                # Shape: (batch_size, generated_sequence_length)
+                generated_ids = outputs[:, input_ids_tensor.shape[1]:]
+                self.logger.debug(f"Generated IDs tensor shape (excluding prompt): {generated_ids.shape}")
+
+                # Move generated IDs to CPU for decoding
+                generated_ids_list = generated_ids.cpu().tolist() # List[List[int]]
+                self.logger.debug(f"Generated IDs (list): {generated_ids_list}")
+
             gen_time = time.time() - start_time
             self.logger.info(f"Model.generate() completed in {gen_time:.2f}s")
 
@@ -181,33 +264,39 @@ class TextGenerator:
                  self.logger.error("Dataset does not have a required 'decode' method.")
                  return ["Error: Decoding not possible."] * num_return_sequences
                  
-            for sequence in output_sequences:
-                # Remove the prompt part to get only the generated tokens
-                # Ensure sequence is on CPU before slicing/converting
-                input_len = input_ids.shape[-1]
-                generated_ids = sequence.cpu()[input_len:].tolist()
-                
+            for ids in generated_ids_list:
                 # Decode, handling potential errors
                 generated_text = "[Decoding Error]" # Default value
                 try:
-                    # Attempt 1: Decode with skip_special_tokens=True
-                    text_attempt_1 = self.dataset.decode(generated_ids, skip_special_tokens=True)
-                    generated_text = text_attempt_1 # Assign only if successful
-                except TypeError:
-                    self.logger.warning(
-                        "Decoding failed with skip_special_tokens=True, trying again without it.",
-                        exc_info=True
-                    )
+                    # Try decoding with skipping special tokens first (common use case)
+                     # Ensure ids is a flat list of integers
+                    if isinstance(ids, list) and all(isinstance(i, int) for i in ids):
+                        self.logger.debug(f"Attempting decode with skip_special_tokens=True for IDs: {ids}")
+                        decoded_text = self.dataset.decode(ids, skip_special_tokens=True)
+                        self.logger.debug(f"Decoded text (skip_special_tokens=True): '{decoded_text}'")
+                        generated_text = decoded_text
+                    else:
+                        self.logger.error(f"Generated IDs format unexpected for decoding: {ids}. Expected List[int].")
+                        generated_text = f"Decoding error: Unexpected ID format. Raw IDs: {ids}"
+                except TypeError as te:
+                    self.logger.warning(f"Decoding with skip_special_tokens=True failed: {te}. Trying without.")
                     try:
-                        # Attempt 2: Decode without skip_special_tokens
-                        text_attempt_2 = self.dataset.decode(generated_ids, skip_special_tokens=False)
-                        generated_text = text_attempt_2 # Assign only if successful
-                    except Exception as decode_err_fallback:
-                        self.logger.error(f"Error during fallback decoding attempt: {decode_err_fallback}", exc_info=True)
-                        # Fallback failed, generated_text remains "[Decoding Error]"
-                except Exception as decode_err_primary:
-                    self.logger.error(f"Error decoding generated sequence: {decode_err_primary}", exc_info=True)
-                    # Primary failed (not TypeError), generated_text remains "[Decoding Error]"
+                        # Fallback: Decode without skipping special tokens
+                        if isinstance(ids, list) and all(isinstance(i, int) for i in ids):
+                            self.logger.debug(f"Attempting decode with skip_special_tokens=False for IDs: {ids}")
+                            decoded_text = self.dataset.decode(ids, skip_special_tokens=False)
+                            self.logger.debug(f"Decoded text (skip_special_tokens=False): '{decoded_text}'")
+                            generated_text = decoded_text
+                        else:
+                            # This path likely won't be hit if the first check failed, but included for safety
+                            self.logger.error(f"Generated IDs format unexpected for fallback decoding: {ids}. Expected List[int].")
+                            generated_text = f"Decoding error: Unexpected ID format in fallback. Raw IDs: {ids}"
+                    except Exception as e_fallback:
+                        self.logger.error(f"Error decoding generated sequence during fallback: {e_fallback}", exc_info=True)
+                        generated_text = f"Decoding error (fallback): {e_fallback}. Raw IDs: {ids}"
+                except Exception as e_primary:
+                    self.logger.error(f"Error decoding generated sequence: {e_primary}", exc_info=True)
+                    generated_text = f"Decoding error: {e_primary}. Raw IDs: {ids}"
 
                 generated_texts.append(generated_text.strip()) # Strip leading/trailing whitespace
 

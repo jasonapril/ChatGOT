@@ -76,21 +76,19 @@ class TestTrainerInit:
         assert trainer.callbacks is not None
         assert trainer.callbacks.callbacks == []
 
-        # Check CheckpointManager call (no checkpoint_dir, uses config.model_dump())
+        # Check CheckpointManager call matches Trainer.__init__
         mock_checkpoint_manager.assert_called_once_with(
             model=mock_model,
             optimizer=mock_optimizer,
             scheduler=None,
-            scaler=trainer.scaler,
             config=mock_config_dict, # Expects dumped dict
-            # checkpoint_dir=None, # REMOVED
+            experiment_name='default', # UPDATED: Trainer passes default
             callbacks=trainer.callbacks,
-            device=trainer.device,
             tokenizer=None, # Default tokenizer is None
-            checkpoint_dir=None, # Expect None from default config
+            checkpoint_dir=None, # <-- ADDED: Expect explicit None dir
             max_checkpoints_to_keep=5 # Expect default 5 as keep_last is None
         )
-        assert trainer.checkpoint_manager == mock_checkpoint_manager_instance
+        assert trainer.checkpoint_manager == mock_checkpoint_manager_instance # Check instance is stored
 
         assert trainer.epoch == 0
         assert trainer.global_step == 0
@@ -224,19 +222,19 @@ class TestTrainerInit:
         assert trainer.callbacks.trainer == trainer # Check callbacks know trainer
         assert trainer.resume_from_checkpoint == resume_path
 
-        # Check CheckpointManager call
+        # Check CheckpointManager call matches Trainer.__init__
         mock_checkpoint_manager.assert_called_once_with(
             model=mock_model,
             optimizer=mock_optimizer,
             scheduler=mock_scheduler,
-            scaler=trainer.scaler,
             config=test_config.model_dump(), # Check dumped config is passed
+            experiment_name='default', # UPDATED: Trainer passes default
             callbacks=trainer.callbacks,
-            device=trainer.device,
             tokenizer=mock_tokenizer,
-            checkpoint_dir=test_config.checkpoint_dir, # Expect None from fixture
+            checkpoint_dir=test_config.checkpoint_dir, # <-- Check correct dir is passed
             max_checkpoints_to_keep=5 # Expect default 5 as keep_last is None in fixture
         )
+        assert trainer.checkpoint_manager == mock_checkpoint_manager_instance # Check instance is stored
 
         # Verify resume path triggered the load_checkpoint call in CheckpointManager
         mock_checkpoint_manager_instance.load_checkpoint.assert_called_once_with(resume_path)

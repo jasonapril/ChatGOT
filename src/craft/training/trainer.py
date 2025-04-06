@@ -8,11 +8,15 @@ This module provides the main Trainer class that integrates all training compone
 
 import logging
 import os
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union, Tuple
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, DictConfig
+import time
+import hashlib
+from pathlib import Path
+from hydra.utils import get_original_cwd
 
 from .training_loop import TrainingLoop
 from .evaluation import Evaluator
@@ -22,7 +26,18 @@ from .generation import TextGenerator
 from .progress import ProgressTracker
 from craft.data.tokenizers.base import BaseTokenizer
 from ..config.schemas import TrainingConfig
-from ..utils.logging import setup_logging
+from ..utils.logging import setup_logging, force_flush_logs, format_time
+
+# Helper to get a representation of state (e.g., hash of params)
+def get_state_hash(component_state_dict):
+    """Creates a hash of a state dict for quick comparison."""
+    try:
+        # Convert state dict to a string representation
+        # Note: This might be slow for large states, consider sampling or norms
+        state_str = str(component_state_dict)
+        return hashlib.md5(state_str.encode()).hexdigest()
+    except Exception as e:
+        return f"ErrorHashingState: {e}"
 
 class Trainer:
     """Main trainer class that coordinates all training components."""
@@ -38,9 +53,11 @@ class Trainer:
         device: Optional[Union[str, torch.device]] = None,
         callbacks: Optional[List[Any]] = None,
         tokenizer: Optional[BaseTokenizer] = None, # Added tokenizer param
+        experiment_config: Optional[DictConfig] = None, # <-- Add this parameter
+        experiment_name: Optional[str] = None,
         resume_from_checkpoint: Optional[str] = None, # Keep resume flag
         compile_model: bool = False,  # Added compile_model argument
-        **kwargs, # Allow for extra args, though we might remove later
+        **kwargs: Any # Allow extra arguments for flexibility
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info("Initializing Trainer...")
@@ -51,10 +68,12 @@ class Trainer:
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
         self.config = config # Store the Pydantic config object
+        self.experiment_config = experiment_config # <-- Store the experiment config
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.tokenizer = tokenizer # Store tokenizer
         self.resume_from_checkpoint = resume_from_checkpoint # Store resume flag
         self.compile_model = compile_model # Store compile_model flag
+        self.experiment_name = experiment_name or "default" # <-- Store experiment_name
 
         # Use default config if none provided
         if self.config is None:
@@ -80,28 +99,46 @@ class Trainer:
         # Access checkpoint-related attributes directly from config
         self.save_interval = self.config.save_interval
         self.save_steps_interval = self.config.save_steps_interval
+        self.time_save_interval_seconds = self.config.time_save_interval_seconds
         # self.checkpoint_dir = self.config.checkpoint_dir # REMOVED - Doesn't exist on TrainingConfig
+
+        # --- Define Persistent Checkpoint Directory --- 
+        # Use original CWD as base to ensure consistency across runs
+        try:
+            original_cwd = Path(get_original_cwd())
+        except Exception:
+            self.logger.warning("Could not get original CWD, using current CWD for checkpoint path.")
+            original_cwd = Path.cwd()
+        persistent_checkpoint_dir = original_cwd / "outputs" / self.experiment_name / "checkpoints"
+        self.logger.info(f"Using persistent checkpoint directory: {persistent_checkpoint_dir}")
+        # --- End Define Checkpoint Directory ---
 
         # Initialize scaler for mixed precision *before* CheckpointManager
         self.scaler = torch.amp.GradScaler(enabled=self.use_amp)
+
+        # Log initial state BEFORE resume attempt
+        self.logger.info(f"[Trainer Init] BEFORE Resume: Model State Hash: {get_state_hash(self.model.state_dict())}")
+        if self.optimizer: # Check if optimizer exists
+            self.logger.info(f"[Trainer Init] BEFORE Resume: Optimizer State Hash: {get_state_hash(self.optimizer.state_dict())}")
+        else:
+             self.logger.info("[Trainer Init] BEFORE Resume: No optimizer yet.")
 
         # Initialize components
         self.callbacks = CallbackList(callbacks or [])
         self.callbacks.set_trainer(self)
         
-        # CheckpointManager now implicitly uses os.getcwd() for its directory
+        # Setup Checkpoint Manager
         self.checkpoint_manager = CheckpointManager(
             model=self.model,
             optimizer=self.optimizer,
             scheduler=self.scheduler,
-            scaler=self.scaler,
-            config=self.config.model_dump() if self.config else {}, # Pass config as dict if needed
-            callbacks=self.callbacks,
-            device=self.device,
-            tokenizer=self.tokenizer, # Pass tokenizer
-            checkpoint_dir=self.config.checkpoint_dir, # <<< Pass the directory
-            # Pass keep_last from TrainingConfig to manager's parameter
-            max_checkpoints_to_keep=self.config.keep_last if self.config.keep_last is not None else 5
+            experiment_name=self.experiment_name, # Pass experiment_name
+            # scaler=self.scaler, # Assuming GradScaler handled elsewhere
+            callbacks=self.callbacks, # Pass callbacks for state saving/loading
+            tokenizer=self.tokenizer,
+            config=self.config.model_dump() if hasattr(self.config, 'model_dump') else OmegaConf.to_container(self.config, resolve=True) if self.config else None,
+            checkpoint_dir=self.config.checkpoint_dir if hasattr(self.config, 'checkpoint_dir') else None, # <-- PASS checkpoint_dir
+            max_checkpoints_to_keep=self.config.keep_last if hasattr(self.config, 'keep_last') and self.config.keep_last is not None else 5
         )
         
         # Training state
@@ -111,13 +148,24 @@ class Trainer:
         self.metrics = {}
         self.loaded_tb_log_dir = None
         
+        # Flags to trigger actions immediately after resuming
+        self._just_resumed_trigger_save = False
+        self._just_resumed_trigger_sample = False
+
         # Move model to device
         self.model.to(self.device)
         
         # Resume from checkpoint if specified
+        self.resume_from_checkpoint = resume_from_checkpoint # Store resume flag FIRST
         if self.resume_from_checkpoint:
             self.logger.info(f"Attempting to resume from checkpoint: {self.resume_from_checkpoint}")
             self._resume_from_checkpoint()
+            # Log state IMMEDIATELY AFTER resume attempt
+            self.logger.info(f"[Trainer Init] AFTER Resume: Model State Hash: {get_state_hash(self.model.state_dict())}")
+            if self.optimizer:
+                self.logger.info(f"[Trainer Init] AFTER Resume: Optimizer State Hash: {get_state_hash(self.optimizer.state_dict())}")
+        else:
+             self.logger.info("No checkpoint specified, starting fresh.")
         
         # TensorBoard setup after potential resume
         tb_logger = None
@@ -136,8 +184,17 @@ class Trainer:
 
     def _resume_from_checkpoint(self):
         """Resume training from a checkpoint."""
+        # --- Add check for 'latest' --- 
+        if self.resume_from_checkpoint is not None and self.resume_from_checkpoint.lower() == "latest":
+            self.logger.error("Resuming with 'latest' is currently not supported due to directory ambiguity.")
+            self.logger.error("Please provide an explicit path to a checkpoint file.")
+            self.resume_from_checkpoint = None # Clear flag
+            raise ValueError("Resuming with 'latest' checkpoint is not supported. Provide explicit path.")
+        # --- End check ---
+            
         try:
-            state = self.checkpoint_manager.load_checkpoint(self.resume_from_checkpoint)
+            # We now expect self.resume_from_checkpoint to be an explicit path or None
+            state = self.checkpoint_manager.load_checkpoint(self.resume_from_checkpoint) 
             if state:
                 # Update Trainer state from loaded TrainingState
                 self.epoch = state.epoch
@@ -145,6 +202,9 @@ class Trainer:
                 self.best_val_metric = state.best_val_metric if state.best_val_metric is not None else float('inf')
                 self.metrics = state.metrics or {}
                 self.loaded_tb_log_dir = state.tensorboard_log_dir
+                # Set flags to trigger actions on first loop iteration after resume
+                self._just_resumed_trigger_save = True 
+                self._just_resumed_trigger_sample = True
                 self.logger.info(f"Resumed trainer state from checkpoint at epoch {self.epoch}, step {self.global_step}")
                 if self.loaded_tb_log_dir:
                     self.logger.info(f"Loaded TensorBoard log directory: {self.loaded_tb_log_dir}")
@@ -175,27 +235,81 @@ class Trainer:
         self.callbacks.on_train_begin(self) # Pass self
         self._stop_training = False # Flag to signal training should stop
 
-        # Instantiate TrainingLoop *once* before the epoch loop
-        training_loop = TrainingLoop(
+        # Instantiate the training loop
+        self.training_loop = TrainingLoop(
             model=self.model,
             optimizer=self.optimizer,
-            train_dataloader=self.train_dataloader, # Pass the dataloader
-            scheduler=self.scheduler,
+            train_dataloader=self.train_dataloader,
             device=self.device,
-            use_amp=self.use_amp,
-            gradient_accumulation_steps=self.gradient_accumulation_steps,
-            max_grad_norm=self.max_grad_norm,
-            log_interval=self.log_interval,
+            config=self.config, # Pass Pydantic TrainingConfig
+            experiment_config=self.experiment_config, # Pass OmegaConf DictConfig
+            scheduler=self.scheduler,
+            use_amp=self.config.use_amp,
+            gradient_accumulation_steps=self.config.gradient_accumulation_steps,
+            max_grad_norm=self.config.max_grad_norm,
+            log_interval=self.config.log_interval,
             callbacks=self.callbacks,
-            # Pass config as dict, loops expects Dict[str, Any]
-            config=self.config.model_dump() if isinstance(self.config, TrainingConfig) else self.config,
-            checkpoint_manager=self.checkpoint_manager,
-            save_steps_interval=self.save_steps_interval, # Pass interval
-            max_steps=self.max_steps # Pass max_steps
+            checkpoint_manager=self.checkpoint_manager, # Pass the manager
+            save_steps_interval=self.config.save_steps_interval, # Pass interval
+            max_steps=self.config.max_steps, # Pass max steps
+            time_save_interval_seconds=self.config.time_save_interval_seconds,
         )
         # Ensure model is on the correct device *before* initializing TrainingLoop
         # self.model.to(self.device) # Already done in Trainer.__init__
 
+        # --- Handle immediate actions after resume ---
+        if self._just_resumed_trigger_save:
+            self.logger.info("Performing immediate time-based save after resuming.")
+            filename = f"checkpoint_step_{self.global_step:06d}_resumed.pt"
+            # Create state (similar logic to loop, consider refactoring)
+            serializable_config = self.config.model_dump() if isinstance(self.config, TrainingConfig) else self.config
+            tb_log_dir = None
+            if self.callbacks:
+               for cb in self.callbacks.callbacks:
+                   if cb.__class__.__name__ == 'TensorBoardLogger' and hasattr(cb, 'resolved_log_dir'):
+                       tb_log_dir = cb.resolved_log_dir
+                       break
+            state = TrainingState(
+                epoch=self.epoch,
+                global_step=self.global_step,
+                model_state_dict=self.model.state_dict(),
+                optimizer_state_dict=self.optimizer.state_dict() if self.optimizer else None,
+                scheduler_state_dict=self.scheduler.state_dict() if self.scheduler else None,
+                scaler_state_dict=self.scaler.state_dict() if self.scaler and self.scaler.is_enabled() else None,
+                best_val_metric=self.best_val_metric,
+                metrics=self.metrics,
+                config=serializable_config,
+                tensorboard_log_dir=tb_log_dir,
+            )
+            self.checkpoint_manager.save_checkpoint(state=state, filename=filename, metrics=state.metrics, is_best=False)
+            # Reset the TrainingLoop timer
+            if hasattr(self.training_loop, 'last_time_based_save'):
+                self.training_loop.last_time_based_save = time.time()
+            self._just_resumed_trigger_save = False # Reset flag
+
+        if self._just_resumed_trigger_sample:
+            self.logger.info("Performing immediate time-based sample after resuming.")
+            sample_cb_found = False
+            if self.callbacks:
+                for cb in self.callbacks.callbacks:
+                     if cb.__class__.__name__ == 'SampleGenerationCallback':
+                         cb.generate_samples(self, trigger_event=f"resume at step {self.global_step}") 
+                         sample_cb_found = True
+                         break # Keep the break after finding the callback
+                if sample_cb_found:
+                     # Reset the TrainingLoop timer
+                     if hasattr(self.training_loop, 'last_time_based_sample'):
+                         self.training_loop.last_time_based_sample = time.time()
+                else:
+                    self.logger.warning("Triggered immediate sample after resume, but SampleGenerationCallback not found.")
+                self._just_resumed_trigger_sample = False # Reset flag
+        # --- End Handle immediate actions ---
+
+        # Log state JUST BEFORE epoch loop starts
+        self.logger.info(f"[Trainer Train] PRE-LOOP: Model State Hash: {get_state_hash(self.model.state_dict())}")
+        if self.optimizer:
+             self.logger.info(f"[Trainer Train] PRE-LOOP: Optimizer State Hash: {get_state_hash(self.optimizer.state_dict())}")
+        
         try:
             for epoch in range(self.epoch, self.num_epochs):
                 self.epoch = epoch
@@ -220,7 +334,7 @@ class Trainer:
                 )
 
                 # Use the single training_loop instance created outside the loop
-                train_metrics = training_loop.train_epoch(
+                train_metrics = self.training_loop.train_epoch(
                     current_epoch=epoch,
                     global_step=self.global_step,
                     progress=progress,

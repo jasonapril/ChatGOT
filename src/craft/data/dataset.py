@@ -150,13 +150,22 @@ class PickledDataset(BaseDataset):
              logger.warning("vocab_size not found in metadata.")
         return vs
 
-    def decode(self, ids: Union[torch.Tensor, List[int]]) -> str:
+    def decode(self, ids: Union[torch.Tensor, List[int]], skip_special_tokens: bool = True) -> str:
         """
         Decodes a sequence of token IDs back into text using idx_to_char from metadata.
         Returns a placeholder if metadata or idx_to_char is unavailable.
+        
+        Args:
+            ids: The token IDs to decode (Tensor or list).
+            skip_special_tokens: Whether to skip PAD and EOS tokens during decoding.
+
+        Returns:
+            The decoded string.
         """
         metadata = self.get_metadata()
         idx_to_char = metadata.get('idx_to_char')
+        pad_token_id = metadata.get('pad_token_id') # Get pad_token_id from metadata
+        eos_token_id = metadata.get('eos_token_id') # Get eos_token_id from metadata
 
         if not idx_to_char:
             logger.warning("Cannot decode: idx_to_char mapping not found in metadata.")
@@ -168,11 +177,23 @@ class PickledDataset(BaseDataset):
             
         try:
             # Handle potential string keys from JSON
-            if all(isinstance(k, str) for k in idx_to_char.keys()):
-                 idx_map = {int(k): v for k, v in idx_to_char.items()} 
-            else:
-                 idx_map = idx_to_char # Assume keys are already integers
-            return ''.join([idx_map.get(i, '?') for i in ids]) # Use '?' for unknown IDs
+            if not hasattr(self, '_idx_map_cache'): # Cache the integer map
+                if all(isinstance(k, str) for k in idx_to_char.keys()):
+                     self._idx_map_cache = {int(k): v for k, v in idx_to_char.items()} 
+                else:
+                     self._idx_map_cache = idx_to_char # Assume keys are already integers
+            idx_map = self._idx_map_cache
+
+            decoded_chars = []
+            for i in ids:
+                if skip_special_tokens:
+                    if pad_token_id is not None and i == pad_token_id:
+                        continue
+                    if eos_token_id is not None and i == eos_token_id:
+                        continue
+                decoded_chars.append(idx_map.get(i, '?')) # Use '?' for unknown IDs
+
+            return ''.join(decoded_chars)
         except Exception as e:
             logger.error(f"Error during decoding: {e}", exc_info=True)
             return f"[Decode error: {e}]"

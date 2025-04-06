@@ -25,7 +25,7 @@ experiment_name: "default_experiment" # Add experiment name field
 # General Run Settings
 seed: 42
 # Remove checkpoint_dir - will be constructed in script from hydra.run.dir
-log_level: "INFO"
+log_level: "DEBUG"
 force_cpu: False
 resume_from: null # Can be set to "latest" or a specific path/to/checkpoint.pt via command line
 
@@ -34,7 +34,7 @@ hydra:
   output_subdir: .hydra
   run:
     # Use original CWD as the base for relative paths in config
-    dir: outputs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: outputs/experiments/${experiment_name}/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
   job:
     chdir: true # Change back to true as it was in the working config
   sweep:
