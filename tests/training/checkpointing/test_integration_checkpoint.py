@@ -103,7 +103,7 @@ class TestCheckpointIntegration:
         """Tests saving and loading the full training state for resume."""
         # 1. Initial State & Checkpoint Manager
         initial_components = checkpoint_components
-        exp_name = "integrity_test_exp"
+        exp_name = "test_integrity_exp"
         initial_cm = CheckpointManager(
             model=initial_components["model"],
             optimizer=initial_components["optimizer"],

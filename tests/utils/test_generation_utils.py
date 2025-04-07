@@ -7,9 +7,9 @@ import pytest
 from unittest.mock import MagicMock, ANY
 from unittest.mock import patch
 
-# Function to test
-from craft.utils.generation import top_k_top_p_filtering
-from craft.utils.generation import generate_sample_text, sample_text
+# Import the module/functions under test
+from craft.training.generation import TextGenerator # Import the class
+from craft.utils.generation import top_k_top_p_filtering # Add this import
 
 # --- Mocks --- 
 
@@ -33,7 +33,7 @@ class MockTokenizer:
         self.encode = MagicMock()
         self.decode = MagicMock()
 
-class MockCharLevel:
+class MockChar:
     """Mock character-level tokenizer/dataset."""
     def __init__(self):
         self.char_to_idx = {'a': 0, 'b': 1, 'c': 2, '<pad>': 3, '<eos>': 4}
@@ -216,119 +216,247 @@ def test_batch_filtering():
     filtered_logits_p = top_k_top_p_filtering(logits_p.clone(), top_k=0, top_p=0.7)
     assert torch.equal(filtered_logits_p, expected_logits_p)
 
-# --- Tests for generate_sample_text --- 
+# --- Tests for generate_sample_text (using mock Model) --- #
 
 def test_generate_sample_text():
     """Test the generate_sample_text utility function."""
     mock_model = MockGenerationModel()
     mock_tokenizer = MockTokenizer()
-    
+    device = torch.device("cpu")
+
+    # Instantiate the generator
+    generator = TextGenerator(model=mock_model, tokenizer=mock_tokenizer, device=device)
+
     # Setup mock return values
     context = torch.tensor([[0, 1]]) # Mock input tensor
     generated_ids = torch.tensor([[0, 1, 2]]) # Mock output from model.generate
     mock_model.generate.return_value = generated_ids
     mock_tokenizer.decode.return_value = "abc" # Mock decoded output
-    
+    mock_tokenizer.encode.return_value = context.tolist() # Mock encode to return list
+
     # Call the function
-    result = generate_sample_text(
-        model=mock_model, 
-        context=context, 
-        max_new_tokens=1, 
-        tokenizer=mock_tokenizer
+    result = generator.generate_text(
+        start_prompt="ab", # Prompt corresponding to context [0, 1]
+        max_new_tokens=1, # Generate 1 new token (ID 2)
+        do_sample=False # Use greedy for predictability
     )
-    
+
     # Assertions
+    # 1. Check model.generate was called (inside generator.generate_text)
     mock_model.generate.assert_called_once()
-    call_kwargs = mock_model.generate.call_args.kwargs
-    assert torch.equal(call_kwargs['input_ids'], context)
+    call_args, call_kwargs = mock_model.generate.call_args
+    assert torch.equal(call_kwargs['input_ids'], context.to(device))
     assert call_kwargs['max_new_tokens'] == 1
+    assert not call_kwargs['do_sample'] # Greedy
+
+    # 2. Check tokenizer.decode was called (inside generator.generate_text)
+    # It should be called with the generated sequence excluding the prompt
+    mock_tokenizer.decode.assert_called_once_with(generated_ids[:, context.shape[1]:].tolist()[0]) # Decode [2]
     
+    # 3. Check the final result
+    assert result == ["abc"] # generate_text returns a list of strings
+
+def test_generate_sample_text_params_forwarding():
+    """Test that generation parameters are forwarded correctly."""
+    mock_model = MockGenerationModel()
+    mock_tokenizer = MockTokenizer()
+    device = torch.device("cpu")
+    generator = TextGenerator(model=mock_model, tokenizer=mock_tokenizer, device=device)
+
+    context = torch.tensor([[0, 1]])
+    generated_ids = torch.tensor([[0, 1, 2]])
+    mock_model.generate.return_value = generated_ids
+    mock_tokenizer.decode.return_value = "decoded"
+    mock_tokenizer.encode.return_value = context.tolist()
+
+    generator.generate_text(
+        start_prompt="ab",
+        max_new_tokens=10,
+        temperature=0.7,
+        top_k=50,
+        top_p=0.95,
+        repetition_penalty=1.2,
+        verbose=True
+    )
+
+    mock_model.generate.assert_called_once()
+    call_args, call_kwargs = mock_model.generate.call_args
+    assert torch.equal(call_kwargs['input_ids'], context)
+    assert call_kwargs['max_new_tokens'] == 10
+    assert call_kwargs['temperature'] == 0.7
+    assert call_kwargs['top_k'] == 50
+    assert call_kwargs['top_p'] == 0.95
+    assert call_kwargs['repetition_penalty'] == 1.2
+    assert call_kwargs['verbose'] is True
     mock_tokenizer.decode.assert_called_once_with(generated_ids[0].tolist())
-    assert result == "abc"
+
+def test_generate_sample_text_max_tokens_zero():
+    """Test generate_sample_text with max_new_tokens=0."""
+    mock_model = MockGenerationModel()
+    mock_tokenizer = MockTokenizer()
+    device = torch.device("cpu")
+    generator = TextGenerator(model=mock_model, tokenizer=mock_tokenizer, device=device)
+
+    context = torch.tensor([[0, 1]])
+    # Expect generate to return only the context if max_new_tokens is 0
+    # (or whatever the underlying model.generate does - we mock it)
+    generated_ids_zero = context.clone()
+    mock_model.generate.return_value = generated_ids_zero
+    mock_tokenizer.decode.return_value = "ab" # Decode of context [0, 1]
+    mock_tokenizer.encode.return_value = context.tolist()
+
+    result = generator.generate_text(
+        start_prompt="ab",
+        max_new_tokens=0
+    )
+
+    mock_model.generate.assert_called_once()
+    call_args, call_kwargs = mock_model.generate.call_args
+    assert call_kwargs['max_new_tokens'] == 0
+    # Check that decode was called with the *original* context ids if max_new=0
+    # This depends on the mock model.generate behavior, let's assume it returns input
+    mock_tokenizer.decode.assert_called_once_with([])
+    assert result == ["ab"] # Assuming decode of context [0, 1] is "ab"
 
 # --- Tests for sample_text --- 
 
 def test_sample_text_regular_tokenizer():
     """Test sample_text with a regular tokenizer."""
-    device = 'cpu' # Explicitly set device for test predictability
+    device = 'cpu' # Explicitly set device for test predictability # TODO: Is this helpful?
     mock_model = MockGenerationModel(device=device)
     mock_tokenizer = MockTokenizer()
+    generator = TextGenerator(model=mock_model, tokenizer=mock_tokenizer, device=device)
     
     prompt = "ab"
     encoded_prompt = torch.tensor([[0, 1]], device=device)
     generated_ids = torch.tensor([[0, 1, 2]])
     
-    mock_tokenizer.encode.return_value = encoded_prompt
+    mock_tokenizer.encode.return_value = encoded_prompt.tolist() # Needs list
     mock_model.generate.return_value = generated_ids
     mock_tokenizer.decode.return_value = "abc"
     
-    result = sample_text(model=mock_model, prompt=prompt, max_length=1, tokenizer=mock_tokenizer, device=device)
+    result = generator.generate_text(start_prompt=prompt, max_new_tokens=1)
     
-    mock_tokenizer.encode.assert_called_once_with(prompt, return_tensors='pt')
+    mock_tokenizer.encode.assert_called_once_with(prompt)
     mock_model.generate.assert_called_once()
-    call_kwargs = mock_model.generate.call_args.kwargs
-    # We need ANY here because the device might be cpu or cuda depending on availability - REMOVED
-    # assert torch.equal(call_kwargs['input_ids'], encoded_prompt.to(ANY))
-    # Check input_ids are on the correct device
-    assert call_kwargs['input_ids'].device == torch.device(device)
-    assert torch.equal(call_kwargs['input_ids'], encoded_prompt) 
+    call_args, call_kwargs = mock_model.generate.call_args
+    assert torch.equal(call_kwargs['input_ids'], encoded_prompt)
     assert call_kwargs['max_new_tokens'] == 1
     
-    mock_tokenizer.decode.assert_called_once_with(generated_ids[0].tolist())
-    assert result == "abc"
+    mock_tokenizer.decode.assert_called_once_with(generated_ids[:, encoded_prompt.shape[1]:].tolist()[0])
+    assert result == ["abc"] # Returns list
 
-def test_sample_text_char_level():
-    """Test sample_text with a character-level tokenizer/dataset."""
-    device = 'cpu' # Explicitly set device
+def test_sample_text_params_forwarding():
+    """Test that generation parameters are forwarded correctly in sample_text."""
+    device = 'cpu'
     mock_model = MockGenerationModel(device=device)
-    mock_char_level = MockCharLevel()
+    mock_tokenizer = MockTokenizer()
+    generator = TextGenerator(model=mock_model, tokenizer=mock_tokenizer, device=device)
+    prompt = "test"
+    encoded_prompt = torch.tensor([[1, 2, 3, 4]], device=device)
+    generated_ids = torch.tensor([[1, 2, 3, 4, 5]])
+
+    mock_tokenizer.encode.return_value = encoded_prompt.tolist()
+    mock_model.generate.return_value = generated_ids
+    mock_tokenizer.decode.return_value = "decoded"
+
+    generator.generate_text(
+        start_prompt=prompt,
+        max_new_tokens=10, # max_length -> max_new_tokens
+        temperature=0.6,
+        top_k=30,
+        top_p=0.85,
+        verbose=True
+    )
+
+    mock_model.generate.assert_called_once()
+    call_args, call_kwargs = mock_model.generate.call_args
+    assert torch.equal(call_kwargs['input_ids'], encoded_prompt)
+    assert call_kwargs['max_new_tokens'] == 10
+    assert call_kwargs['temperature'] == 0.6
+    assert call_kwargs['top_k'] == 30
+    assert call_kwargs['top_p'] == 0.85
+    mock_tokenizer.decode.assert_called_once_with(generated_ids[0].tolist())
+
+def test_sample_text_max_length_zero():
+    """Test sample_text with max_length=0."""
+    device = 'cpu'
+    mock_model = MockGenerationModel(device=device)
+    mock_tokenizer = MockTokenizer()
+    generator = TextGenerator(model=mock_model, tokenizer=mock_tokenizer, device=device)
+    prompt = "test"
+    encoded_prompt = torch.tensor([[1, 2, 3, 4]], device=device)
+    # Expect generate to return only the prompt if max_length is 0
+    generated_ids_zero = encoded_prompt.clone()
+    mock_model.generate.return_value = generated_ids_zero
+    mock_tokenizer.encode.return_value = encoded_prompt.tolist()
+    mock_tokenizer.decode.return_value = "test" # Decode of prompt
+
+    result = generator.generate_text(
+        start_prompt=prompt,
+        max_new_tokens=0
+    )
+
+    mock_model.generate.assert_called_once()
+    call_args, call_kwargs = mock_model.generate.call_args
+    assert call_kwargs['max_new_tokens'] == 0
+    # Check decode was called with the prompt's ids
+    mock_tokenizer.decode.assert_called_once_with([]) # Decode empty generated part
+    assert result == ["test"] # Returns list
+
+def test_sample_text_char():
+    """Test sample_text with a character-level tokenizer/dataset."""
+    device = 'cpu' # Explicitly set device # TODO: Why are we forcing CPU?
+    mock_model = MockGenerationModel(device=device)
+    mock_char = MockChar()
+    generator = TextGenerator(model=mock_model, dataset=mock_char, device=device)
     
     prompt = "ab"
-    # Encoded according to MockCharLevel: a=0, b=1
+    # Encoded according to MockChar: a=0, b=1
     encoded_prompt = torch.tensor([[0, 1]], device=device)
     generated_ids = torch.tensor([[0, 1, 2]]) # a, b, c
     
     mock_model.generate.return_value = generated_ids
-    # Decode mock is handled by side_effect in MockCharLevel
+    # Decode mock is handled by side_effect in MockChar
     
-    result = sample_text(model=mock_model, prompt=prompt, max_length=1, tokenizer=mock_char_level, device=device)
+    result = generator.generate_text(start_prompt=prompt, max_new_tokens=1)
     
     mock_model.generate.assert_called_once()
-    call_kwargs = mock_model.generate.call_args.kwargs
-    # assert torch.equal(call_kwargs['input_ids'], encoded_prompt.to(ANY))
-    assert call_kwargs['input_ids'].device == torch.device(device)
+    call_args, call_kwargs = mock_model.generate.call_args
     assert torch.equal(call_kwargs['input_ids'], encoded_prompt)
     assert call_kwargs['max_new_tokens'] == 1
     
     # Check that the internal decode mock was called correctly
-    mock_char_level.decode.assert_called_once_with(generated_ids[0].tolist())
-    assert result == "abc"
+    mock_char.decode.assert_called_once_with(generated_ids[0].tolist())
+    assert result == ["abc"] # Returns list
 
 def test_sample_text_empty_prompt():
     """Test sample_text with an empty prompt."""
-    device = 'cpu' # Explicitly set device
+    device = 'cpu' # Explicitly set device # TODO: Why are we forcing CPU?
     mock_model = MockGenerationModel(device=device)
     mock_tokenizer = MockTokenizer()
+    generator = TextGenerator(model=mock_model, tokenizer=mock_tokenizer, device=device)
     
     prompt = ""
-    # Expect a default starting tensor, e.g., zeros
-    default_start_ids = torch.zeros((1, 1), dtype=torch.long, device=device)
+    # Expect a default starting tensor, e.g., zeros, handled by model.generate
+    # TextGenerator will encode empty string
+    encoded_empty_prompt = torch.tensor([[]], dtype=torch.long, device=device)
+    mock_tokenizer.encode.return_value = [] # Empty list for empty string
     generated_ids = torch.tensor([[0, 1, 2]])
     
     mock_model.generate.return_value = generated_ids
     mock_tokenizer.decode.return_value = "abc"
     
-    result = sample_text(model=mock_model, prompt=prompt, max_length=3, tokenizer=mock_tokenizer, device=device)
+    result = generator.generate_text(start_prompt=prompt, max_new_tokens=3)
     
     mock_model.generate.assert_called_once()
-    call_kwargs = mock_model.generate.call_args.kwargs
-    # assert torch.equal(call_kwargs['input_ids'], default_start_ids.to(ANY))
-    assert call_kwargs['input_ids'].device == torch.device(device)
-    assert torch.equal(call_kwargs['input_ids'], default_start_ids)
+    call_args, call_kwargs = mock_model.generate.call_args
+    # Check input_ids was based on encoded empty prompt
+    assert call_kwargs['input_ids'].shape[1] == 0 # Check if input shape reflects empty prompt
     assert call_kwargs['max_new_tokens'] == 3
-    
     mock_tokenizer.decode.assert_called_once_with(generated_ids[0].tolist())
-    assert result == "abc"
+
+    assert result == ["abc"] # Returns list
 
 def test_sample_text_device_auto_detection():
     """Test that sample_text auto-detects the correct device (cuda if available, else cpu)"""
@@ -339,46 +467,47 @@ def test_sample_text_device_auto_detection():
         delattr(mock_tokenizer, 'char_to_idx')
     # Simulate tokenizer returning tensor on CPU initially
     encoded_tensor_cpu = torch.tensor([[1, 2, 3]], device='cpu')
-    mock_tokenizer.encode.return_value = encoded_tensor_cpu
+    mock_tokenizer.encode.return_value = encoded_tensor_cpu.tolist()
     mock_tokenizer.decode.return_value = "Generated text"
     # Simulate model generating tensor on CPU initially
     generated_tensor_cpu = torch.tensor([[1, 2, 3, 4]], device='cpu')
     mock_model.generate.return_value = generated_tensor_cpu
+    # Mock model.to
+    mock_model.to = MagicMock(return_value=mock_model)
 
     # Test with CUDA available
     # Use 'cuda' for model.to check, but check type for tensor device
     expected_cuda_device = torch.device('cuda')
     with patch('src.craft.utils.generation.torch.cuda.is_available', return_value=True):
-        sample_text(mock_model, "test prompt", tokenizer=mock_tokenizer)
+        # Instantiate TextGenerator, device='auto' is implicit if None
+        generator_cuda = TextGenerator(model=mock_model, tokenizer=mock_tokenizer, device=expected_cuda_device)
+        # Call generate
+        generator_cuda.generate_text(start_prompt="test prompt", max_new_tokens=1)
 
-        # Assert model was moved to CUDA (without index)
-        mock_model.to.assert_called_with(expected_cuda_device)
+    # Assert model was moved to CUDA
+    mock_model.to.assert_called_with(expected_cuda_device) # Check model moved during TextGenerator init
+    # Assert tensors passed to generate were on CUDA
+    mock_model.generate.assert_called_once()
+    call_args, call_kwargs = mock_model.generate.call_args
+    assert call_kwargs['input_ids'].device == expected_cuda_device
 
-        # Assert input tensor passed to generate is on a CUDA device (ignore index)
-        generate_call_args, generate_call_kwargs = mock_model.generate.call_args
-        input_ids_tensor = generate_call_kwargs.get('input_ids')
-        assert input_ids_tensor is not None, "input_ids not found in generate kwargs"
-        assert input_ids_tensor.device.type == expected_cuda_device.type, \
-               f"Input tensor device type should be {expected_cuda_device.type}, but was {input_ids_tensor.device.type} ({input_ids_tensor.device})"
-
+    # Reset mocks and test CPU path
     mock_model.reset_mock()
     mock_tokenizer.reset_mock()
+    mock_model.to = MagicMock(return_value=mock_model) # Re-mock .to
+    mock_model.generate.return_value = generated_tensor_cpu # Reset generate return
+    mock_tokenizer.encode.return_value = encoded_tensor_cpu.tolist() # Reset encode return
 
-    # Test with CUDA not available
     expected_cpu_device = torch.device('cpu')
     with patch('src.craft.utils.generation.torch.cuda.is_available', return_value=False):
-        # Need to re-assign return value as the tensor might have been modified in place if .to() returned self
-        mock_tokenizer.encode.return_value = torch.tensor([[1, 2, 3]], device='cpu')
-        mock_model.generate.return_value = torch.tensor([[1, 2, 3, 4]], device='cpu')
+        # Instantiate TextGenerator, device='auto' is implicit if None
+        generator_cpu = TextGenerator(model=mock_model, tokenizer=mock_tokenizer, device=expected_cpu_device)
+        # Call generate
+        generator_cpu.generate_text(start_prompt="test prompt", max_new_tokens=1)
 
-        sample_text(mock_model, "test prompt", tokenizer=mock_tokenizer)
-
-        # Assert model was moved to CPU
-        mock_model.to.assert_called_with(expected_cpu_device)
-
-        # Assert input tensor passed to generate is on CPU
-        generate_call_args, generate_call_kwargs = mock_model.generate.call_args
-        input_ids_tensor = generate_call_kwargs.get('input_ids')
-        assert input_ids_tensor is not None, "input_ids not found in generate kwargs"
-        assert input_ids_tensor.device.type == expected_cpu_device.type, \
-               f"Input tensor device type should be {expected_cpu_device.type}, but was {input_ids_tensor.device.type} ({input_ids_tensor.device})"
+    # Assert model was moved to CPU
+    mock_model.to.assert_called_with(expected_cpu_device) # Check model moved during TextGenerator init
+    # Assert tensors passed to generate were on CPU
+    mock_model.generate.assert_called_once()
+    call_args, call_kwargs = mock_model.generate.call_args
+    assert call_kwargs['input_ids'].device == expected_cpu_device

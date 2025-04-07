@@ -17,9 +17,9 @@ import time
 import re
 
 # Module under test
-from craft.training.checkpointing import CheckpointManager, CheckpointLoadError, TrainingState
+from craft.training.checkpointing import CheckpointManager, CheckpointLoadError, TrainingState, CHECKPOINT_FILE_PATTERN
 from craft.models.base import Model, BaseModelConfig # Keep Base models for MockModel
-from craft.data.tokenizers.base import BaseTokenizer
+from craft.data.tokenizers.base import Tokenizer # Replaced BaseTokenizer
 from craft.training.callbacks import CallbackList
 
 # --- Fixtures (Copied/Adapted from original test_checkpointing.py) --- #
@@ -38,7 +38,7 @@ class MockPydanticConfig(BaseModelConfig):
 
 @pytest.fixture
 def mock_tokenizer_fixture():
-    tokenizer = MagicMock(spec=BaseTokenizer)
+    tokenizer = MagicMock(spec=Tokenizer)
     tokenizer.save = MagicMock()
     tokenizer.load = MagicMock() 
     return tokenizer
@@ -90,7 +90,7 @@ def mock_objects_for_cm(mock_tokenizer_fixture):
 @pytest.fixture
 def checkpoint_manager(mock_objects_for_cm, tmp_path):
     """Provides an initialized CheckpointManager instance."""
-    exp_name = "init_manage_test_exp"
+    exp_name = "test_init_manage_exp"
     # Patch os.getcwd for consistent directory behavior in tests if needed, BUT
     # CheckpointManager now uses hydra.utils.get_original_cwd(). Mocking that is complex.
     # Instead, we'll initialize normally and then manually set the checkpoint_dir
@@ -161,7 +161,7 @@ def test_init_directory_already_exists(mock_objects_for_cm, tmp_path):
 
 def test_init_default_directory(mock_objects_for_cm):
     """Test that CheckpointManager uses a default structure and creates the directory."""
-    exp_name = "default_dir_test_exp"
+    exp_name = "test_default_dir_exp"
 
     # Mock getcwd just to provide a known root for the relative default path derivation
     with patch("hydra.utils.get_original_cwd", return_value="/fake/cwd"):
@@ -337,3 +337,14 @@ def test_manage_checkpoints_deletes_tokenizer_dir(checkpoint_manager, tmp_path):
     assert manager.saved_checkpoints[0][0] == str(new_path)
 
 # Add more tests for find_checkpoints, cleanup_checkpoints etc. later 
+
+# Fixtures
+@pytest.fixture
+def mock_pydantic_config():
+    """Provides a mock Pydantic config including the required architecture field."""
+    # Add required architecture field
+    return MockPydanticConfig(param=10, architecture='mock_arch')
+
+@pytest.fixture
+def checkpoint_dir(tmp_path):
+    return tmp_path 

@@ -4,15 +4,18 @@ from unittest.mock import MagicMock, patch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.cuda.amp import GradScaler
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, Dataset
 import logging
 import time
-from craft.config.schemas import TrainingConfig
-from craft.data.tokenizers.base import BaseTokenizer
+from craft.config.schemas import TrainingConfig, AppConfig, LanguageModelConfig, ExperimentConfig
+from craft.models import LanguageModel
+from craft.data import DataLoadersDict # Keep type alias
 from craft.data.base import BaseDataset
-from craft.data.factory import create_data_loaders_from_config
-from pathlib import Path
-import os
+from craft.data.tokenizers.base import Tokenizer
+from craft.training.trainer import Trainer
+from craft.training.checkpointing import TrainingState, CheckpointManager
+import tempfile
+import shutil
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -24,6 +27,8 @@ except ImportError:
 # Import Callback for spec
 from craft.training.callbacks import Callback
 
+# Import base classes for type hinting or fixtures
+from craft.models.base import Model
 
 # Helper function moved here
 # def create_dummy_checkpoint(path: Path, data: dict):
@@ -193,7 +198,7 @@ def mock_dataloader():
 @pytest.fixture
 def mock_tokenizer():
     """Mocks a craft.data.tokenizers.base.BaseTokenizer."""
-    return MagicMock(spec=BaseTokenizer)
+    return MagicMock(spec=Tokenizer)
 
 @pytest.fixture
 def mock_callback():

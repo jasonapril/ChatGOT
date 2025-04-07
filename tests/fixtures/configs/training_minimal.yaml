@@ -1,0 +1,43 @@
+# conf/training/minimal_test.yaml
+
+defaults:
+  - default # Inherit from default training config
+  - _self_  # Allow this file to override defaults
+
+# Override data block size for reduced memory
+data:
+  block_size: 256
+
+# Override parameters for a minimal test run
+# This configuration should be used with the default model
+
+epochs: 1           # Run for only 1 epoch (or set max_steps)
+max_steps: 2        # Limit to only 2 training steps
+
+# Removed overrides for:
+# - batch_size
+# - use_amp
+# - gradient_accumulation_steps
+# - activation_checkpointing
+# The rest will be inherited from defaults (training=default, data=got_char, etc.)
+
+# Adjust logging and saving for short run
+log_interval: 50
+save_interval: 0
+time_save_interval_minutes: 0
+
+# Keep other settings from default or override if needed
+compile_model: False
+torch_compile: False
+
+# Sampling settings (less relevant for short run, keep defaults)
+sample_max_new_tokens: 100
+sample_temperature: 0.8
+sample_start_text: "The night is dark and"
+
+# Generation config (keep defaults)
+generation:
+  start_prompt: "The night is dark and"
+  max_new_tokens: 150
+  temperature: 0.8
+  top_k: null

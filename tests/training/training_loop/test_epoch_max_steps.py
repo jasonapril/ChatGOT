@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader, TensorDataset # Need these
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
+from craft.training.progress import ProgressTracker # Import ProgressTracker
+from craft.training.trainer import Trainer # Import Trainer
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -56,10 +58,11 @@ class TestEpochMaxSteps:
         )
         loop.scaler = mock_scaler
         loop.scaler.is_enabled = MagicMock(return_value=False)
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # --- Run Epoch ---
         start_global_step = 0
-        epoch_metrics = loop.train_epoch(current_epoch=0, global_step=start_global_step, progress=mock_progress_tracker_instance)
+        epoch_metrics = loop.train_epoch(current_epoch=0, global_step=start_global_step, progress=mock_progress_tracker_instance, trainer=mock_trainer) # Pass trainer
 
         # --- Assertions ---
         # Verify the loop ran exactly for max_steps

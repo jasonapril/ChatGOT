@@ -2,9 +2,12 @@ import pytest
 import torch
 from unittest.mock import MagicMock, patch, call, ANY
 from torch.utils.data import DataLoader # Need this
+from torch.optim import AdamW
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
+from craft.training.progress import ProgressTracker
+from craft.training.trainer import Trainer # Import Trainer
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -61,10 +64,12 @@ class TestEpochBasic:
         # --- Run Epoch ---
         current_epoch = 1
         start_global_step_for_epoch = start_global_step
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
         epoch_metrics = loop.train_epoch(
             current_epoch=current_epoch,
             global_step=start_global_step_for_epoch,
-            progress=mock_progress_tracker_instance
+            progress=mock_progress_tracker_instance,
+            trainer=mock_trainer # Pass mock trainer
         )
 
         # --- Assertions ---
@@ -129,13 +134,15 @@ class TestEpochBasic:
         )
         loop.scaler = mock_scaler
         loop.scaler.is_enabled = MagicMock(return_value=False)
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # --- Run Epoch ---
         start_global_step = 0
         epoch_metrics = loop.train_epoch(
             current_epoch=0,
             global_step=start_global_step,
-            progress=mock_progress_tracker_instance
+            progress=mock_progress_tracker_instance,
+            trainer=mock_trainer # Pass mock trainer
         )
 
         # --- Assertions ---
@@ -193,13 +200,15 @@ class TestEpochBasic:
         )
         loop.scaler = mock_scaler
         loop.scaler.is_enabled = MagicMock(return_value=False)
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # --- Run Epoch ---\
         start_global_step = 0
         epoch_metrics = loop.train_epoch(
             current_epoch=0,
             global_step=start_global_step,
-            progress=mock_progress_tracker_instance
+            progress=mock_progress_tracker_instance,
+            trainer=mock_trainer # Pass mock trainer
         )
 
         # --- Assertions ---\

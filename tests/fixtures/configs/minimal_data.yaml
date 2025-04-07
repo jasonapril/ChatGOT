@@ -1,0 +1,17 @@
+# tests/fixtures/configs/minimal_data.yaml
+# Minimal data configuration for testing.
+
+# Example using a character tokenizer and assuming a small test data file
+
+dataset:
+  _target_: craft.data.dataset.PickledDataset # Or another simple dataset target
+  data_dir: tests/fixtures/data/minimal_char # Path to tiny preprocessed data
+  block_size: 16 # Must match model's block_size typically
+
+tokenizer:
+  _target_: craft.data.tokenizers.CharTokenizer
+  # No model_path needed for char tokenizer
+
+# Dataloader config (adjust as needed for tests)
+batch_size: 4
+num_workers: 0 

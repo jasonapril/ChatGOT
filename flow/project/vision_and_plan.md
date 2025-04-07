@@ -25,7 +25,7 @@ We will build and test features incrementally, focusing first on the smaller Gam
 2.  **Data Processing & Loading (`src/craft/data`, `scripts/prepare_data.py`, `data/`) - *Initial Preprocessing***
     *   Implement Character-level processing for GoT (logic within `src/craft/data/processors.py` or called by `scripts/prepare_data.py`).
         *   Input: `data/raw/got.txt` (or similar path)
-        *   Output: Tokenized `train/val/test` splits in `data/processed/got/char_level/` (e.g., `.pkl` files containing token IDs, vocab info).
+        *   Output: Tokenized `train/val/test` splits in `data/processed/got/char/` (e.g., `.pkl` files containing token IDs, vocab info).
     *   Implement `Dataset` and `DataLoader` logic (`src/craft/data/datasets.py`, `src/craft/data/dataloaders.py`) capable of loading the processed character-level data based on configuration.
     *   Ensure `scripts/prepare_data.py` can be driven by configurations in `conf/data/`.
 
@@ -67,7 +67,7 @@ We will build and test features incrementally, focusing first on the smaller Gam
 
 1.  **Subword Tokenization (`src/craft/data`, `conf/tokenizer`, `scripts/prepare_data.py`) - *Tokenizer Training***
     *   Integrate/implement subword tokenizer training (e.g., BPE using Hugging Face `tokenizers` library).
-    *   Update data processing (`scripts/prepare_data.py`, `src/craft/data/processors.py`) to handle subword tokenization for GoT (`data/processed/got/subword_level/`).
+    *   Update data processing (`scripts/prepare_data.py`, `src/craft/data/processors.py`) to handle subword tokenization for GoT (`data/processed/got/subword/`).
     *   Update `Dataset/DataLoader` (`src/craft/data/`) to handle subword tokenized data.
     *   Train and evaluate GoT models using subword tokens, comparing with character-level results.
 

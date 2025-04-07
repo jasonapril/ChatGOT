@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader # Need this
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
+from craft.training.progress import ProgressTracker # Import ProgressTracker
+from craft.training.trainer import Trainer # Import Trainer
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -69,6 +71,7 @@ class TestEpochClipping:
                 max_grad_norm=max_norm
             )
             loop.scaler = mock_scaler
+            mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
             # --- Run Epoch with Patched isnan/isinf --- #
             current_epoch = 0
@@ -81,7 +84,8 @@ class TestEpochClipping:
                 epoch_metrics = loop.train_epoch(
                     current_epoch=current_epoch,
                     global_step=start_global_step_for_epoch,
-                    progress=mock_progress_tracker_instance # Pass progress
+                    progress=mock_progress_tracker_instance, # Pass progress
+                    trainer=mock_trainer # Pass mock trainer
                 )
 
             # --- Assertions ---

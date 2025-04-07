@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader # Need this
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
+from craft.training.progress import ProgressTracker # Import ProgressTracker
+from craft.training.trainer import Trainer # Import Trainer
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -54,6 +56,7 @@ class TestTrainingLoopTrainEpochErrorHandling:
         )
         loop.scaler = mock_scaler
         loop.scaler.is_enabled = MagicMock(return_value=False)
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # --- Run Epoch & Assert Exception ---
         start_global_step = 0
@@ -61,7 +64,8 @@ class TestTrainingLoopTrainEpochErrorHandling:
             loop.train_epoch(
                 current_epoch=0,
                 global_step=start_global_step,
-                progress=mock_progress_tracker_instance # Add progress
+                progress=mock_progress_tracker_instance, # Add progress
+                trainer=mock_trainer # Pass mock trainer
             )
 
         # Assertions
@@ -110,6 +114,7 @@ class TestTrainingLoopTrainEpochErrorHandling:
         )
         loop.scaler = mock_scaler
         loop.scaler.is_enabled = MagicMock(return_value=False)
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # --- Run Epoch & Assert Warning --- #
         start_global_step = 0
@@ -118,7 +123,8 @@ class TestTrainingLoopTrainEpochErrorHandling:
             epoch_metrics = loop.train_epoch(
                 current_epoch=0,
                 global_step=start_global_step,
-                progress=mock_progress_tracker_instance # Add progress
+                progress=mock_progress_tracker_instance, # Add progress
+                trainer=mock_trainer # Pass mock trainer
             )
 
         # Assertions
@@ -150,13 +156,15 @@ class TestTrainingLoopTrainEpochErrorHandling:
         )
         loop.scaler = mock_scaler
         loop.scaler.is_enabled = MagicMock(return_value=False)
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # --- Run Epoch & Assert Error Log --- #
         start_global_step = 0
         epoch_metrics = loop.train_epoch(
             current_epoch=0,
             global_step=start_global_step,
-            progress=mock_progress_tracker_instance # Add progress
+            progress=mock_progress_tracker_instance, # Add progress
+            trainer=mock_trainer # Pass mock trainer
         )
 
         # Assertions
@@ -212,6 +220,7 @@ class TestTrainingLoopTrainEpochErrorHandling:
         )
         loop.scaler = mock_scaler
         loop.scaler.is_enabled = MagicMock(return_value=False) # Keep AMP off for simplicity
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # --- Run Epoch & Assert Exception ---\
         start_global_step = 0
@@ -219,7 +228,8 @@ class TestTrainingLoopTrainEpochErrorHandling:
             loop.train_epoch(
                 current_epoch=0,
                 global_step=start_global_step,
-                progress=mock_progress_tracker_instance
+                progress=mock_progress_tracker_instance,
+                trainer=mock_trainer # Pass mock trainer
             )
 
         # Assertions

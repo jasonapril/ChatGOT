@@ -12,20 +12,21 @@ handlers:
   # Console handler to show progress on stdout
   console:
     class: logging.StreamHandler
-    level: INFO  # Changed back from WARNING to INFO
+    level: INFO  # Changed back from DEBUG
     formatter: minimal
     stream: ext://sys.stdout
+    encoding: utf-8
 
   # File handler to save detailed logs
   file:
     class: logging.FileHandler
-    level: DEBUG      # Log DEBUG level and above to file
+    level: DEBUG      # Keep file log at DEBUG
     formatter: standard # Use standard format for file
     filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log # Log to <output_dir>/train.log (or similar)
     encoding: utf-8
 
 root:
-  level: DEBUG # Set root logger level to DEBUG to capture everything
+  level: DEBUG # Keep root logger level at DEBUG to capture everything for file
   handlers: [console, file] # Use both console and file handlers
 
 # Optional: Configure specific loggers if needed (e.g., reduce verbosity of certain libraries)

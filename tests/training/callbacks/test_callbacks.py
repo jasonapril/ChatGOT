@@ -4,6 +4,7 @@ from typing import List
 import torch
 import numpy as np
 import logging
+import inspect
 
 # Import the classes to test
 from craft.training.callbacks import Callback, CallbackList
@@ -44,7 +45,8 @@ class TestCallbackList:
         """Test extending with multiple callbacks."""
         cb_list = CallbackList([mock_callback])
         new_callbacks = [MagicMock(spec=Callback), MagicMock(spec=Callback)]
-        cb_list.extend(new_callbacks)
+        cb_list.append(new_callbacks[0])
+        cb_list.append(new_callbacks[1])
         assert cb_list.callbacks == [mock_callback] + new_callbacks
 
     def test_set_trainer(self, mock_trainer):
@@ -58,46 +60,97 @@ class TestCallbackList:
         mock_cb1.set_trainer.assert_called_once_with(mock_trainer)
         mock_cb2.set_trainer.assert_called_once_with(mock_trainer)
 
-    # Test dispatching of each event type
     @pytest.mark.parametrize(
-        "method_name, method_args",
+        "method_name, call_args_to_list, expected_args_to_callback",
         [
-            ("on_train_begin", {}),
-            ("on_train_end", {"logs": {"final_metric": 1}}),
-            ("on_epoch_begin", {"epoch": 1, "logs": {"epoch_start": True}}),
-            ("on_epoch_end", {"epoch": 1, "logs": {"epoch_loss": 0.5}}),
-            ("on_step_begin", {"step": 100, "logs": {}}),
-            ("on_step_end", {"step": 100, "logs": {"loss": 0.1}}),
+            # on_train_begin: Called with **kwargs. Individual callback receives **kwargs.
+            ("on_train_begin", {"extra_arg": 123}, {"extra_arg": 123}),
+
+            # on_train_end: Called with metrics=..., **kwargs. Individual callback receives metrics=..., **kwargs.
+            ("on_train_end", {"metrics": {"final_metric": 1}, "extra_arg": 456}, {"metrics": {"final_metric": 1}, "extra_arg": 456}),
+
+            # on_epoch_begin: Called with trainer, current_epoch, global_step, **kwargs. Individual receives all.
+            ("on_epoch_begin", {"current_epoch": 1, "global_step": 10, "extra_arg": 789}, {"trainer": "mock_trainer_placeholder", "current_epoch": 1, "global_step": 10, "extra_arg": 789}),
+
+            # on_epoch_end: Called with epoch, global_step, metrics, **kwargs. Individual receives all.
+            ("on_epoch_end", {"epoch": 1, "global_step": 20, "metrics": {"loss": 0.5}, "extra_arg": "abc"}, {"epoch": 1, "global_step": 20, "metrics": {"loss": 0.5}, "extra_arg": "abc"}),
+
+            # on_step_begin: Called with step, logs=... Individual receives step (positional), **logs.
+            ("on_step_begin", {"step": 100, "logs": {"lr": 0.01}}, {"step": 100, "lr": 0.01}),
+
+            # on_step_end: Called with step, logs=... Individual receives step (positional), **logs.
+            ("on_step_end", {"step": 100, "logs": {"loss": 0.1}}, {"step": 100, "loss": 0.1}),
         ]
     )
-    def test_event_dispatch(self, method_name, method_args):
-        """Test that event methods are correctly dispatched to all callbacks."""
+    def test_event_dispatch(self, method_name, call_args_to_list, expected_args_to_callback):
+        """Test that CallbackList correctly dispatches events to individual callbacks."""
         mock_cb1 = MagicMock(spec=Callback)
         mock_cb2 = MagicMock(spec=Callback)
+        # Ensure the mock methods exist for getattr checks later
+        for cb in [mock_cb1, mock_cb2]:
+            # Add the method if it doesn't exist, crucial for spec'd mocks
+            if not hasattr(cb, method_name):
+                 setattr(cb, method_name, MagicMock())
+            # Ensure the attribute IS callable if it exists
+            elif not callable(getattr(cb, method_name)):
+                 setattr(cb, method_name, MagicMock())
+
+
         cb_list = CallbackList([mock_cb1, mock_cb2])
+        mock_trainer = MagicMock(name="MockTrainerInstance") # Give mock a name
+        cb_list.set_trainer(mock_trainer) # Explicitly set trainer
 
-        # Get the method on CallbackList and call it
+        # Get the method on CallbackList to call
         list_method = getattr(cb_list, method_name)
-        cb_list.trainer = MagicMock() # Set a mock trainer to satisfy checks
-        list_method(**method_args)
 
-        # Assert the corresponding method was called on each mock callback
-        # Separate assertions for clarity
+        # Prepare args for calling the CallbackList method
+        actual_call_args = call_args_to_list.copy()
+
+        # Dynamically add trainer if the list method expects it explicitly as a keyword
+        sig = inspect.signature(list_method)
+        if "trainer" in sig.parameters:
+            # We call everything with kwargs, so only add if it's a kwarg
+            # (This check might be redundant if we always call with kwargs, but safe)
+             actual_call_args["trainer"] = mock_trainer
+
+
+        # Special handling for on_epoch_begin which has specific positional args in CallbackList
+        # We will call it using keyword arguments for consistency in the test setup.
+        # The signature requires trainer, current_epoch, global_step.
+        if method_name == "on_epoch_begin":
+             required_args = {"trainer": mock_trainer, "current_epoch": actual_call_args["current_epoch"], "global_step": actual_call_args["global_step"]}
+             # Add any extra args from the test parameters
+             extra_args = {k: v for k, v in actual_call_args.items() if k not in required_args}
+             required_args.update(extra_args)
+             actual_call_args = required_args # Use this complete set for the call
+
+
+        # Call the CallbackList method using keyword arguments
+        list_method(**actual_call_args)
+
+
+        # Get the method on the individual mock callbacks
         cb1_method = getattr(mock_cb1, method_name)
         cb2_method = getattr(mock_cb2, method_name)
 
-        # Unpack args based on method name for assertion
-        pos_args = []
-        kw_args = {}
-        if "epoch" in method_args: pos_args.append(method_args["epoch"])
-        if "step" in method_args: pos_args.append(method_args["step"])
-        # Ensure logs dict is passed, even if originally None/empty
-        kw_args["logs"] = method_args.get("logs", {})
+        # Prepare the expected arguments dictionary for the individual callback assertion
+        final_expected_args_dict = expected_args_to_callback.copy()
+        # Replace placeholder trainer with the actual mock trainer object
+        if "trainer" in final_expected_args_dict and final_expected_args_dict["trainer"] == "mock_trainer_placeholder":
+            final_expected_args_dict["trainer"] = mock_trainer
 
-        # Only expect trainer arg for non-step methods
-        expected_args = [cb_list.trainer] + pos_args if "step" not in method_name else pos_args
-        cb1_method.assert_called_once_with(*expected_args, **kw_args)
-        cb2_method.assert_called_once_with(*expected_args, **kw_args)
+        # --- Assert based on how CallbackList calls individual callbacks ---
+        if method_name in ["on_step_begin", "on_step_end"]:
+            # CallbackList calls these with step as positional, logs unpacked as kwargs
+            # And trainer is passed via **kwargs
+            expected_pos_arg = final_expected_args_dict.pop("step")
+            cb1_method.assert_called_once_with(expected_pos_arg, **final_expected_args_dict)
+            cb2_method.assert_called_once_with(expected_pos_arg, **final_expected_args_dict)
+        else:
+            # All other methods are called with keywords / **kwargs by CallbackList
+            # including trainer, epoch, global_step, metrics where applicable
+            cb1_method.assert_called_once_with(**final_expected_args_dict)
+            cb2_method.assert_called_once_with(**final_expected_args_dict)
 
 
 # --- Tests for ReduceLROnPlateauOrInstability --- #

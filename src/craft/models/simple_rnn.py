@@ -5,11 +5,10 @@ from typing import Optional
 
 # Import base class, config class, and registration decorator
 from .base import LanguageModel
-from .configs import SimpleRNNConfig
-from .registry import register_model
+from ..config.schemas import SimpleRNNConfig # Config location changed
 
 # Register this model implementation
-@register_model(name="simple_rnn", config_cls=SimpleRNNConfig)
+# @register_model(name="simple_rnn", config_cls=SimpleRNNConfig)
 class SimpleRNN(LanguageModel):
     """
     A simple RNN-based language model.

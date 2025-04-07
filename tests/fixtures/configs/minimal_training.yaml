@@ -1,0 +1,35 @@
+# tests/fixtures/configs/minimal_training.yaml
+# Minimal training configuration for testing.
+
+_target_: craft.config.schemas.TrainingConfig
+
+# Basic Training Loop Params
+max_steps: 10 # Run only a few steps for tests
+num_epochs: 1 # Usually overridden by max_steps for testing
+batch_size: 4 # Should match data config if data provides loader
+grad_accum_steps: 1
+
+# Validation / Evaluation (Minimal)
+val_interval_steps: 10 # Validate once
+eval_iters: 2 # Minimal evaluation iterations
+
+# Checkpointing (Minimal/Disabled)
+save_interval_steps: null # Disable interval saving for most tests
+save_best_model: false
+
+# Logging (Minimal)
+log_interval_steps: 5
+use_wandb: false
+
+# Hardware
+amp_enabled: false # Disable AMP for simplicity in basic tests
+amp_dtype: float32
+
+# Learning Rate Schedule (if needed, often omitted in minimal tests)
+lr_decay: false
+warmup_steps: 0
+lr_min: 1.0e-5
+lr_decay_style: cosine
+
+# Other params from TrainingConfig schema with simple defaults
+seed: 42 

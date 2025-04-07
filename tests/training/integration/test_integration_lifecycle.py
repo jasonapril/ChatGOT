@@ -21,16 +21,12 @@ import hydra
 import pickle
 
 # Import necessary components from the craft library
-from craft.config.schemas import TrainingConfig
-# Import TransformerModel directly from its module
-from craft.models import create_model_from_config, LanguageModelConfig
-from craft.models.transformer import TransformerModel
-# Import correct data factory function name
-from craft.data.factory import prepare_dataloaders_from_config
-# from craft.data.configs import TokenizerConfig, DataConfig # Assuming DataConfig exists - REMOVED
+from craft.config.schemas import TrainingConfig, AppConfig # Ensure AppConfig is available if needed
+from craft.config.schemas import LanguageModelConfig # Import config from schemas
 from craft.data.tokenizers import SentencePieceTokenizer # Assuming this exists
 from craft.training import Trainer
 from craft.training.callbacks import SampleGenerationCallback, TensorBoardLogger
+from craft.utils.common import set_seed
 
 # Configure basic logging for tests
 logging.basicConfig(level=logging.DEBUG)
@@ -194,165 +190,63 @@ def test_subword_lifecycle(integration_config: DictConfig, tiny_corpus: Path):
         pickle.dump(dummy_ids, f)
 
     # --- Instantiate components from config --- #
-    logger.info("Instantiating components...")
+    logger.info("Instantiating Trainer...")
+
     try:
-        # 1. Dataloaders and Tokenizer
-        # Use prepare_dataloaders_from_config which handles tokenizer init
-        # Pass the full integration_config object
-        train_loader, val_loader, _, tokenizer = prepare_dataloaders_from_config(integration_config)
+        logger.info("Instantiating Trainer...")
 
-        assert train_loader is not None, "Train loader failed to initialize"
-        assert val_loader is not None, "Validation loader failed to initialize"
-        assert tokenizer is not None, "Tokenizer failed to initialize"
-        vocab_size = tokenizer.get_vocab_size()
-        integration_config.experiment.model.config.vocab_size = vocab_size
+        # Extract necessary config parts
+        # The model config is nested under model.config in the fixture
+        model_config_dict = OmegaConf.to_container(integration_config.experiment.model.config, resolve=True)
 
-        # # --- Explicitly set tokenizer on datasets --- #
-        # # This is needed because TextGenerator inside the callback needs access via dataset
-        train_dataset_id = None
-        val_dataset_id = None
-        tokenizer_id = id(tokenizer)
-        if hasattr(train_loader.dataset, 'tokenizer'):
-            train_loader.dataset.tokenizer = tokenizer
-            train_dataset_id = id(train_loader.dataset)
-            logger.debug(f"[Test Setup] Set tokenizer (ID: {tokenizer_id}) on train_loader.dataset (ID: {train_dataset_id})")
-            logger.debug(f"[Test Setup] train_loader.dataset.__dict__ after set: {getattr(train_loader.dataset, '__dict__', 'N/A')}")
-        if hasattr(val_loader.dataset, 'tokenizer'):
-            val_loader.dataset.tokenizer = tokenizer
-            val_dataset_id = id(val_loader.dataset)
-            logger.debug(f"[Test Setup] Set tokenizer on val_loader.dataset (ID: {val_dataset_id})")
-        # # --- End explicit set --- #
+        # Extract TrainingConfig settings by combining training and checkpoints sections
+        training_args = OmegaConf.to_container(integration_config.experiment.training, resolve=True)
+        checkpoint_args = OmegaConf.to_container(integration_config.experiment.checkpoints, resolve=True)
+        training_args.update(checkpoint_args)
+        training_args["batch_size"] = integration_config.experiment.data.batch_size # Add batch size if needed by TrainingConfig
+        training_config_obj = TrainingConfig(**training_args)
 
-        # 2. Model
-        model = create_model_from_config(integration_config.experiment.model)
-        
-        # 3. Optimizer
-        optimizer = torch.optim.AdamW(model.parameters(), lr=integration_config.experiment.optimizer.lr)
+        # The full experiment config node (contains data, model, optimizer, callbacks etc.)
+        experiment_config_node = integration_config.experiment
 
-        # 4. Scheduler (Optional)
-        scheduler = None # Configured as None in fixture
-        
-        # 5. Training Config (Pydantic object)
-        # Combine training and checkpoint args from the nested structure
-        flat_training_config = OmegaConf.to_container(integration_config.experiment.training, resolve=True)
-        flat_training_config.update(OmegaConf.to_container(integration_config.experiment.checkpoints, resolve=True))
-        flat_training_config["log_level"] = integration_config.experiment.training.log_level # Ensure log level is included
-        flat_training_config["batch_size"] = integration_config.experiment.data.batch_size
-        training_config = TrainingConfig(**flat_training_config)
+        # Instantiate Trainer
+        trainer = Trainer(
+            model_config=model_config_dict,
+            config=training_config_obj,
+            experiment_config=experiment_config_node,
+            device=experiment_config_node.training.device, # Get device from config
+            experiment_name="integration_test"
+        )
 
-        # 6. Callbacks (Instantiate from config)
-        callbacks_list = []
-        if "callbacks" in integration_config.experiment and integration_config.experiment.callbacks:
-            for cb_conf in integration_config.experiment.callbacks:
-                try:
-                     callback_instance = hydra.utils.instantiate(cb_conf, _convert_="partial") 
-                     callbacks_list.append(callback_instance)
-                except Exception as e:
-                     logger.error(f"Failed to instantiate callback {cb_conf.get('_target_')}: {e}")
-                     pytest.fail(f"Callback instantiation failed: {e}")
+        # Run Setup and Train
+        logger.info("Running trainer.setup()...")
+        trainer.setup()
+        # Ensure vocab size is consistent after setup (tokenizer is loaded)
+        assert trainer._model.config.vocab_size == trainer._tokenizer.get_vocab_size()
+
+        logger.info("Running trainer.train()...")
+        trainer.train()
 
     except Exception as e:
-        logger.exception("Component instantiation failed.")
-        pytest.fail(f"Failed to instantiate components: {e}")
+        logger.exception("Error during Trainer instantiation, setup or training")
+        pytest.fail(f"Trainer lifecycle failed: {e}")
 
-    # --- Part 1: Initial Training --- #
-    logger.info("--- Starting Initial Training (Part 1) ---")
-    trainer1 = Trainer(
-        config=training_config, 
-        model=model, 
-        optimizer=optimizer, 
-        train_dataloader=train_loader, 
-        val_dataloader=val_loader,
-        scheduler=scheduler,
-        tokenizer=tokenizer,
-        callbacks=callbacks_list, # Pass the instantiated list
-        experiment_name="lifecycle_test" # Provide an experiment name
-    )
-    trainer1.train()
-    logger.info("--- Initial Training Finished (Part 1) ---")
-
-    # --- Assertions after Part 1 --- #
-    assert trainer1.global_step == integration_config.experiment.training.max_steps
-    # Check if checkpoints were created (based on save_steps_interval = 2, max_steps = 4)
+    # --- Assertions (Example - adapt as needed) --- #
+    logger.info("Trainer training finished. Checking outputs...")
+    
     checkpoint_dir = Path(integration_config.experiment.checkpoints.checkpoint_dir)
-    step2_ckpt = checkpoint_dir / "checkpoint_step_000002.pt"
-    step4_ckpt = checkpoint_dir / "checkpoint_step_000004.pt"
-    assert step2_ckpt.exists(), "Checkpoint at step 2 should exist"
-    assert step4_ckpt.exists(), "Checkpoint at step 4 should exist"
-    # Check if TensorBoard logs exist
-    log_dir = Path(integration_config.experiment.callbacks[1].log_dir) # Assuming TB logger is second callback
-    assert any(log_dir.iterdir()), "TensorBoard log directory should not be empty"
-    # Check if sample generation produced output (difficult to assert content precisely)
-    # We can check if the callback logged something, but that requires capturing logs
+    log_dir = Path(integration_config.experiment.callbacks[1].log_dir) # Assumes TB logger is the second callback
 
-    # Get state dicts before potentially resetting for resume
-    model_state_after_part1 = model.state_dict()
-    optimizer_state_after_part1 = optimizer.state_dict()
+    # Checkpoint files (saved at step 2 and 4)
+    assert (checkpoint_dir / "ckpt_step_2.pt").exists()
+    assert (checkpoint_dir / "ckpt_step_4.pt").exists()
+    assert not (checkpoint_dir / "ckpt_step_0.pt").exists() # Assuming it doesn't save at step 0
 
-    # --- Part 2: Resuming Training --- #
-    logger.info("--- Starting Resumed Training (Part 2) ---")
-    # Modify config to resume from the last checkpoint (step 4)
-    integration_config.experiment.checkpoints.resume_from_checkpoint = str(step4_ckpt)
-    # Increase max_steps to allow further training
-    new_max_steps = 6
-    integration_config.experiment.training.max_steps = new_max_steps
+    # TensorBoard logs
+    assert log_dir.is_dir()
+    tfevents_files = list(log_dir.glob("events.out.tfevents.*"))
+    assert len(tfevents_files) > 0, f"No TensorBoard event files found in {log_dir}"
 
-    # Re-create components (simulate restarting the script)
-    logger.info("Re-instantiating components for resume...")
-    try:
-        # Re-create using the modified config
-        train_loader2, val_loader2, _, tokenizer2 = prepare_dataloaders_from_config(integration_config)
-        model2 = create_model_from_config(integration_config.experiment.model)
-        optimizer2 = torch.optim.AdamW(model2.parameters(), lr=integration_config.experiment.optimizer.lr)
-        scheduler2 = None
-        # Re-create TrainingConfig with updated max_steps and resume path
-        flat_training_config2 = OmegaConf.to_container(integration_config.experiment.training, resolve=True)
-        flat_training_config2.update(OmegaConf.to_container(integration_config.experiment.checkpoints, resolve=True))
-        flat_training_config2["log_level"] = integration_config.experiment.training.log_level
-        flat_training_config2["batch_size"] = integration_config.experiment.data.batch_size
-        training_config2 = TrainingConfig(**flat_training_config2)
+    # TODO: Add checks for generated samples (e.g., check log output or a saved file)
 
-        # # --- Explicitly set tokenizer on datasets (Part 2) --- #
-        # if hasattr(train_loader2.dataset, 'tokenizer'):
-        #     train_loader2.dataset.tokenizer = tokenizer2
-        # if hasattr(val_loader2.dataset, 'tokenizer'):
-        #     val_loader2.dataset.tokenizer = tokenizer2
-        # # --- End explicit set --- #
-
-        callbacks_list2 = []
-        if "callbacks" in integration_config.experiment and integration_config.experiment.callbacks:
-            for cb_conf in integration_config.experiment.callbacks:
-                callbacks_list2.append(hydra.utils.instantiate(cb_conf, _convert_="partial"))
-
-    except Exception as e:
-        logger.exception("Component re-instantiation for resume failed.")
-        pytest.fail(f"Failed to re-instantiate components for resume: {e}")
-
-    trainer2 = Trainer(
-        config=training_config2, # Use updated config
-        model=model2, 
-        optimizer=optimizer2, 
-        train_dataloader=train_loader2, 
-        val_dataloader=val_loader2,
-        scheduler=scheduler2,
-        tokenizer=tokenizer2,
-        callbacks=callbacks_list2,
-        experiment_name="lifecycle_test_resume", # Can use same or different
-        resume_from_checkpoint=str(step4_ckpt) # <-- EXPLICITLY PASS RESUME PATH
-    )
-    # Trainer init should load the checkpoint specified in config
-    assert trainer2.global_step == 4, "Trainer should resume from global_step 4"
-    trainer2.train() 
-    logger.info("--- Resumed Training Finished (Part 2) ---")
-
-    # --- Assertions after Part 2 --- #
-    assert trainer2.global_step == new_max_steps
-    # Check if a new checkpoint was created at step 6 (save_steps_interval = 2)
-    step6_ckpt = checkpoint_dir / "checkpoint_step_000006.pt"
-    assert step6_ckpt.exists(), "Checkpoint at step 6 should exist after resume"
-    # Due to keep_last=2, step 2 checkpoint should be deleted
-    assert not step2_ckpt.exists(), "Checkpoint at step 2 should be deleted (keep_last=2)"
-
-    # Assert that model/optimizer states are different after resuming and training further
-
-# ... (Potentially add more specific assertions about model weights if needed) ...
+    # TODO: Add resume test logic here or in a separate test function

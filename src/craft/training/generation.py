@@ -11,12 +11,15 @@ import logging
 import time  # Import the time module
 from typing import Dict, List, Any, Optional, Union
 from unittest.mock import MagicMock
-from ..data.tokenizers.base import BaseTokenizer
+from ..data.tokenizers.base import Tokenizer
+from omegaconf import DictConfig
+
+from ..models.base import Model
 
 class TextGenerator:
     """Generates text using a trained model."""
 
-    def __init__(self, model: torch.nn.Module, device: torch.device, dataset: Optional[Any] = None, tokenizer: Optional[BaseTokenizer] = None, config: Optional[Union[Dict[str, Any], "DictConfig"]] = None):
+    def __init__(self, model: torch.nn.Module, device: torch.device, dataset: Optional[Any] = None, tokenizer: Optional[Tokenizer] = None, config: Optional[Union[Dict[str, Any], "DictConfig"]] = None):
         """
         Initializes the TextGenerator.
 
@@ -24,7 +27,7 @@ class TextGenerator:
             model (torch.nn.Module): The model to use for generation.
             device (torch.device): The device to run generation on.
             dataset (Optional[Any]): The dataset object, used for encoding/decoding if tokenizer not provided explicitly.
-            tokenizer (Optional[BaseTokenizer]): Explicit tokenizer to use. If provided, this takes precedence over dataset.tokenizer.
+            tokenizer (Optional[Tokenizer]): Explicit tokenizer to use. If provided, this takes precedence over dataset.tokenizer.
             config (Optional[Union[Dict[str, Any], "DictConfig"]]): Configuration dictionary (optional).
         """
         self.model = model
@@ -268,37 +271,36 @@ class TextGenerator:
                 # Decode, handling potential errors
                 generated_text = "[Decoding Error]" # Default value
                 try:
-                    # Try decoding with skipping special tokens first (common use case)
-                     # Ensure ids is a flat list of integers
-                    if isinstance(ids, list) and all(isinstance(i, int) for i in ids):
-                        self.logger.debug(f"Attempting decode with skip_special_tokens=True for IDs: {ids}")
+                    # --- Decoding Logic --- #
+                    # Priority: self.tokenizer -> self.dataset.decode -> Error
+                    # Try explicit tokenizer first
+                    if self.tokenizer and hasattr(self.tokenizer, 'decode') and callable(getattr(self.tokenizer, 'decode')):
+                        # Use explicitly provided tokenizer
+                        self.logger.debug("Using self.tokenizer.decode")
+                        decoded_text = self.tokenizer.decode(ids, skip_special_tokens=True)
+                        if not decoded_text: # Try without skipping specials if first attempt was empty
+                            self.logger.warning(f"Decoding with skip_special_tokens=True failed or returned empty. Trying without.")
+                            decoded_text = self.tokenizer.decode(ids, skip_special_tokens=False)
+                    # Fallback to dataset decode method
+                    elif self.dataset and hasattr(self.dataset, 'decode') and callable(getattr(self.dataset, 'decode')):
+                        # Fallback to dataset decode method
+                        self.logger.debug("Using self.dataset.decode")
                         decoded_text = self.dataset.decode(ids, skip_special_tokens=True)
-                        self.logger.debug(f"Decoded text (skip_special_tokens=True): '{decoded_text}'")
-                        generated_text = decoded_text
-                    else:
-                        self.logger.error(f"Generated IDs format unexpected for decoding: {ids}. Expected List[int].")
-                        generated_text = f"Decoding error: Unexpected ID format. Raw IDs: {ids}"
-                except TypeError as te:
-                    self.logger.warning(f"Decoding with skip_special_tokens=True failed: {te}. Trying without.")
-                    try:
-                        # Fallback: Decode without skipping special tokens
-                        if isinstance(ids, list) and all(isinstance(i, int) for i in ids):
-                            self.logger.debug(f"Attempting decode with skip_special_tokens=False for IDs: {ids}")
+                        # Fallback if decode fails or returns None/empty (e.g., special tokens only)
+                        if not decoded_text:
+                            self.logger.warning(f"Decoding with skip_special_tokens=True failed or returned empty. Trying without.")
                             decoded_text = self.dataset.decode(ids, skip_special_tokens=False)
-                            self.logger.debug(f"Decoded text (skip_special_tokens=False): '{decoded_text}'")
-                            generated_text = decoded_text
-                        else:
-                            # This path likely won't be hit if the first check failed, but included for safety
-                            self.logger.error(f"Generated IDs format unexpected for fallback decoding: {ids}. Expected List[int].")
-                            generated_text = f"Decoding error: Unexpected ID format in fallback. Raw IDs: {ids}"
-                    except Exception as e_fallback:
-                        self.logger.error(f"Error decoding generated sequence during fallback: {e_fallback}", exc_info=True)
-                        generated_text = f"Decoding error (fallback): {e_fallback}. Raw IDs: {ids}"
-                except Exception as e_primary:
-                    self.logger.error(f"Error decoding generated sequence: {e_primary}", exc_info=True)
-                    generated_text = f"Decoding error: {e_primary}. Raw IDs: {ids}"
+                    else:
+                        # Fallback if neither decode method exists
+                        self.logger.error("Cannot decode: No usable tokenizer or dataset.decode method found.")
+                        decoded_text = f"[Decoding Error: No decode method found]"
 
-                generated_texts.append(generated_text.strip()) # Strip leading/trailing whitespace
+                    generated_text = decoded_text.strip() # Strip leading/trailing whitespace
+                except Exception as e:
+                    self.logger.error(f"Error decoding generated sequence: {e}", exc_info=True)
+                    generated_text = f"Decoding error: {e}"
+
+                generated_texts.append(generated_text)
 
             return generated_texts
 

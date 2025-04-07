@@ -1,0 +1,30 @@
+# Minimal config for CLI training test
+
+defaults:
+  - _self_
+  - override /data: test_got_char # Use minimal char data
+  - override /model: char_transformer_test # Use minimal model
+
+training:
+  max_steps: 2 # Run for 2 steps to ensure checkpointing logic might trigger
+  save_steps_interval: 1 # Save every step
+  log_interval: 1
+  epochs: 1 # Ensure it doesn't run long if steps aren't limiting
+  batch_size: 2 # Minimal batch size
+  # Keep other settings from defaults
+
+data:
+  batch_size: ${training.batch_size}
+  num_workers: 0 # Avoid multiprocessing issues in tests
+
+# Disable callbacks that might interfere or require extra setup
+callbacks:
+  tensorboard: null
+  sample_generation: null
+  early_stopping: null
+  lr_scheduler: null
+
+# Let hydra manage run dir unless overridden in test
+hydra:
+  run:
+    dir: ??? 

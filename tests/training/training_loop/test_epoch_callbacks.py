@@ -5,6 +5,9 @@ from torch.utils.data import DataLoader # Need this
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
+from craft.training.callbacks.base import Callback # Ensure Base Callback is imported
+from craft.training.progress import ProgressTracker # Import ProgressTracker
+from craft.training.trainer import Trainer # Import Trainer
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -49,6 +52,7 @@ class TestEpochCallbacks:
 
         mock_scaler.is_enabled = MagicMock(return_value=False)
         mock_callback = mock_callback_fixture
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # --- Setup Loop ---
         loop = TrainingLoop(
@@ -67,11 +71,12 @@ class TestEpochCallbacks:
         loop.train_epoch(
             current_epoch=0,
             global_step=start_global_step,
-            progress=mock_progress_tracker_instance
+            progress=mock_progress_tracker_instance,
+            trainer=mock_trainer # Pass mock trainer
         )
         # --- Assertions ---
         mock_callback.on_step_begin.assert_called_once_with(start_global_step, logs=ANY)
-        mock_callback.on_step_end.assert_called_once_with(start_global_step + 1, logs=ANY)
+        mock_callback.on_step_end.assert_called_once_with(step=0, global_step=start_global_step + 1, metrics=ANY)
         assert mock_progress_tracker_instance.update.call_count == len(mock_dataloader)
         mock_progress_tracker_instance.update.assert_called_with(
             step=start_global_step + 1, 

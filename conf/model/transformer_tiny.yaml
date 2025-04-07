@@ -1,20 +1,17 @@
-# conf/model/transformer_tiny.yaml
-# Configuration for a very small Transformer model for testing on low-memory GPUs
+# @package _group_
+# Minimal Transformer config for testing
 
 _target_: craft.models.transformer.TransformerModel
-model_type: language # Should match the training task
 
-config:
-  _target_: src.models.base.LanguageModelConfig
-  architecture: transformer
-  model_type: ${model.model_type}
-  vocab_size: null      # Add placeholder for vocab_size
-  d_model: 128          # Significantly reduced
-  n_layers: 2           # Significantly reduced
-  n_head: 4             # Reduced
-  d_hid: 512            # Significantly reduced (usually 4*d_model)
-  dropout: 0.1
-  layer_norm_eps: 1e-5
-  activation: gelu
-  bias: true
-  max_seq_length: ${data.block_size} # Keep block size consistent with data 
+architecture: transformer # Discriminator for schemas.py
+vocab_size: ??? # REQUIRED override from test script
+d_model: 16
+n_head: 2
+d_hid: 32 # Explicitly set for tiny model (4*d_model would be 64)
+n_layers: 1
+dropout: 0.0 # No dropout for testing
+bias: true
+layer_norm_eps: 1e-5
+activation: relu # Simple activation for testing
+norm_first: true
+max_seq_length: 32 # Matches data.block_size in experiment 

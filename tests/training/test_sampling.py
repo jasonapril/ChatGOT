@@ -7,7 +7,8 @@ from unittest.mock import patch, MagicMock, call
 import torch.nn.functional as F
 
 # Import functions to test
-from craft.training.sampling import generate_text_sampling, sample_text
+from craft.training.sampling import generate_text_manual_sampling, generate_samples_manual_sampling
+from craft.data.tokenizers.base import Tokenizer # Correct base class name
 
 # Basic fixture for character mappings
 @pytest.fixture
@@ -15,6 +16,18 @@ def char_maps():
     char_to_idx = {'<unk>': 0, 'a': 1, 'b': 2, 'c': 3, 'd': 4, ' ': 5}
     idx_to_char = {0: '<unk>', 1: 'a', 2: 'b', 3: 'c', 4: 'd', 5: ' '}
     return char_to_idx, idx_to_char
+
+# Mock Tokenizer fixture based on char_maps
+@pytest.fixture
+def mock_tokenizer(char_maps):
+    char_to_idx, idx_to_char = char_maps
+    tokenizer = MagicMock(spec=Tokenizer)
+    tokenizer.encode.side_effect = lambda text: [char_to_idx.get(c, 0) for c in text] # Simple char encoding
+    tokenizer.decode.side_effect = lambda ids: "".join([idx_to_char.get(i, '<unk>') for i in ids])
+    tokenizer.pad_token_id = None # Assume no padding needed for these tests
+    tokenizer.eos_token_id = None # Assume no EOS needed for these tests
+    tokenizer.vocab_size = len(char_to_idx)
+    return tokenizer
 
 @pytest.fixture
 def mock_model():
@@ -48,8 +61,7 @@ def mock_model():
 
 # --- Tests for generate_text_sampling ---
 
-def test_generate_basic_sampling(mock_model, char_maps):
-    char_to_idx, idx_to_char = char_maps
+def test_generate_basic_manual_sampling(mock_model, mock_tokenizer):
     seed_text = "a"
     max_length = 3 # Generate 3 more chars: b, c, d
     device = torch.device('cpu')
@@ -63,10 +75,9 @@ def test_generate_basic_sampling(mock_model, char_maps):
             return torch.argmax(probs, dim=1, keepdim=True)
         mock_multinomial.side_effect = multinomial_side_effect
 
-        generated_text = generate_text_sampling(
+        generated_text = generate_text_manual_sampling(
             model=mock_model,
-            char_to_idx=char_to_idx,
-            idx_to_char=idx_to_char,
+            tokenizer=mock_tokenizer,
             seed_text=seed_text,
             max_length=max_length,
             temperature=1.0, # No scaling
@@ -108,8 +119,7 @@ def test_generate_basic_sampling(mock_model, char_maps):
     # Verify multinomial calls (sampling)
     assert mock_multinomial.call_count == max_length
 
-def test_generate_sampling_temperature(mock_model, char_maps):
-    char_to_idx, idx_to_char = char_maps
+def test_generate_manual_sampling_temperature(mock_model, mock_tokenizer):
     seed_text = "a"
     max_length = 1 # Only need one step
     device = torch.device('cpu')
@@ -118,10 +128,9 @@ def test_generate_sampling_temperature(mock_model, char_maps):
     # Patch multinomial to be deterministic (argmax)
     with patch('torch.multinomial') as mock_multinomial_low_temp:
         mock_multinomial_low_temp.side_effect = lambda probs, num_samples: torch.argmax(probs, dim=1, keepdim=True)
-        generated_text_low_temp = generate_text_sampling(
+        generated_text_low_temp = generate_text_manual_sampling(
             model=mock_model, # Model still prefers 'b' after 'a'
-            char_to_idx=char_to_idx,
-            idx_to_char=idx_to_char,
+            tokenizer=mock_tokenizer,
             seed_text=seed_text,
             max_length=max_length,
             temperature=0.1, # Very low temperature
@@ -148,10 +157,9 @@ def test_generate_sampling_temperature(mock_model, char_maps):
         with patch('torch.multinomial') as mock_multinomial_high_temp:
              # Return a fixed value, e.g., index 3 ('c'), doesn't matter for this check
             mock_multinomial_high_temp.return_value = torch.tensor([[3]])
-            generate_text_sampling(
+            generate_text_manual_sampling(
                 model=mock_model,
-                char_to_idx=char_to_idx,
-                idx_to_char=idx_to_char,
+                tokenizer=mock_tokenizer,
                 seed_text=seed_text,
                 max_length=max_length,
                 temperature=10.0, # Very high temperature
@@ -174,10 +182,9 @@ def test_generate_sampling_temperature(mock_model, char_maps):
     with patch('torch.nn.functional.softmax', new=softmax_wrapper_low_temp):
         with patch('torch.multinomial') as mock_multinomial_low_temp_check:
             mock_multinomial_low_temp_check.return_value = torch.tensor([[2]]) # Return 'b'
-            generate_text_sampling(
+            generate_text_manual_sampling(
                 model=mock_model,
-                char_to_idx=char_to_idx,
-                idx_to_char=idx_to_char,
+                tokenizer=mock_tokenizer,
                 seed_text=seed_text,
                 max_length=max_length,
                 temperature=0.1, # Very low temperature
@@ -190,8 +197,7 @@ def test_generate_sampling_temperature(mock_model, char_maps):
     # High temp variance should be significantly lower than low temp variance
     assert prob_variance_high_temp < prob_variance_low_temp
 
-def test_generate_sampling_top_k(mock_model, char_maps):
-    char_to_idx, idx_to_char = char_maps
+def test_generate_manual_sampling_top_k(mock_model, mock_tokenizer):
     seed_text = "a" # Model output after 'a' is [-10, -10, 1.0, -10, -10, -10]
     max_length = 1
     device = torch.device('cpu')
@@ -226,10 +232,9 @@ def test_generate_sampling_top_k(mock_model, char_maps):
         with patch('torch.multinomial') as mock_multinomial:
             # Return index 2 ('b'), the most likely of the top-k
             mock_multinomial.return_value = torch.tensor([[2]])
-            generate_text_sampling(
+            generate_text_manual_sampling(
                 model=mock_model,
-                char_to_idx=char_to_idx,
-                idx_to_char=idx_to_char,
+                tokenizer=mock_tokenizer,
                 seed_text=seed_text,
                 max_length=max_length,
                 temperature=1.0,
@@ -246,8 +251,7 @@ def test_generate_sampling_top_k(mock_model, char_maps):
     assert captured_probs[0, 2].item() > 0
     assert captured_probs[0, 3].item() > 0
 
-def test_generate_sampling_top_p(mock_model, char_maps):
-    char_to_idx, idx_to_char = char_maps
+def test_generate_manual_sampling_top_p(mock_model, mock_tokenizer):
     seed_text = "a"
     max_length = 1
     device = torch.device('cpu')
@@ -280,10 +284,9 @@ def test_generate_sampling_top_p(mock_model, char_maps):
     with patch('torch.nn.functional.softmax', new=softmax_wrapper):
         with patch('torch.multinomial') as mock_multinomial:
             mock_multinomial.return_value = torch.tensor([[2]]) # Doesn't matter
-            generate_text_sampling(
+            generate_text_manual_sampling(
                 model=mock_model,
-                char_to_idx=char_to_idx,
-                idx_to_char=idx_to_char,
+                tokenizer=mock_tokenizer,
                 seed_text=seed_text,
                 max_length=max_length,
                 temperature=1.0,
@@ -299,8 +302,7 @@ def test_generate_sampling_top_p(mock_model, char_maps):
 
     assert kept_indices == expected_kept_indices
 
-def test_generate_sampling_repetition_penalty(mock_model, char_maps):
-    char_to_idx, idx_to_char = char_maps
+def test_generate_manual_sampling_repetition_penalty(mock_model, mock_tokenizer):
     seed_text = "ab"
     max_length = 1 # We only care about the step predicting after 'ab'
     device = torch.device('cpu')
@@ -330,10 +332,9 @@ def test_generate_sampling_repetition_penalty(mock_model, char_maps):
     with patch('torch.nn.functional.softmax', new=softmax_wrapper):
         with patch('torch.multinomial') as mock_multinomial:
             mock_multinomial.return_value = torch.tensor([[3]]) # Predict 'c'
-            generate_text_sampling(
+            generate_text_manual_sampling(
                 model=mock_model,
-                char_to_idx=char_to_idx,
-                idx_to_char=idx_to_char,
+                tokenizer=mock_tokenizer,
                 seed_text=seed_text,
                 max_length=max_length,
                 temperature=1.0,
@@ -353,9 +354,8 @@ def test_generate_sampling_repetition_penalty(mock_model, char_maps):
     logit_for_c = captured_logits_before_softmax[0, 3].item()
     assert logit_for_c == pytest.approx(1.0) # Original logit from mock model
 
-def test_generate_sampling_unknown_seed_chars(mock_model, char_maps):
+def test_generate_manual_sampling_unknown_seed_chars(mock_model, mock_tokenizer):
     """Test handling of unknown characters in the seed text."""
-    char_to_idx, idx_to_char = char_maps
     seed_text = "axb"
     max_length = 1
     device = torch.device('cpu')
@@ -367,10 +367,9 @@ def test_generate_sampling_unknown_seed_chars(mock_model, char_maps):
     with patch('torch.multinomial') as mock_multinomial:
         mock_multinomial.return_value = torch.tensor([[3]])
 
-        generate_text_sampling(
+        generate_text_manual_sampling(
             model=mock_model,
-            char_to_idx=char_to_idx,
-            idx_to_char=idx_to_char,
+            tokenizer=mock_tokenizer,
             seed_text=seed_text,
             max_length=max_length,
             temperature=1.0,
@@ -383,10 +382,8 @@ def test_generate_sampling_unknown_seed_chars(mock_model, char_maps):
     first_call_args = mock_model.call_args_list[0]
     assert torch.equal(first_call_args[0][0], expected_initial_context)
 
-def test_generate_sampling_context_truncation(mock_model, char_maps):
+def test_generate_manual_sampling_context_truncation(mock_model, mock_tokenizer):
     """Test that context passed to model is truncated correctly."""
-    char_to_idx, idx_to_char = char_maps
-    # Make a long seed text
     seed_text = "abc" * 5 # Length 15
     max_length = 2 # Generate 2 more chars
     device = torch.device('cpu')
@@ -403,10 +400,9 @@ def test_generate_sampling_context_truncation(mock_model, char_maps):
     with patch('torch.multinomial') as mock_multinomial:
         mock_multinomial.side_effect = [torch.tensor([[5]]), torch.tensor([[1]])]
 
-        generate_text_sampling(
+        generate_text_manual_sampling(
             model=mock_model,
-            char_to_idx=char_to_idx,
-            idx_to_char=idx_to_char,
+            tokenizer=mock_tokenizer,
             seed_text=seed_text,
             max_length=max_length,
             temperature=1.0,
@@ -432,9 +428,9 @@ def test_generate_sampling_context_truncation(mock_model, char_maps):
     assert second_call_arg.shape[1] == model_max_len, "Second call context length is wrong"
     assert torch.equal(second_call_arg, expected_second_call_context), "Second call context content is wrong"
 
-def test_generate_sampling_default_context_truncation(mock_model, char_maps):
+def test_generate_manual_sampling_default_context_truncation(mock_model, mock_tokenizer):
     """Test context truncation uses default 1024 if model lacks config."""
-    char_to_idx, idx_to_char = char_maps
+    char_to_idx, idx_to_char = char_maps()
     default_max_len = 1024
     # Seed text exactly at the default limit
     seed_text = "a" * default_max_len # Length 1024
@@ -454,10 +450,9 @@ def test_generate_sampling_default_context_truncation(mock_model, char_maps):
     with patch('torch.multinomial') as mock_multinomial:
         mock_multinomial.side_effect = [torch.tensor([[2]]), torch.tensor([[3]])]
 
-        generate_text_sampling(
+        generate_text_manual_sampling(
             model=mock_model,
-            char_to_idx=char_to_idx,
-            idx_to_char=idx_to_char,
+            tokenizer=mock_tokenizer,
             seed_text=seed_text,
             max_length=max_length,
             temperature=1.0,
@@ -483,94 +478,73 @@ def test_generate_sampling_default_context_truncation(mock_model, char_maps):
 
 # --- Tests for sample_text ---
 
-@patch('craft.training.sampling.generate_text_sampling')
-def test_sample_text_calls_generate(mock_generate, mock_model, char_maps):
-    char_to_idx, idx_to_char = char_maps
-    num_samples = 3
-    seed = "test"
-    max_len = 10
-    temp = 0.7
-    dev = torch.device('cpu')
-    extra_kwarg_val = 5 # For top_k passed via kwargs
+@patch('craft.training.sampling.generate_text_manual_sampling')
+def test_generate_samples_manual_sampling_calls_generate(mock_manual_sampling, mock_model, mock_tokenizer):
+    """Test that generate_samples_manual_sampling calls generate_text_manual_sampling correctly."""
+    prompts = ["a", "b"]
+    max_new_tokens = 5
+    device = torch.device('cpu')
+    gen_kwargs = {'temperature': 0.9, 'top_k': 10}
 
-    # Configure mock generate to return distinct values
-    mock_generate.side_effect = [f"sample_{i}" for i in range(num_samples)]
+    # Mock the return value of the underlying generate_text_manual_sampling
+    # It receives seed_text, return seed + "_gen"
+    mock_manual_sampling.side_effect = lambda seed_text, **kwargs: seed_text + "_gen"
 
-    samples = sample_text(
+    results = generate_samples_manual_sampling(
         model=mock_model,
-        char_to_idx=char_to_idx,
-        idx_to_char=idx_to_char,
-        num_samples=num_samples,
-        seed_text=seed,
-        max_length=max_len,
-        temperature=temp,
-        device=dev,
-        log_samples=False, # Disable logging for this test
-        top_k=extra_kwarg_val # Pass an extra kwarg
+        tokenizer=mock_tokenizer,
+        prompts=prompts,
+        max_new_tokens=max_new_tokens,
+        device=device,
+        **gen_kwargs
     )
 
-    # Assert generate was called correct number of times
-    assert mock_generate.call_count == num_samples
+    # Check the results
+    assert results == ["a_gen", "b_gen"], f"Expected ['a_gen', 'b_gen'], got {results}"
 
-    # Assert generate called with correct arguments each time
-    expected_calls = []
-    for i in range(num_samples):
-        expected_calls.append(
-            call(
-                model=mock_model,
-                char_to_idx=char_to_idx,
-                idx_to_char=idx_to_char,
-                seed_text=seed,
-                max_length=max_len,
-                temperature=temp,
-                device=dev,
-                top_k=extra_kwarg_val # Check kwarg passthrough
-            )
-        )
-    mock_generate.assert_has_calls(expected_calls)
+    # Check that generate_text_manual_sampling was called for each prompt
+    assert mock_manual_sampling.call_count == len(prompts)
 
-    # Assert the returned list contains the mock return values
-    assert samples == [f"sample_{i}" for i in range(num_samples)]
+    # Check arguments for the first call (to generate_text_manual_sampling)
+    call1_args, call1_kwargs = mock_manual_sampling.call_args_list[0]
+    assert call1_kwargs['model'] == mock_model
+    assert call1_kwargs['tokenizer'] == mock_tokenizer
+    assert call1_kwargs['seed_text'] == prompts[0]
+    assert call1_kwargs['max_length'] == max_new_tokens
+    assert call1_kwargs['device'] == device
+    assert call1_kwargs['temperature'] == gen_kwargs['temperature']
+    assert call1_kwargs['top_k'] == gen_kwargs['top_k']
 
 @patch('craft.training.sampling.logging.info')
-@patch('craft.training.sampling.generate_text_sampling')
+@patch('craft.training.sampling.generate_text_manual_sampling')
 @patch('craft.training.sampling.time.time') # Mock time to control duration
-def test_sample_text_logging(mock_time, mock_generate, mock_log_info, mock_model, char_maps):
-    char_to_idx, idx_to_char = char_maps
-    num_samples = 2
-    seed = "start: "
-    generated_sample_text = "generated text"
-    mock_generate.return_value = seed + generated_sample_text # Include seed for length calc
+def test_sample_text_logging(mock_time, mock_generate, mock_log_info, mock_model, mock_tokenizer):
+    """Test logging messages in generate_samples_manual_sampling."""
+    prompts = ["a"]
+    max_new_tokens = 1
 
-    # Simulate time passing
-    mock_time.side_effect = [0.0, 0.5, 0.5, 1.2] # start1, end1, start2, end2
+    # Mock the underlying generator
+    mock_generate.return_value = "a_gen"
 
-    sample_text(
+    # Mock time to simulate duration
+    mock_time.side_effect = [100.0, 105.0] # Start time, end time
+
+    generate_samples_manual_sampling(
         model=mock_model,
-        char_to_idx=char_to_idx,
-        idx_to_char=idx_to_char,
-        num_samples=num_samples,
-        seed_text=seed,
+        tokenizer=mock_tokenizer,
+        prompts=prompts,
+        max_new_tokens=max_new_tokens,
         log_samples=True # Enable logging
-        # Other args don't matter as generate is mocked
     )
 
-    # Check log calls
-    expected_log_calls = [
-        call(f"Generating {num_samples} samples with temperature 0.8..."), # Default temp
-        call(f"Seed text: '{seed}'"),
-        # Sample 1
-        call(f"\nSample 1/{num_samples} (generated in 0.50s, {len(seed+generated_sample_text)/0.5:.1f} char/s):"),
-        call(f"{'-' * 40}"),
-        call(seed + generated_sample_text),
-        call(f"{'-' * 40}\n"),
-        # Sample 2
-        call(f"\nSample 2/{num_samples} (generated in 0.70s, {len(seed+generated_sample_text)/0.7:.1f} char/s):"),
-        call(f"{'-' * 40}"),
-        call(seed + generated_sample_text),
-        call(f"{'-' * 40}\n"),
+    # Check logging calls
+    expected_calls = [
+        call("Generating 1 samples with max_new_tokens=1..."), # Message might be the same
+        call("Sample 1/1: Prompt='a'"),
+        call("Generated: a_gen"),
+        call("Finished generating 1 samples in 5.00 seconds."),
     ]
-    mock_log_info.assert_has_calls(expected_log_calls)
-    assert mock_log_info.call_count == len(expected_log_calls)
+    mock_log_info.assert_has_calls(expected_calls)
+    assert mock_log_info.call_count == len(expected_calls)
 
 # TODO: Test edge case log_samples=False (already implicitly tested above) 

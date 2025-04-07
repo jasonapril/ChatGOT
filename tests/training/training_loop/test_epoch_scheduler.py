@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader # Need this
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
+from craft.training.progress import ProgressTracker # Import ProgressTracker
+from craft.training.trainer import Trainer # Import Trainer
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -62,6 +64,7 @@ class TestEpochScheduler:
             gradient_accumulation_steps=1
         )
         loop.scaler = mock_scaler
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
         # --- Run Epoch ---
         start_global_step = 0
         # Patch isnan/isinf as the mock loss isn't a real tensor
@@ -70,7 +73,8 @@ class TestEpochScheduler:
             epoch_metrics = loop.train_epoch(
                 current_epoch=0,
                 global_step=start_global_step,
-                progress=mock_progress_tracker_instance
+                progress=mock_progress_tracker_instance,
+                trainer=mock_trainer # Pass mock trainer
             )
         # --- Assertions ---
         mock_optimizer.step.assert_called_once()

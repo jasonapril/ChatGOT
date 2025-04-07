@@ -1,13 +1,15 @@
 # conf/experiment/chatgot_95m_subword.yaml
 defaults:
-  - /model: transformer_model # Load default model into this experiment's scope
-  - /training: default
-  - /data: got_s1_subword
+  - /model: transformer_95m
+  - /training: default # Use correct filename
+  - /data: got_subword # Switched to full dataset subword config
   - /optimizer: adamw
-  - /scheduler: cosine
-  - /callbacks: default
-  - /generation: default
-  - _self_ # Allows defining overrides below
+  - /scheduler: cosine # Corrected filename from cosine_annealing
+  - /callbacks: default # Use correct filename
+  - /generation: default # Use correct filename
+
+# Experiment Specific Overrides
+experiment_name: chatgot_95m_subword
 
 # Defaults from conf/config.yaml are merged unless overridden here
 
@@ -23,7 +25,7 @@ data:
     # REMOVED nested config, provide path directly if tokenizer load supports it
     # If load expects a config object, keep this structure but ensure it matches load method
     config:
-      model_path: outputs/tokenizers/got_full_subword_8k
+      model_path: outputs/tokenizers/got_subword_8k
       vocab_size: 8000 # This might be ignored if loading pre-trained
 
   # Override datasets config
@@ -34,12 +36,7 @@ data:
         file_paths:
           - data/raw/got/game_of_thrones.txt
         block_size: ${experiment.data.block_size}
-        # Explicitly define tokenizer config for this dataset
-        tokenizer:
-          _target_: craft.data.tokenizers.subword.SubwordTokenizer
-          config:
-            model_path: outputs/tokenizers/got_full_subword_8k
-            vocab_size: 8000
+        tokenizer: ${experiment.data.tokenizer}
       dataloader: {}
     val:
       dataset:
@@ -47,12 +44,7 @@ data:
         file_paths:
           - data/raw/got/game_of_thrones.txt
         block_size: ${experiment.data.block_size}
-        # Explicitly define tokenizer config for this dataset
-        tokenizer:
-          _target_: craft.data.tokenizers.subword.SubwordTokenizer
-          config:
-            model_path: outputs/tokenizers/got_full_subword_8k
-            vocab_size: 8000
+        tokenizer: ${experiment.data.tokenizer}
       dataloader: {}
 
 # --- Overrides for Model Config --- #
@@ -95,7 +87,8 @@ callbacks:
     # log_dir: will be derived from output dir
   sample_generation:
     _target_: craft.training.callbacks.SampleGenerationCallback
-    # Add any generation specific overrides here
+    start_prompt: ${experiment.generation.start_prompt}
+    # Add any other generation specific overrides here
 
 # --- Optional Generation Overrides (if needed) --- #
 # generation:

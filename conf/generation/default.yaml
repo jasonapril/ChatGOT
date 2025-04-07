@@ -1,7 +1,7 @@
 # conf/generation/default.yaml
 _target_: craft.core.generation.GeneratorConfig # Assuming a Pydantic model for validation
 
-start_prompt: "The meaning of life is\n"
+start_prompt: "The night is dark and full of"
 max_new_tokens: 200
 temperature: 0.8
 top_k: null # Use null for Python None 

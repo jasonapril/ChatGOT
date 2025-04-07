@@ -46,7 +46,8 @@ class TestProgressTracker:
             position=0,
             leave=True,
             dynamic_ncols=True,
-            mininterval=1.0
+            mininterval=1.0,
+            initial=0
         )
         assert tracker.progress_bar == mock_tqdm_bar
         assert tracker.logger == mock_logger

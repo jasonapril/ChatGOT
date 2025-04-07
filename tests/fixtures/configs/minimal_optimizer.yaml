@@ -1,0 +1,6 @@
+# tests/fixtures/configs/minimal_optimizer.yaml
+# Minimal optimizer configuration for testing.
+
+_target_: torch.optim.AdamW
+lr: 1.0e-4 # A plausible small LR
+weight_decay: 0.0 

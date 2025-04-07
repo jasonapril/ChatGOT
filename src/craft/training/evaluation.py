@@ -50,10 +50,28 @@ class Evaluator:
 
         with torch.no_grad():
             for batch in progress_bar:
-                # Unpack batch
-                inputs = batch['input_ids'].to(self.device, non_blocking=True)
-                targets = batch['labels'].to(self.device, non_blocking=True)
+                # Unpack batch based on type
+                if isinstance(batch, dict):
+                    inputs = batch.get('input_ids')
+                    targets = batch.get('labels')
+                elif isinstance(batch, (list, tuple)) and len(batch) == 2:
+                    inputs, targets = batch
+                else:
+                    self.logger.warning(f"Skipping batch due to unexpected format: {type(batch)}")
+                    continue
 
+                # Validate batch contents before moving to device
+                if inputs is None or targets is None:
+                     self.logger.warning(f"Skipping batch due to missing inputs or targets. Format: {type(batch)}")
+                     continue
+                if not isinstance(inputs, torch.Tensor) or not isinstance(targets, torch.Tensor):
+                    self.logger.warning(f"Skipping batch because inputs/targets are not tensors. Input type: {type(inputs)}, Target type: {type(targets)}")
+                    continue
+                    
+                inputs = inputs.to(self.device, non_blocking=True)
+                targets = targets.to(self.device, non_blocking=True)
+
+                # Model forward pass
                 # Forward pass with AMP
                 with torch.amp.autocast(device_type=self.device.type, enabled=self.use_amp):
                     outputs = self.model(inputs)

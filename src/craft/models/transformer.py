@@ -11,8 +11,8 @@ import torch.nn.functional as F
 
 # Import base class, new config type, and registration decorator
 from .base import LanguageModel # Import only the base model class
-from .configs import LanguageModelConfig # Import the config class from its correct location
-from .registry import register_model # Import decorator from the new registry file
+from ..config.schemas import LanguageModelConfig # Config location changed
+# from .registry import register_model # REMOVE registry import
 
 
 class PositionalEncoding(nn.Module):
@@ -59,9 +59,8 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-# Register this model implementation with its specific config class
-# Use the full import path or a consistent alias as the registration name
-@register_model(name="craft.models.transformer.TransformerModel", config_cls=LanguageModelConfig)
+# REMOVE registration decorator:
+# @register_model(name="craft.models.transformer.TransformerModel", config_cls=LanguageModelConfig)
 class TransformerModel(LanguageModel):
     """
     Transformer model for character-level language modeling.

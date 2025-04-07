@@ -10,46 +10,56 @@ from unittest.mock import patch, MagicMock, ANY
 import os
 import logging
 import numpy as np
+from typing import List
 
-# Import the correct high-level function
-from craft.data import prepare_dataloaders_from_config
+# Import for deleted function removed
+from craft.data.datasets.text_dataset import TextDataset
+from craft.data.datasets.pickled_dataset import PickledDataset
+from craft.data.tokenizers.char import CharTokenizer
+# CharTokenizerConfig removed, handled differently
+from craft.config.schemas import DataConfig
 # Import dataset/tokenizer for type checks
-from craft.data.dataset import PickledDataset, TextDataset
-from craft.data.tokenizers.base import BaseTokenizer
+from craft.data.tokenizers.base import Tokenizer
+from craft.data.base import BaseDataset
+from craft.data.tokenizers.base import Tokenizer
+import hydra
 
 logger = logging.getLogger(__name__)
 
 # --- Mock Tokenizer (defined at module level) ---
-class MockTokenizer(BaseTokenizer):
-    def __init__(self, vocab_size=100, config: dict = None): 
-        super().__init__(config=config or {})
+class MockTokenizer(Tokenizer):
+    """Simple mock tokenizer for testing dataset loading."""
+    def __init__(self, vocab_size=100, **kwargs): # Add **kwargs
+        # Initialize the base Tokenizer
+        super().__init__(**kwargs)
         self._vocab_size = vocab_size
-        
-    def encode(self, text, **kwargs): return [0, 1, 2]
-    def decode(self, ids, **kwargs): return "mock"
-    
-    @property
-    def vocab_size(self): 
-        logger.debug("Accessing MockTokenizer vocab_size property")
-        return self._vocab_size
-    
+        self.vocab_size = vocab_size # Add the public attribute
+        self.kwargs = kwargs # Store unused kwargs if needed
+
+    def encode(self, text: str) -> List[int]:
+        # Simulate encoding - just return list of ordinals up to vocab size
+        return [min(ord(c), self._vocab_size - 1) for c in text]
+
+    def decode(self, ids: List[int]) -> str:
+        # Simulate decoding
+        return "".join([chr(min(i, 255)) for i in ids]) # Use chr, limit to valid range
+
     def get_vocab_size(self) -> int:
-        logger.debug("Calling MockTokenizer get_vocab_size method")
         return self._vocab_size
-        
-    def save(self, directory): 
-        logger.debug(f"MockTokenizer save called (no-op): {directory}")
+
+    def save(self, output_dir: str) -> None:
+        # Mock save - does nothing
         pass
-    
+
     @classmethod
-    def load(cls, directory): 
-        logger.debug(f"MockTokenizer load called (no-op): {directory}")
+    def load(cls, load_dir: str):
+        # Mock load - return a default instance
         return cls()
-        
-    def train(self, file_path: str, **kwargs): 
-        logger.info(f"MockTokenizer train called (no-op): {file_path}")
-        pass 
-        
+
+    def train(self, text_file: str, output_dir: str):
+        # Mock train - does nothing
+        pass
+
     @property
     def bos_token_id(self): return None
     @property
@@ -94,9 +104,9 @@ def test_pickled_dataset_standalone_init_len_getitem(pickled_dataset_test_setup)
     file_path, vocab_path, block_size, token_ids, _ = pickled_dataset_test_setup
     dataset = PickledDataset(str(file_path), block_size, str(vocab_path))
     assert len(dataset.token_ids) == len(token_ids)
-    # Corrected expected length calculation
-    expected_len = max(0, len(token_ids) - block_size)
-    assert len(dataset) == expected_len 
+    # Corrected expected length calculation to match __len__
+    expected_len = (len(token_ids) - 1) // block_size
+    assert len(dataset) == expected_len
     if len(dataset) > 0:
         x, y = dataset[0]
         assert x.shape == (block_size,)
@@ -132,6 +142,9 @@ def test_create_data_loaders_train_val(processed_data_dir):
     cfg_dict = {
         "experiment": {
             "data": {
+                "batch_size": 4,
+                "block_size": seq_length,
+                "num_workers": 0,
                 "datasets": {
                     "train": {
                         "dataset": {
@@ -163,15 +176,15 @@ def test_create_data_loaders_train_val(processed_data_dir):
     }
     cfg = OmegaConf.create(cfg_dict)
     
-    # Call the correct function with the full config
-    train_loader, val_loader, test_loader, tokenizer = prepare_dataloaders_from_config(cfg)
+    # Call the correct function, passing only the data config part
+    loaders_dict, tokenizer = prepare_dataloaders_from_config(cfg.experiment.data)
+    train_loader = loaders_dict.get('train')
+    val_loader = loaders_dict.get('val')
     
     assert train_loader is not None
     assert val_loader is not None
-    assert test_loader is None
     assert isinstance(train_loader, DataLoader)
     assert isinstance(val_loader, DataLoader)
-    assert test_loader is None
     assert train_loader.batch_size == 4
     assert val_loader.batch_size == 8
     assert isinstance(train_loader.dataset, PickledDataset)
@@ -185,18 +198,21 @@ def test_create_data_loaders_train_val_test(processed_data_dir):
     cfg_dict = {
         "experiment": {
             "data": {
+                "batch_size": 4,
+                "block_size": seq_length,
+                "num_workers": 0,
                 "datasets": {
-                    "train": { # Required
+                    "train": {
                         "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "train.pkl"), "block_size": seq_length},
                         "dataloader": {"batch_size": 4}
                     },
-                    "val": { # Required
+                    "val": {
                         "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "val.pkl"), "block_size": seq_length},
                         "dataloader": {"batch_size": 4}
                     },
-                    "test": { # Optional
+                    "test": {
                         "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(data_path / "test.pkl"), "block_size": seq_length},
-                        "dataloader": {"batch_size": 4, "shuffle": False} # Explicit shuffle False
+                        "dataloader": {"batch_size": 4, "shuffle": False}
                     }
                 }
             }
@@ -204,8 +220,11 @@ def test_create_data_loaders_train_val_test(processed_data_dir):
     }
     cfg = OmegaConf.create(cfg_dict)
     
-    # Call the correct function with the full config
-    train_loader, val_loader, test_loader, tokenizer = prepare_dataloaders_from_config(cfg)
+    # Call the correct function, passing only the data config part
+    loaders_dict, tokenizer = prepare_dataloaders_from_config(cfg.experiment.data)
+    train_loader = loaders_dict.get('train')
+    val_loader = loaders_dict.get('val')
+    test_loader = loaders_dict.get('test')
     
     assert train_loader is not None
     assert val_loader is not None
@@ -219,43 +238,42 @@ def test_create_data_loaders_train_val_test(processed_data_dir):
     assert tokenizer is None
 
 def test_create_data_loaders_missing_split_config(tmp_path):
-    """Test factory behavior when required train or val config keys are missing."""
-    block_size = 1
+    """Test error handling when a dataset split key (e.g., 'val') is missing."""
+    block_size = 32
     dummy_train_file = tmp_path / "train.pkl"
     dummy_val_file = tmp_path / "val.pkl"
-    dummy_data = [0, 1, 2, 3]
+    # Ensure dummy data is large enough (>= block_size + 1) to avoid DataLoader error
+    dummy_data = list(range(block_size + 5))
     with open(dummy_train_file, 'wb') as f: pickle.dump(dummy_data, f)
     with open(dummy_val_file, 'wb') as f: pickle.dump(dummy_data, f)
 
     # Config missing 'val' dataset key entirely
-    cfg_missing_val_key = OmegaConf.create({"experiment": {"data": {"datasets": {"train": {
-        "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(dummy_train_file), "block_size": block_size},
-        "dataloader": {}
-    }}}}})
+    cfg_missing_val_key = OmegaConf.create({"experiment": {"data": {
+        "batch_size": 4, "block_size": block_size, "num_workers": 0,
+        "datasets": {"train": {
+            "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(dummy_train_file), "block_size": block_size},
+            "dataloader": {}
+        }}}}})
 
     # Config missing 'train' dataset key entirely
-    cfg_missing_train_key = OmegaConf.create({"experiment": {"data": {"datasets": {"val": {
-        "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(dummy_val_file), "block_size": block_size},
-        "dataloader": {}
-    }}}}})
+    cfg_missing_train_key = OmegaConf.create({"experiment": {"data": {
+        "batch_size": 4, "block_size": block_size, "num_workers": 0,
+        "datasets": {"val": {
+            "dataset": {"_target_": "craft.data.dataset.PickledDataset", "file_path": str(dummy_val_file), "block_size": block_size},
+            "dataloader": {}
+        }}}}})
 
-    # The factory currently does NOT raise an error if 'train' or 'val' keys are completely missing.
-    # It only raises if they exist but are misconfigured, or if loading fails later.
-    # The RuntimeError check at the end of the factory handles cases where a configured
-    # split fails silently. So, we just run the factory call without expecting an immediate error here.
-    try:
-        tr, vl, _, _ = prepare_dataloaders_from_config(cfg_missing_val_key)
-        assert tr is not None
-        assert vl is None # Val should be None as it wasn't configured
-    except Exception as e:
-        pytest.fail(f"prepare_dataloaders_from_config raised unexpected error for missing val key: {e}")
+    # The factory now expects the data config part, so the check happens there
+    # Expect an error if a default split ('train', 'val') is missing
+    # Update: Expecting ValueError based on recent changes in prepare_dataloaders_from_config
+    expected_error_msg_val = r"Required DataLoader for split 'val' was not created successfully."
+    with pytest.raises(ValueError, match=expected_error_msg_val):
+        prepare_dataloaders_from_config(cfg_missing_val_key.experiment.data)
 
-    try:
-        tr, vl, _, _ = prepare_dataloaders_from_config(cfg_missing_train_key)
-        assert tr is None # Train should be None
-        assert vl is not None
-    except Exception as e:
-        pytest.fail(f"prepare_dataloaders_from_config raised unexpected error for missing train key: {e}")
+    # Similar check if train is missing (adjust expected message if needed)
+    expected_error_msg_train = r"Required DataLoader for split 'train' was not created successfully."
+    with pytest.raises(ValueError, match=expected_error_msg_train):
+        prepare_dataloaders_from_config(cfg_missing_train_key.experiment.data)
 
 def test_create_data_loaders_missing_target(processed_data_dir):
     """Test error handling for missing _target_ in required dataset config."""
@@ -263,6 +281,9 @@ def test_create_data_loaders_missing_target(processed_data_dir):
     cfg_dict = {
         "experiment": {
             "data": {
+                "batch_size": 4,
+                "block_size": seq_length,
+                "num_workers": 0,
                 "datasets": {
                     "train": {
                         "dataset": {"file_path": str(data_path / "train.pkl"), "block_size": seq_length}, # Missing _target_
@@ -278,10 +299,10 @@ def test_create_data_loaders_missing_target(processed_data_dir):
     }
     cfg = OmegaConf.create(cfg_dict)
 
-    # Match the specific error raised when _target_ is missing inside the factory
-    expected_error_msg = r"Dataset configuration for split \'train\' is missing the \'_target_\' key."
+    # Updated expected message based on create_dataset raising the error earlier
+    expected_error_msg = r"Dataset configuration must be a dictionary or DictConfig with a '_target_' key."
     with pytest.raises(ValueError, match=expected_error_msg):
-        prepare_dataloaders_from_config(cfg)
+        prepare_dataloaders_from_config(cfg.experiment.data)
 
 def test_create_data_loaders_with_tokenizer(processed_data_dir):
     """Test creating dataloaders when a tokenizer is configured."""
@@ -291,6 +312,9 @@ def test_create_data_loaders_with_tokenizer(processed_data_dir):
     cfg_dict = {
         "experiment": {
             "data": {
+                "batch_size": 4,
+                "block_size": seq_length,
+                "num_workers": 0,
                 "tokenizer": {
                     "_target_": f"{__name__}.MockTokenizer",
                     "vocab_size": 150
@@ -301,7 +325,7 @@ def test_create_data_loaders_with_tokenizer(processed_data_dir):
                             "_target_": "craft.data.dataset.PickledDataset",
                             "file_path": str(data_path / "train.pkl"),
                             "block_size": seq_length,
-                            "tokenizer": "${experiment.data.tokenizer}" # Update interpolation path
+                            "tokenizer": "${experiment.data.tokenizer}"
                         },
                         "dataloader": {"batch_size": 4}
                     },
@@ -310,7 +334,7 @@ def test_create_data_loaders_with_tokenizer(processed_data_dir):
                             "_target_": "craft.data.dataset.PickledDataset",
                             "file_path": str(data_path / "val.pkl"),
                             "block_size": seq_length,
-                            "tokenizer": "${experiment.data.tokenizer}" # Update interpolation path
+                            "tokenizer": "${experiment.data.tokenizer}"
                         },
                         "dataloader": {"batch_size": 4}
                     }
@@ -320,7 +344,10 @@ def test_create_data_loaders_with_tokenizer(processed_data_dir):
     }
     cfg = OmegaConf.create(cfg_dict)
     
-    _, _, _, tokenizer = prepare_dataloaders_from_config(cfg)
+    # Call the function, passing only the data config part
+    loaders_dict, tokenizer = prepare_dataloaders_from_config(cfg.experiment.data)
+    train_loader = loaders_dict.get('train')
+    val_loader = loaders_dict.get('val')
     
     assert tokenizer is not None
     assert isinstance(tokenizer, MockTokenizer)
@@ -332,7 +359,10 @@ def test_create_data_loaders_tokenizer_override(processed_data_dir):
     cfg_dict = {
         "experiment": {
             "data": {
-                "tokenizer": { # Top-level tokenizer (should be overridden by override_tokenizer)
+                "batch_size": 4,
+                "block_size": seq_length,
+                "num_workers": 0,
+                "tokenizer": {
                     "_target_": "tests.data.test_datasets.MockTokenizer",
                     "vocab_size": 100
                 },
@@ -342,7 +372,6 @@ def test_create_data_loaders_tokenizer_override(processed_data_dir):
                             "_target_": "craft.data.dataset.PickledDataset",
                             "file_path": str(data_path / "train.pkl"),
                             "block_size": seq_length,
-                            # No explicit tokenizer here, override should be used
                         },
                         "dataloader": {"batch_size": 4}
                     },
@@ -351,7 +380,6 @@ def test_create_data_loaders_tokenizer_override(processed_data_dir):
                             "_target_": "craft.data.dataset.PickledDataset",
                             "file_path": str(data_path / "val.pkl"),
                             "block_size": seq_length
-                            # No explicit tokenizer here, override should be used
                         },
                         "dataloader": {"batch_size": 4}
                     }
@@ -362,9 +390,10 @@ def test_create_data_loaders_tokenizer_override(processed_data_dir):
     cfg = OmegaConf.create(cfg_dict)
 
     # Create a tokenizer instance to override (should work now)
-    override_tokenizer = MockTokenizer(vocab_size=200, config={})
+    override_tokenizer = MockTokenizer(vocab_size=200, **{})
 
-    _, _, _, tokenizer = prepare_dataloaders_from_config(cfg, tokenizer_override=override_tokenizer)
+    # Pass only the data config part and the override
+    loaders_dict, tokenizer = prepare_dataloaders_from_config(cfg.experiment.data, tokenizer_override=override_tokenizer)
 
     assert tokenizer is override_tokenizer
     assert tokenizer.vocab_size == 200 

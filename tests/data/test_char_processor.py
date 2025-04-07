@@ -6,9 +6,9 @@ import tempfile
 import numpy as np
 
 # Import the function to test
-from craft.data.char_processor import process_char_level_data
+from craft.data.char_processor import process_char_data
 # Import the tokenizer class to load the saved tokenizer
-from craft.data.tokenizers.char_level import CharLevelTokenizer
+from craft.data.tokenizers.char import CharTokenizer
 
 # --- Test Fixtures ---
 
@@ -39,7 +39,7 @@ def test_processor_success_defaults(sample_input_file, temp_data_dir):
     tokenizer_dir = output_dir / "tokenizer"
 
     # Run the processor using positional arguments and default splits
-    output_files = process_char_level_data(str(input_path), str(output_dir))
+    output_files = process_char_data(str(input_path), str(output_dir))
 
     assert isinstance(output_files, dict)
     assert "train" in output_files
@@ -60,20 +60,25 @@ def test_processor_success_defaults(sample_input_file, temp_data_dir):
     # Basic check of pickle file content (metadata is no longer here)
     with open(train_path, "rb") as f:
         train_data = pickle.load(f)
-    assert "token_ids" in train_data
-    assert isinstance(train_data["token_ids"], np.ndarray) # Processor uses numpy arrays
-    # assert "vocab_size" in train_data # REMOVED check
-    # assert "char_to_idx" in train_data # REMOVED check
-    # assert "idx_to_char" in train_data # REMOVED check
+    assert isinstance(train_data, np.ndarray)
+    assert train_data.dtype == np.uint16
+    assert len(train_data) > 0
 
     with open(val_path, "rb") as f:
         val_data = pickle.load(f)
-    assert "token_ids" in val_data
-    assert isinstance(val_data["token_ids"], np.ndarray)
+    assert isinstance(val_data, np.ndarray)
+    assert val_data.dtype == np.uint16
+    assert len(val_data) > 0
+
+    with open(test_path, "rb") as f:
+        test_data = pickle.load(f)
+    assert isinstance(test_data, np.ndarray)
+    assert test_data.dtype == np.uint16
+    assert len(test_data) > 0
 
     # Check tokenizer loading and basic properties
-    loaded_tokenizer = CharLevelTokenizer.load(str(tokenizer_dir))
-    assert isinstance(loaded_tokenizer, CharLevelTokenizer)
+    loaded_tokenizer = CharTokenizer.load(str(tokenizer_dir))
+    assert isinstance(loaded_tokenizer, CharTokenizer)
     assert loaded_tokenizer.vocab_size > 0
 
 def test_processor_tokenizer_metadata_content(sample_input_file, temp_data_dir):
@@ -82,11 +87,11 @@ def test_processor_tokenizer_metadata_content(sample_input_file, temp_data_dir):
     output_dir = temp_data_dir
     tokenizer_dir = output_dir / "tokenizer"
 
-    process_char_level_data(str(input_path), str(output_dir))
+    process_char_data(str(input_path), str(output_dir))
 
     assert tokenizer_dir.exists()
     # Load the tokenizer
-    tokenizer = CharLevelTokenizer.load(str(tokenizer_dir))
+    tokenizer = CharTokenizer.load(str(tokenizer_dir))
 
     # Check expected characters (case-sensitive)
     expected_chars = set("abc123\n ABCxyz")
@@ -116,7 +121,7 @@ def test_processor_data_split_and_content(sample_input_file, temp_data_dir):
     total_chars = len(input_content)
     test_splits = (0.7, 0.2, 0.1) # Use custom splits
 
-    process_char_level_data(str(input_path), str(output_dir), splits=test_splits)
+    process_char_data(str(input_path), str(output_dir), splits=test_splits)
 
     with open(train_path, "rb") as f:
         train_data = pickle.load(f)
@@ -125,13 +130,14 @@ def test_processor_data_split_and_content(sample_input_file, temp_data_dir):
     with open(test_path, "rb") as f:
         test_data = pickle.load(f)
 
-    train_tokens = train_data["token_ids"]
-    val_tokens = val_data["token_ids"]
-    test_tokens = test_data["token_ids"]
-    # Load tokenizer to get the mapping
-    tokenizer = CharLevelTokenizer.load(str(tokenizer_dir))
+    # Load directly as numpy arrays
+    train_tokens = train_data
+    val_tokens = val_data
+    test_tokens = test_data
 
-    assert len(train_tokens) + len(val_tokens) + len(test_tokens) == total_chars
+    total_processed_tokens = len(train_tokens) + len(val_tokens) + len(test_tokens)
+
+    assert total_processed_tokens == total_chars
 
     # Check approximate split ratios (allow some tolerance due to integer division)
     expected_train_len = int(total_chars * test_splits[0])
@@ -144,14 +150,14 @@ def test_processor_data_split_and_content(sample_input_file, temp_data_dir):
     assert abs(len(test_tokens) - expected_test_len) <= 2
 
     # Verify some tokens map correctly using the loaded tokenizer
+    tokenizer = CharTokenizer.load(str(tokenizer_dir))
     assert train_tokens[0] == tokenizer.char_to_idx['a']
-    assert train_tokens[1] == tokenizer.char_to_idx['b']
-    assert train_tokens[9] == tokenizer.char_to_idx['\n'] # First newline
+    assert val_tokens[0] == tokenizer.char_to_idx[input_content[expected_train_len]]
 
 def test_processor_invalid_input_path(temp_data_dir):
     """Test error handling for non-existent input file."""
     with pytest.raises(ValueError, match="Input file not found"):
-        process_char_level_data("non_existent_file.txt", str(temp_data_dir))
+        process_char_data("non_existent_file.txt", str(temp_data_dir))
 
 def test_processor_invalid_splits_tuple(sample_input_file, temp_data_dir):
     """Test error handling for invalid splits tuple values."""
@@ -159,9 +165,9 @@ def test_processor_invalid_splits_tuple(sample_input_file, temp_data_dir):
     output_dir = temp_data_dir
     
     with pytest.raises(ValueError, match="Split ratios must sum to 1.0"):
-        process_char_level_data(str(input_path), str(output_dir), splits=(0.8, 0.1, 0.2)) # Sum > 1
+        process_char_data(str(input_path), str(output_dir), splits=(0.8, 0.1, 0.2)) # Sum > 1
         
     with pytest.raises(ValueError, match="Split ratios must sum to 1.0"):
-        process_char_level_data(str(input_path), str(output_dir), splits=(0.7, 0.1, 0.1)) # Sum < 1
+        process_char_data(str(input_path), str(output_dir), splits=(0.7, 0.1, 0.1)) # Sum < 1
 
 # (Tests will be added here) 

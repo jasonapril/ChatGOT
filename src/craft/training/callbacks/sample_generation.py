@@ -1,6 +1,7 @@
 import logging
 import torch
 from typing import List, Optional, Dict, Any
+import sys
 
 from .base import Callback
 # Assume TextGenerator lives elsewhere, e.g., in craft.training.generation
@@ -37,9 +38,9 @@ class SampleGenerationCallback(Callback):
         self.start_prompt = start_prompt
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
+        self.generator: Optional[TextGenerator] = None # Initialize generator as None
+        self.initialized = False # Flag to track if generator is initialized
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.generator = None # Generator will be created when needed
-        self.initialized = False # Flag to track generator initialization
 
         if self.step_interval is None and self.epoch_interval is None:
             # Clarified warning message
@@ -47,9 +48,9 @@ class SampleGenerationCallback(Callback):
                               "Callback will not trigger based on steps or epochs. "
                               "(Time-based triggering might still be active via TrainingLoop)." )
 
-    def on_train_begin(self, trainer, logs=None):
-        super().on_train_begin(trainer)
+    def on_train_begin(self, **kwargs):
         # Defer generator creation until we have the trainer and its device/model/dataset
+        # Use self.trainer now, assuming set_trainer was called
         if self.trainer and hasattr(self.trainer, 'model') and hasattr(self.trainer, 'device') and hasattr(self.trainer, 'train_dataloader') and hasattr(self.trainer.train_dataloader, 'dataset'):
              try:
                  # Pass the necessary components to TextGenerator
@@ -90,6 +91,12 @@ class SampleGenerationCallback(Callback):
             self.logger.debug("_initialize_generator: No explicit tokenizer found on trainer.")
         # --------------------------------- #
             
+        # --- Add check for explicit tokenizer --- #
+        if explicit_tokenizer is None:
+            self.logger.error("Trainer does not have an explicit 'tokenizer' attribute needed for TextGenerator.")
+            return False # FAIL if tokenizer is missing
+        # --------------------------------------- #
+            
         try:
             # Pass the trainer's model, device, dataset, and *explicit tokenizer*.
             self.generator = TextGenerator(
@@ -114,27 +121,37 @@ class SampleGenerationCallback(Callback):
 
         return False
 
-    def on_epoch_end(self, trainer, epoch: int, train_metrics: dict, val_metrics: dict, logs: Optional[Dict] = None) -> None:
+    def on_epoch_begin(self, trainer: "Trainer", current_epoch: int, global_step: int, **kwargs: Any) -> None:
+        """Called at the start of each training epoch."""
+        # Optionally reset any epoch-specific state here
+        self.logger.debug(
+            f"[Epoch Start] Callback {self.__class__.__name__}: Epoch {current_epoch+1} begin at step {global_step}."
+        )
+
+    def on_epoch_end(self, epoch: int, global_step: int, metrics: Dict[str, Any], **kwargs) -> None:
         """Generate samples at the end of an epoch if interval matches."""
         # Check interval
         if self.epoch_interval and (epoch + 1) % self.epoch_interval == 0:
-            self.generate_samples(trainer, f"Epoch {epoch + 1}")
+            self.generate_samples(f"Epoch {epoch + 1}") # Pass only trigger event
             self.logger.info("Finished generating samples.")
 
-    def on_step_end(self, step: int, logs: Optional[Dict] = None) -> None:
+    def on_step_begin(self, step: int, **kwargs):
+        """Called at the beginning of a training step."""
+        pass # No action needed
+
+    def on_step_end(self, step: int, global_step: int, metrics: Dict[str, Any], **kwargs) -> None:
         """Generate samples at the end of a step if interval matches."""
-        # Get global_step from logs if available, otherwise use step
-        global_step = logs.get('global_step', step)
+        # Use global_step passed from Trainer
         if self.step_interval and (global_step + 1) % self.step_interval == 0:
-            self.generate_samples(self.trainer, f"Step {global_step + 1}")
+            self.generate_samples(f"Step {global_step + 1}") # Pass only trigger event
             self.logger.info("Finished generating samples.")
 
-    def generate_samples(self, trainer, trigger_event: str) -> None:
+    def generate_samples(self, trigger_event: str) -> None:
         """Generates and logs sample text."""
         # Attempt initialization if generator is None or not initialized
         if not self.generator or not self.initialized: # Check both flags
             self.logger.debug("Generator not ready, attempting initialization in generate_samples.")
-            if not self._initialize_generator(trainer):
+            if not self._initialize_generator(self.trainer): # Pass self.trainer here
                  self.logger.error("TextGenerator could not be initialized. Cannot generate samples.")
                  return
             # Check again after attempt
@@ -155,24 +172,36 @@ class SampleGenerationCallback(Callback):
                 temperature=self.temperature,
                 # Pass other params if added to __init__
             )
-            if generated_texts:
-                # Log only the first generated sequence if multiple
-                self.logger.info(f"Generated: {generated_texts[0]}")
-            else:
+
+            if not generated_texts:
                 self.logger.warning("Sample generation produced no output.")
+                generated_texts = ["[No text generated]"]
+            # Removed the explicit decoding block, assuming generate_text returns decoded strings
+
         except AttributeError as e:
              # Catch specific errors like missing tokenizer methods
              self.logger.error(f"Error during sample generation (AttributeError): {e}. Check if tokenizer is correctly initialized and has required methods.", exc_info=True)
+             generated_texts = [f"[Generation Error: {e}]"]
         except Exception as e:
-            self.logger.error(f"Error during sample generation: {e}", exc_info=True)
-        finally:
-            self.logger.info(f"--- End Sample Generation ({trigger_event}) ---")
+            self.logger.error(f"Error during text generation: {e}", exc_info=True)
+            generated_texts = [f"[Generation Error: {e}]"]
 
-    # Implement other abstract methods as no-ops
-    def on_train_end(self, trainer, logs=None):
-        pass
+        # Log the generated text, handling potential console encoding issues
+        raw_text = generated_texts[0] if generated_texts else "[No text generated]"
+        try:
+            # Directly print UTF-8 encoded bytes to the standard output buffer
+            # This bypasses the logger and potential console encoding issues for this specific output
+            output_bytes = f"Generated: {raw_text}\n".encode('utf-8', errors='replace')
+            sys.stdout.buffer.write(output_bytes)
+            sys.stdout.flush() # Ensure it gets written immediately
+        except Exception as print_e:
+            # Fallback if direct printing fails
+            self.logger.error(f"Error directly printing generated text to console: {print_e}. Raw text snippet: {repr(raw_text[:100])}")
 
-    def on_epoch_begin(self, trainer, epoch, logs=None):
+        self.logger.info(f"--- End Sample Generation ({trigger_event}) ---")
+
+    def on_train_end(self, **kwargs):
+        """Called at the end of training."""
         pass
 
     def on_step_begin(self, step: int, logs=None):

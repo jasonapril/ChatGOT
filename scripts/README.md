@@ -2,18 +2,23 @@
 
 ## Purpose
 
-This directory contains standalone scripts for various operational tasks related to the project, such as data preparation, running training jobs, evaluation, and potentially deployment or utility tasks. It often serves as the entry point for command-line operations.
+This directory contains standalone Python scripts, primarily for auxiliary development tasks, debugging utilities, or potentially legacy workflows.
 
-## Structure
+**Note:** The primary interface for core operations like model training, text generation, and data preparation is now the unified Command-Line Interface (CLI). Use `python -m craft.cli.run --help` for details on available CLI commands.
 
--   `scripts/`
-    -   `train.py`: Script to initiate model training.
-    -   `generate.py`: Script to generate samples from a trained model.
-    -   `evaluate.py`: Script to run model evaluation.
-    -   `prepare_data.py`: Example script for data processing.
+Scripts in this folder may include:
+
+-   Utilities for inspecting model parameters or vocabulary (`check_model_params.py`, `check_vocab.py`).
+-   Helpers for specific development or testing scenarios (`timeout_test_runner.py`).
+-   Scripts for managing checkpoints (`get_latest_checkpoint.py`).
+-   Potentially legacy scripts (`train.py`, `generate.py`, `train_tokenizer.py`) whose functionality has largely been integrated into the CLI.
+
+## Usage
+
+Consult the individual script's command-line help (usually via `python scripts/<script_name>.py --help`) for specific usage instructions.
 
 ## Guidelines
 
-- Scripts should be executable and ideally accept command-line arguments for flexibility.
-- Leverage functions and classes defined in `src/` where appropriate.
-- Include argument parsing (`argparse`) and clear usage instructions (e.g., via `--help` or comments).
+-   New core functionality should generally be added as a command to the main CLI (`src/craft/cli/`) rather than as a new script here.
+-   Existing scripts should clearly document their purpose and usage.
+-   Scripts can leverage functions and classes defined in `src/craft/`.

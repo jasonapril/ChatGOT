@@ -6,30 +6,6 @@ This document provides detailed operational guidelines, conventions, templates, 
 
 This section defines standard conventions and configuration preferences used within the Flow system documentation and workflow.
 
-### Appearance
-
--   **Priority Colors**:
-    -   🔴 Critical - Used for urgent items that block progress
-    -   🟠 High - Important items that need immediate attention
-    -   🟡 Medium - Standard work items
-    -   🟢 Low - Nice-to-have items or long-term improvements
-
--   **Status Indicators**:
-    -   ⏳ In progress - Actively being worked on
-    -   ✅ Completed - Work is finished and verified
-    -   🔄 Under review - Awaiting feedback or assessment
-    -   ⏸️ Paused - Temporarily suspended
-    -   🚩 Blocked - Unable to proceed due to dependencies
-
-### Organization
-
--   **Task Categories** (Examples - Adapt as needed per project):
-    -   Implementation - New features or components
-    -   Bug Fix - Addressing errors or defects
-    -   Research - Investigation and information gathering
-    -   Documentation - Improving or extending documentation
-    -   Refactoring - Restructuring without changing behavior
-
 ### Default Behaviors
 
 -   **Log Retention** (in `flow/project/logs/`):

@@ -18,7 +18,7 @@ from omegaconf import DictConfig
 import hydra
 
 # Import the config class from the new location
-from craft.models.configs import BaseModelConfig # Adjust if other configs are needed directly
+from craft.config.schemas import BaseModelConfig # Import from central location
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)

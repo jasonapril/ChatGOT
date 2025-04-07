@@ -1,32 +1,36 @@
-# Craft Tests
+# Tests (`tests/`)
 
-This directory contains tests for the Craft project.
+This directory contains automated tests for the Craft framework, using the `pytest` framework.
 
 ## Structure
 
-Tests are organized mirroring the `src/craft` directory structure:
+Tests are organized mirroring the `src/craft/` structure:
 
-*   `tests/data/`: Tests for data loading (`PickledDataset`, `create_data_loaders_from_config`), processing (`process_char_level_data`), and related utilities.
-*   `tests/models/`: Tests for model architectures (e.g., `TransformerModel`) and base classes.
-*   `tests/training/`: Tests for training loop components (`Trainer`, `TrainingLoop`), generation (`generate_text`), etc.
-*   `tests/integration/`: End-to-end integration tests (Planned).
-*   `tests/`: Contains shared configuration (`conftest.py`).
+- `tests/config/`: Tests for configuration loading and schema validation.
+- `tests/models/`: Tests for specific model implementations and base classes.
+- `tests/data/`: Tests for datasets, tokenizers, and data utilities.
+- `tests/training/`: Tests for the Trainer, training loop, callbacks, checkpointing, etc.
+- `tests/cli/`: Tests for the command-line interface.
+- `tests/utils/`: Tests for common utility functions.
+- `tests/conftest.py`: Contains shared fixtures used across multiple test files.
 
 ## Running Tests
 
-Tests are written using `pytest` (and `unittest` for some older files).
-
-To run all tests from the root directory:
+Tests can be run from the project root directory using `pytest`:
 
 ```bash
 pytest
 ```
 
-To run tests in a specific file or directory:
+To run specific tests:
 
 ```bash
-pytest tests/data/test_datasets.py
-pytest tests/models/
+pytest tests/training/trainer/test_trainer_init.py
+pytest tests/models/test_transformer.py::TestTransformerModel::test_forward_pass_shape
 ```
 
-Coverage information is automatically generated if `pytest-cov` is installed.
+Coverage reports can be generated if `pytest-cov` is installed:
+
+```bash
+pytest --cov=src/craft
+```

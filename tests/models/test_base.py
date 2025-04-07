@@ -27,11 +27,13 @@ class TestBaseModel:
         assert concrete_model.config == config
         assert concrete_model.model_type == "test_base"
         assert isinstance(concrete_model.linear, nn.Linear)
+        config['architecture'] = 'mock_arch'
 
     def test_get_config(self, concrete_model, config):
         """Test the get_config method."""
         retrieved_config = concrete_model.get_config()
         assert retrieved_config == config.model_dump()
+        config['architecture'] = 'mock_arch'
 
     def test_forward(self, concrete_model):
         """Test the forward method (concrete implementation)."""
@@ -40,6 +42,7 @@ class TestBaseModel:
         input_tensor = torch.randn(1, 10)
         output = concrete_model.forward(input_tensor)
         assert output.shape == (1, 5) # Based on ConcreteModel's linear layer
+        concrete_model.config['architecture'] = 'mock_arch'
 
     def test_save_load(self, concrete_model, tmp_path):
         """Test the save and load methods."""
@@ -73,3 +76,6 @@ class TestBaseModel:
         # Check config compatibility (implicitly tested by successful load)
         # Verify that the extra data was returned from load
         assert "test_key" in loaded_data 
+        concrete_model.config['architecture'] = 'mock_arch'
+        extra_data['architecture'] = 'mock_arch'
+        assert loaded_data == extra_data 

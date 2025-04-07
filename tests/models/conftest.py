@@ -6,11 +6,12 @@ import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 from unittest.mock import MagicMock
+from pydantic import Field
 
 # Import base model classes
 from craft.models.base import Model, GenerativeModel, LanguageModel, VisionModel, MultiModalModel
 # Import config classes from the correct location
-from craft.models.configs import (
+from craft.config.schemas import (
     BaseModelConfig, # Import the actual base config
     GenerativeModelConfig,
     LanguageModelConfig,

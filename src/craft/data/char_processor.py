@@ -5,15 +5,16 @@ Processor for character-level language modeling data.
 import os
 import pickle
 import logging
+import json
 from typing import List, Tuple, Dict, Any
 import numpy as np
 from pathlib import Path
 
-from craft.data.tokenizers.char_level import CharLevelTokenizer
+from craft.data.tokenizers.char import CharTokenizer
 
 logger = logging.getLogger(__name__)
 
-def process_char_level_data(input_path: str, output_dir: str, splits: Tuple[float, float, float] = (0.9, 0.05, 0.05)) -> Dict[str, str]:
+def process_char_data(input_path: str, output_dir: str, splits: Tuple[float, float, float] = (0.9, 0.05, 0.05)) -> Dict[str, str]:
     """
     Processes a raw text file for character-level language modeling.
 
@@ -39,11 +40,17 @@ def process_char_level_data(input_path: str, output_dir: str, splits: Tuple[floa
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Split ratios (train/val/test): {splits}")
 
+    # --- Input Validation --- #
     if not os.path.exists(input_path):
         raise ValueError(f"Input file not found: {input_path}")
 
+    # Validate splits type and length BEFORE summing
+    if not isinstance(splits, (list, tuple)) or len(splits) != 3:
+        raise ValueError(f"Splits must be a list or tuple of 3 elements, but got: {splits}")
+    # Now validate the sum
     if not np.isclose(sum(splits), 1.0):
         raise ValueError(f"Split ratios must sum to 1.0, but got {splits} (sum={sum(splits)})" )
+    # --- End Validation --- #
 
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
@@ -64,8 +71,8 @@ def process_char_level_data(input_path: str, output_dir: str, splits: Tuple[floa
         # logger.debug(f"Vocabulary: {''.join(chars)}")
 
         # --- Instantiate and Save Tokenizer ---
-        logger.info("Creating and saving CharLevelTokenizer...")
-        tokenizer = CharLevelTokenizer()
+        logger.info("Creating and saving CharTokenizer...")
+        tokenizer = CharTokenizer()
         tokenizer.char_to_idx = char_to_idx
         tokenizer.idx_to_char = idx_to_char
         tokenizer.vocab_size = vocab_size
@@ -94,33 +101,44 @@ def process_char_level_data(input_path: str, output_dir: str, splits: Tuple[floa
         test_ids = token_ids[val_end:]
         logger.info(f"Split sizes: Train={len(train_ids):,}, Val={len(val_ids):,}, Test={len(test_ids):,}")
 
-        # Prepare metadata (excluding vocabulary info now)
-        meta = {
-            # 'vocab_size': vocab_size, # Removed - stored in tokenizer
-            # 'idx_to_char': idx_to_char, # Removed - stored in tokenizer
-            # 'char_to_idx': char_to_idx, # Removed - stored in tokenizer
-            # 'chars': chars, # Removed - stored in tokenizer
+        # --- Prepare Metadata --- #
+        metadata = {
             'input_file': input_path,
-            'split_ratios': splits,
+            'data_format': 'character', # Explicitly state format
+            'vocab_size': vocab_size,
+            'tokenizer_type': str(type(tokenizer)),
+            'total_tokens': n,
+            'split_ratios': list(splits),
+            'split_sizes': {
+                'train': len(train_ids),
+                'val': len(val_ids),
+                'test': len(test_ids)
+             },
         }
 
-        # Save splits to pickle files
+        # --- Save Splits (Numpy Arrays) --- #
         output_paths = {}
-        for split_name, split_ids in [('train', train_ids), ('val', val_ids), ('test', test_ids)]:
+        split_data_map = {'train': train_ids, 'val': val_ids, 'test': test_ids}
+        for split_name, split_ids_array in split_data_map.items():
+            if len(split_ids_array) == 0:
+                 logger.warning(f"Split '{split_name}' has size 0. Skipping save.")
+                 continue
             output_filename = f"{split_name}.pkl"
             output_filepath = os.path.join(output_dir, output_filename)
             logger.info(f"Saving {split_name} split to {output_filepath}...")
-
-            # Combine token IDs and metadata for saving
-            save_data = {
-                'token_ids': split_ids,
-                **meta # Embed non-vocab metadata in each split file
-            }
-
             with open(output_filepath, 'wb') as f:
-                pickle.dump(save_data, f)
+                pickle.dump(split_ids_array, f)
             output_paths[split_name] = output_filepath
-            logger.info(f"Saved {split_name} split ({len(split_ids):,} tokens).")
+            logger.info(f"Saved {split_name} split ({len(split_ids_array):,} tokens).")
+
+        # --- Save Metadata --- #
+        metadata_path = os.path.join(output_dir, "metadata.json")
+        try:
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=4)
+            logger.info(f"Saved metadata to {metadata_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save metadata.json: {e}", exc_info=True)
 
         logger.info("Character-level processing completed successfully.")
         return output_paths

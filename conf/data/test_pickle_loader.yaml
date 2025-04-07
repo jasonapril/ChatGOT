@@ -1,0 +1,15 @@
+# @package _group_
+# Defines the configuration for loading simple .pkl files containing numpy arrays of token ids.
+# Useful for basic integration testing.
+
+# Target class for the Dataset.
+# This class must exist in the codebase.
+_target_: craft.data.datasets.pickled_dataset.PickledDataset
+
+# Required parameters for the PickleDataset (example)
+path: ??? # REQUIRED: Must be overridden - Directory containing train.pkl, val.pkl, etc.
+split: ??? # REQUIRED: Must be overridden - e.g., "train" or "val"
+block_size: ${experiment.data.block_size} # Inherit block_size from parent data config
+
+# Optional parameters specific to this loader/dataset can be added here
+# e.g., cache_in_ram: false 

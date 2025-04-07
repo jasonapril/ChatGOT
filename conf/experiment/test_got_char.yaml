@@ -1,0 +1,61 @@
+# conf/experiment/test_got_char.yaml
+# Defines an experiment for quick end-to-end testing using the char level tokenizer.
+
+# @package _global_
+defaults:
+  - /data: got_char         # Include base got_char config
+  - /model: transformer_debug  # Fix: Use 'transformer_debug'
+  - /optimizer: adamw        # Fix: Use 'adamw', not 'adamw_common'
+  - /training: default      # Fix: Use 'default', not 'default_train'
+  - _self_                  # Include local settings from this file last
+  # Inherit scheduler (often None by default)
+
+# Configuration for the experiment run
+experiment_name: test_got_char
+resume_from: null
+
+# Data configuration (Override block_size if needed, inherits tokenizer from got_char)
+data:
+  block_size: 256 # Ensure this matches model max_seq_length
+
+# Training configuration (Override for minimal run, enable checkpointing/sampling)
+training:
+  batch_size: 32          # Ensure batch_size is defined here or inherited
+  num_epochs: 1 # Override for faster test
+  max_steps: 10   # Override for faster test
+  log_interval: 1 # Log every step
+  save_steps_interval: 5 # Save checkpoint at step 5
+  time_save_interval_seconds: 0 # Disable time-based saving
+  compile_model: False
+  torch_compile: False
+  activation_checkpointing: false # Keep false for speed
+
+  # Use minimal generation settings for sample callback test
+  generation:
+    max_new_tokens: 20 # Generate very short samples
+    start_prompt: "The " # Add default start prompt
+
+# Callbacks configuration (Enable minimal necessary callbacks)
+callbacks:
+  # Keep only essential callbacks for testing save/generate
+  tensorboard:
+    _target_: craft.training.callbacks.TensorBoardLogger
+  sample_generation:
+    _target_: craft.training.callbacks.SampleGenerationCallback
+    start_prompt: ${experiment.training.generation.start_prompt} # Correct interpolation
+
+# Disable MLflow logging for tests
+mlflow:
+  log_params: false
+  log_metrics: false
+
+# Explicitly override model block_size if needed for memory, otherwise inherit
+model:
+  _target_: craft.models.transformer.TransformerModel
+  config:
+    _target_: craft.config.schemas.LanguageModelConfig # Use the Pydantic schema for validation
+    architecture: transformer # Required discriminator
+    vocab_size: null # Will be inferred from data
+    d_model: 128
+    n_layers: 2
+ 

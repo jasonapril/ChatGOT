@@ -59,4 +59,7 @@ ENV/
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Tooling cache
+.pip-tools-cache/ 

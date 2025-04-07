@@ -1,0 +1,35 @@
+# conf/data/got_char.yaml
+# Configuration for loading PRE-PROCESSED character-level GoT data.
+
+# @package _group_
+
+# Configuration for GoT Character-Level Dataset (using pre-pickled data)
+# Ensure parameters are at the root level for correct merging.
+
+type: char_pickle # Identifier for this data configuration
+batch_size: 32
+num_workers: 0
+block_size: 1024 # Context length for the model
+
+# Removed vocab_path - info should be loaded by the dataset from its directory or metadata
+
+# Split configurations
+datasets:
+  train:
+    dataset:
+      _target_: craft.data.dataset.PickledDataset
+      file_path: data/processed/got/char/train.pkl
+      block_size: ${experiment.data.block_size} # Absolute interpolation path
+  # Optional: Add train-specific dataloader args here if needed
+
+  val:
+    dataset:
+      _target_: craft.data.dataset.PickledDataset
+      file_path: data/processed/got/char/val.pkl
+      block_size: ${experiment.data.block_size} # Absolute interpolation path
+
+  test:
+    dataset:
+      _target_: craft.data.dataset.PickledDataset
+      file_path: data/processed/got/char/test.pkl
+      block_size: ${experiment.data.block_size} # Absolute interpolation path 

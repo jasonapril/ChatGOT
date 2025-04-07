@@ -1,0 +1,11 @@
+# tests/fixtures/configs/minimal_model.yaml
+# Minimal model configuration for basic testing.
+
+# Assuming a very simple dummy model exists for testing purposes
+# Replace with an actual minimal model available in your codebase
+_target_: craft.models.dummy.DummyModel # Adjust path if needed
+
+n_layer: 1
+n_embd: 16
+vocab_size: 32 # Small vocab for testing
+block_size: 16 # Small context 

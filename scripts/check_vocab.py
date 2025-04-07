@@ -4,7 +4,7 @@ import json
 
 def check_vocab_size():
     # Check character-level data
-    char_data_path = 'data/processed/got/char_level/game_of_thrones_train.pkl'
+    char_data_path = 'data/processed/got/char/game_of_thrones_train.pkl'
     if not os.path.exists(char_data_path):
         print(f"Character-level file not found: {char_data_path}")
     else:
@@ -18,7 +18,7 @@ def check_vocab_size():
     # Check subword-level data
     # Note: Subword data files themselves might not exist yet, 
     # the script currently only checks for a hypothetical train file.
-    subword_data_path = 'data/processed/got/subword_level/game_of_thrones_train.pkl' 
+    subword_data_path = 'data/processed/got/subword/game_of_thrones_train.pkl' 
     if not os.path.exists(subword_data_path):
         print(f"\nSubword-level data file not found: {subword_data_path}")
     else:
@@ -30,7 +30,7 @@ def check_vocab_size():
             print(f"  Number of tokens: {len(data.get('token_ids', []))}")
     
     # Check the tokenizer file
-    tokenizer_path = 'data/processed/got/subword_level/tokenizer/tokenizer.json'
+    tokenizer_path = 'data/processed/got/subword/tokenizer/tokenizer.json'
     if not os.path.exists(tokenizer_path):
         print(f"\nTokenizer file not found: {tokenizer_path}")
     else:

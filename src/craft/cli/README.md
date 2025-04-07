@@ -1,14 +1,34 @@
-# Command-Line Interface (`src/cli/`)
+# Command-Line Interface (`src/craft/cli/`)
 
-This directory contains the code for the ChatGoT command-line interface (CLI), built using the [Typer](https://typer.tiangolo.com/) library.
+This package implements the command-line interface (CLI) for the Craft framework using [Typer](https://typer.tiangolo.com/).
+
+- `run.py`: The main entry point for the CLI, defining the top-level `app` and subcommands.
+- Other files (e.g., `train_commands.py`, `generate_commands.py`, `dataset_commands.py`): Define the logic and arguments for specific subcommands (like `train`, `generate text`, `dataset prepare`).
+
+## Usage
+
+The CLI is typically invoked via `python -m craft.cli.run`. Available commands and options can be discovered using:
+
+```bash
+python -m craft.cli.run --help
+python -m craft.cli.run train --help
+python -m craft.cli.run generate --help
+# etc.
+```
+
+The CLI commands often rely on Hydra for configuration management, allowing users to specify experiment configurations and overrides:
+
+```bash
+python -m craft.cli.run train experiment=my_experiment training.num_epochs=5
+```
 
 ## Structure:
 
 *   `run.py`: The main entry point for the CLI (`python -m src.cli.run ...`). It defines the top-level `typer.Typer()` application, handles global options (like `--log-level`), sets up logging, and imports and registers command groups (sub-apps) from other modules in this directory.
-*   `train_commands.py`: Defines the `train_app` and includes commands related to model training (e.g., `train language`).
 *   `dataset_commands.py`: Defines the `dataset_app` and includes commands related to dataset operations (e.g., `dataset prepare`).
+*   `train_commands.py`: Defines the `train_app` and includes commands related to model training (e.g., `train language`).
+*   `generate_commands.py`: Defines the `generate_app` and includes commands related to text generation (e.g., `generate text`).
 *   `evaluate_commands.py`: Defines the `evaluate_app` and includes commands related to model evaluation (currently a placeholder).
-*   `generate_commands.py`: Defines the `generate_app` and includes commands related to text generation (currently a placeholder).
 
 ## Purpose:
 

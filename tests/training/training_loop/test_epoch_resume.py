@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader # Need this
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
+from craft.training.progress import ProgressTracker # Import ProgressTracker
+from craft.training.trainer import Trainer # Import Trainer
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -56,6 +58,7 @@ class TestEpochResume:
             gradient_accumulation_steps=1
         )
         loop.scaler = mock_scaler
+        mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # Resume logic setup ...
         current_epoch = 2
@@ -69,7 +72,8 @@ class TestEpochResume:
             current_epoch=current_epoch,
             global_step=start_global_step_for_epoch,
             progress=mock_progress_tracker_instance,
-            loaded_global_step=loaded_global_step
+            loaded_global_step=loaded_global_step,
+            trainer=mock_trainer # Pass mock trainer
         )
 
         # --- Assertions ---

@@ -1,0 +1,32 @@
+# Contains parameters for loading pre-processed subword datasets.
+
+type: subword_pickle
+batch_size: 32
+num_workers: 4
+# block_size: ${experiment.data.block_size} # Interpolation issue with _group_, hardcoding below
+
+# Tokenizer Config (if needed, often defined elsewhere or loaded with data)
+# tokenizer:
+#   _target_: craft.data.tokenizers.SentencePieceTokenizer
+#   model_path: data/processed/got/subword/bpe_32k.model # Path to the trained SP model
+#   vocab_size: 32000 # Must match the trained model
+
+# Datasets section (now at root level)
+datasets:
+  train:
+    dataset:
+      _target_: craft.data.dataset.PickledDataset
+      file_path: data/processed/got/subword/train.pkl # Adjusted path
+      block_size: 256 # Hardcode the value, remove interpolation
+
+  val:
+    dataset:
+      _target_: craft.data.dataset.PickledDataset
+      file_path: data/processed/got/subword/val.pkl # Adjusted path
+      block_size: 256 # Hardcode the value, remove interpolation
+
+  test:
+    dataset:
+      _target_: craft.data.dataset.PickledDataset
+      file_path: data/processed/got/subword/test.pkl # Adjusted path
+      block_size: 256 # Hardcode the value, remove interpolation

@@ -1,0 +1,99 @@
+project_name: Craft
+experiment_name: default
+seed: 42
+log_level: DEBUG
+force_cpu: false
+resume_from: null
+device: auto
+formatters:
+  standard:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  minimal:
+    format: '%(message)s'
+experiment:
+  data:
+    type: char_pickle
+    batch_size: 32
+    num_workers: 0
+    block_size: 256
+    datasets:
+      train:
+        dataset:
+          _target_: craft.data.dataset.PickledDataset
+          file_path: data/processed/got/char/train.pkl
+          block_size: ${experiment.data.block_size}
+      val:
+        dataset:
+          _target_: craft.data.dataset.PickledDataset
+          file_path: data/processed/got/char/val.pkl
+          block_size: ${experiment.data.block_size}
+      test:
+        dataset:
+          _target_: craft.data.dataset.PickledDataset
+          file_path: data/processed/got/char/test.pkl
+          block_size: ${experiment.data.block_size}
+  model:
+    _target_: craft.models.transformer.TransformerModel
+    model_type: language
+    config:
+      _target_: craft.models.configs.LanguageModelConfig
+      architecture: transformer
+      model_type: ${..model_type}
+      vocab_size: null
+      d_model: 128
+      n_layers: 2
+      n_head: 4
+      d_hid: 512
+      dropout: 0.1
+      layer_norm_eps: 1.0e-05
+      activation: gelu
+      bias: true
+      max_seq_length: 256
+  optimizer:
+    _target_: torch.optim.AdamW
+    lr: 0.0001
+    weight_decay: 0.01
+  training:
+    epochs: 1
+    use_amp: true
+    gradient_accumulation_steps: 1
+    max_grad_norm: 1.0
+    log_interval: 1
+    save_steps_interval: 5
+    time_save_interval_seconds: 0
+    compile_model: false
+    activation_checkpointing: false
+    torch_compile: false
+    sample_max_new_tokens: 100
+    sample_temperature: 0.8
+    sample_start_text: '
+
+      '
+    batch_size: 32
+    max_steps: 10
+    warmup_steps: 100
+    weight_decay: 0.01
+    generation:
+      _target_: craft.core.generation.GeneratorConfig
+      prompt: ${experiment.training.generation.start_prompt}
+      max_new_tokens: 20
+      temperature: ${..sample_temperature}
+      top_k: 50
+      top_p: 0.9
+      repetition_penalty: 1.1
+      start_prompt: 'The '
+    num_epochs: 1
+  experiment_name: test_got_char
+  resume_from: null
+  callbacks:
+    tensorboard:
+      _target_: craft.training.callbacks.TensorBoardLogger
+    sample_generation:
+      _target_: craft.training.callbacks.SampleGenerationCallback
+      start_prompt: ${experiment.training.generation.start_prompt}
+  mlflow:
+    log_params: false
+    log_metrics: false
+training:
+  max_steps: 1
+  save_steps_interval: 1

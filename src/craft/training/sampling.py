@@ -8,166 +8,179 @@ import logging
 import time
 from typing import Dict, List, Any, Optional
 
-def generate_text_sampling(model, char_to_idx, idx_to_char, seed_text, max_length=500, temperature=0.8, 
-                 device=None, top_k=0, top_p=0.0, repetition_penalty=1.0):
+# Import utility function
+from ..utils.generation import top_k_top_p_filtering
+# Import tokenizer base class for type hinting
+from ..data.tokenizers.base import Tokenizer
+
+logger = logging.getLogger(__name__)
+
+def generate_text_manual_sampling(
+    model: torch.nn.Module,
+    tokenizer: Tokenizer,
+    seed_text: str,
+    max_length: int = 500,
+    temperature: float = 0.8,
+    device: Optional[torch.device] = None,
+    top_k: int = 0,
+    top_p: float = 0.0,
+    repetition_penalty: float = 1.0
+) -> str:
     """
-    Generate text from a trained model using sampling.
-    
+    Generate text from a trained model using manual sampling logic.
+    Uses the provided tokenizer for encoding and decoding.
+
     Args:
-        model: Trained model
-        char_to_idx: Character to index mapping
-        idx_to_char: Index to character mapping
-        seed_text: Initial text to condition the generation
-        max_length: Maximum number of characters to generate
-        temperature: Sampling temperature (higher = more random)
-        device: Device to run generation on
-        top_k: Limit sampling to top k tokens (0 = disabled)
-        top_p: Nucleus sampling threshold (0.0 = disabled)
-        repetition_penalty: Penalty for repeating tokens
-        
+        model: Trained model.
+        tokenizer: Initialized tokenizer instance.
+        seed_text: Initial text to condition the generation.
+        max_length: Maximum number of *new* tokens to generate.
+        temperature: Sampling temperature (higher = more random).
+        device: Device to run generation on.
+        top_k: Limit sampling to top k tokens (0 = disabled).
+        top_p: Nucleus sampling threshold (0.0 = disabled).
+        repetition_penalty: Penalty for repeating tokens (1.0 = no penalty).
+
     Returns:
-        Generated text including the seed
+        Generated text (including the seed text).
     """
     if device is None:
         device = next(model.parameters()).device
-    
+    if tokenizer is None or not hasattr(tokenizer, 'encode') or not hasattr(tokenizer, 'decode'):
+        raise ValueError("A valid tokenizer with encode/decode methods must be provided.")
+
     model.eval()
-    generated = seed_text
-    
-    # Convert seed text to indices
-    context = [char_to_idx.get(c, char_to_idx.get("<unk>", 0)) for c in seed_text]
-    context = torch.tensor(context, dtype=torch.long, device=device).unsqueeze(0)
-    
-    # Truncate initial context if it exceeds model's max length
+    generated_token_ids: List[int] = []
+
+    # Encode seed text
+    try:
+        context_ids = tokenizer.encode(seed_text)
+        context = torch.tensor(context_ids, dtype=torch.long, device=device).unsqueeze(0)
+    except Exception as e:
+        logger.error(f"Failed to encode seed text '{seed_text}': {e}", exc_info=True)
+        return "[Encoding Error]"
+
+    # Truncate initial context if needed
     model_max_length = getattr(model.config, 'max_seq_length', 1024) if hasattr(model, 'config') else 1024
     if context.size(1) > model_max_length:
         context = context[:, -model_max_length:]
-        logging.warning(f"Initial seed text length ({context.size(1)}) exceeded model max length ({model_max_length}). Truncating.") # Optional: Add warning
+        logger.warning(f"Initial seed text length ({len(context_ids)}) exceeded model max length ({model_max_length}). Truncating.")
+
+    generated_token_ids.extend(context.squeeze().tolist()) # Store initial context IDs
 
     with torch.no_grad():
         for _ in range(max_length):
+            # Ensure context does not exceed model max length before passing to model
+            current_context = context[:, -model_max_length:]
+
             # Get predictions
-            outputs = model(context)
-            
+            outputs = model(current_context)
+
             # Focus on the last token predictions
-            # Assume outputs are logits or tuple where first element is logits
             if isinstance(outputs, tuple):
-                next_token_logits = outputs[0][:, -1, :] 
-            else: # Assuming outputs are just logits
+                next_token_logits = outputs[0][:, -1, :] # Logits are often first element
+            else:
                 next_token_logits = outputs[:, -1, :]
-            
+
             # Apply temperature
             next_token_logits = next_token_logits / temperature
-            
-            # Apply repetition penalty
-            if repetition_penalty > 1.0:
-                for prev_token in context[0]:
-                    # Only apply penalty if token_id is valid
-                    if 0 <= prev_token.item() < next_token_logits.size(-1):
-                         next_token_logits[0, prev_token.item()] /= repetition_penalty
-            
-            # Apply top-k filtering
-            if top_k > 0:
-                # Ensure top_k is not larger than vocab size
-                effective_top_k = min(top_k, next_token_logits.size(-1))
-                top_k_vals, _ = torch.topk(next_token_logits, effective_top_k)
-                indices_to_remove = next_token_logits < top_k_vals[:, [-1]] 
-                next_token_logits[indices_to_remove] = float('-inf')
-            
-            # Apply top-p (nucleus) filtering
-            if top_p > 0.0:
-                sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
-                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                
-                # Remove tokens with cumulative probability above the threshold
-                sorted_indices_to_remove = cumulative_probs > top_p
-                # Shift the indices to the right to keep also the first token above the threshold
-                if sorted_indices_to_remove.shape[-1] > 1:
-                     sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                sorted_indices_to_remove[..., 0] = 0
-                
-                indices_to_remove = torch.zeros_like(next_token_logits, dtype=torch.bool).scatter_(dim=-1, index=sorted_indices, src=sorted_indices_to_remove)
-                next_token_logits[indices_to_remove] = float('-inf')
-            
-            # Convert to probabilities
-            probs = F.softmax(next_token_logits, dim=-1)
-            
-            # Sample from the distribution
-            next_token = torch.multinomial(probs, 1).item()
-            
-            # Add to generated text
-            # Handle potential KeyError if next_token is out of bounds for idx_to_char
-            next_char = idx_to_char.get(next_token, '<UNK>') # Use <UNK> or similar for safety
-            generated += next_char
-            
-            # Update context for next prediction
-            context = torch.cat((context, torch.tensor([[next_token]], device=device)), dim=1)
-            
-            # Optionally truncate context to save memory for long generations
-            model_max_length = getattr(model.config, 'max_seq_length', 1024) if hasattr(model, 'config') else 1024 # Use max_seq_length if available
-            if context.size(1) > model_max_length:
-                context = context[:, -model_max_length:]
-            
-            # Check for EOS token using the *character* mapping if applicable
-            # eos_char = idx_to_char.get(char_to_idx.get("<eos>", -1), None)
-            # if eos_char and next_char == eos_char:
-            #     break
-    
-    return generated
 
-def sample_text(model, char_to_idx, idx_to_char, num_samples=5, seed_text="TYRION: ", 
-               max_length=500, temperature=0.8, device=None, log_samples=True, **kwargs):
+            # Apply repetition penalty
+            if repetition_penalty > 1.0 and context.numel() > 0: # Check context is not empty
+                # Use the full context tensor directly for checking previous tokens
+                for prev_token_id in context[0]:
+                    if 0 <= prev_token_id.item() < next_token_logits.size(-1):
+                         next_token_logits[0, prev_token_id.item()] /= repetition_penalty
+
+            # Apply top-k and top-p filtering using the utility function
+            next_token_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
+
+            # Convert to probabilities and sample
+            probs = F.softmax(next_token_logits, dim=-1)
+            next_token = torch.multinomial(probs, 1)
+            next_token_id = next_token.item()
+
+            # Append to generated sequence and update context
+            generated_token_ids.append(next_token_id)
+            context = torch.cat((context, next_token.to(context.device)), dim=1)
+
+            # Check for EOS token
+            eos_token_id = getattr(tokenizer, 'eos_token_id', None)
+            if eos_token_id is not None and next_token_id == eos_token_id:
+                logger.debug(f"EOS token ({eos_token_id}) generated. Stopping generation.")
+                break
+
+    # Decode the full sequence of generated IDs
+    try:
+        # Pass skip_special_tokens=True to avoid including EOS/PAD in final output typically
+        decoded_text = tokenizer.decode(generated_token_ids, skip_special_tokens=True)
+    except Exception as e:
+        logger.error(f"Failed to decode generated token IDs: {e}", exc_info=True)
+        decoded_text = f"[Decoding Error: {e}]"
+
+    return decoded_text
+
+def generate_samples_manual_sampling(
+    model: torch.nn.Module,
+    tokenizer: Tokenizer,
+    num_samples: int = 5,
+    seed_text: str = "The ",
+    max_length: int = 500,
+    temperature: float = 0.8,
+    device: Optional[torch.device] = None,
+    log_samples: bool = True,
+    **kwargs
+) -> List[str]:
     """
-    Generate multiple text samples from a trained model using sampling.
-    
+    Generate multiple text samples from a trained model using manual sampling.
+
     Args:
-        model: Trained model
-        char_to_idx: Character to index mapping
-        idx_to_char: Index to character mapping
-        num_samples: Number of samples to generate
-        seed_text: Initial text to condition the generation
-        max_length: Maximum number of characters per sample
-        temperature: Sampling temperature (higher = more random)
-        device: Device to run generation on
-        log_samples: Whether to log samples
-        **kwargs: Additional keyword arguments passed to generate_text 
+        model: Trained model.
+        tokenizer: Initialized tokenizer instance.
+        num_samples: Number of samples to generate.
+        seed_text: Initial text to condition the generation.
+        max_length: Maximum number of *new* characters/tokens per sample.
+        temperature: Sampling temperature (higher = more random).
+        device: Device to run generation on.
+        log_samples: Whether to log samples.
+        **kwargs: Additional keyword arguments passed to generate_text_manual_sampling
                   (e.g., top_k, top_p, repetition_penalty).
-        
+
     Returns:
-        List of generated samples
+        List of generated samples (including the seed text).
     """
     samples = []
-    
+
     if log_samples:
-        logging.info(f"Generating {num_samples} samples with temperature {temperature}...")
-        logging.info(f"Seed text: '{seed_text}'")
-    
+        logger.info(f"Generating {num_samples} samples via manual sampling with temperature {temperature}...")
+        logger.info(f"Seed text: '{seed_text}'")
+
     for i in range(num_samples):
         start_time = time.time()
-        
+
         # Generate the sample, passing through extra kwargs
-        sample = generate_text_sampling(
+        sample = generate_text_manual_sampling(
             model=model,
-            char_to_idx=char_to_idx,
-            idx_to_char=idx_to_char,
+            tokenizer=tokenizer,
             seed_text=seed_text,
             max_length=max_length,
             temperature=temperature,
             device=device,
             **kwargs # Pass top_k, top_p, etc.
         )
-        
+
         samples.append(sample)
-        
+
         # Log the sample if requested
         if log_samples:
             generation_time = time.time() - start_time
-            # Avoid division by zero if generation was instant
-            chars_per_sec = len(sample) / generation_time if generation_time > 0 else float('inf')
-            
-            logging.info(f"\nSample {i+1}/{num_samples} (generated in {generation_time:.2f}s, {chars_per_sec:.1f} char/s):")
-            logging.info(f"{'-' * 40}")
-            logging.info(sample)
-            logging.info(f"{'-' * 40}\n")
-    
+            # Calculate length excluding seed text for meaningful throughput
+            generated_part_len = len(sample) - len(seed_text)
+            chars_per_sec = generated_part_len / generation_time if generation_time > 0 else float('inf')
+
+            logger.info(f"\nSample {i+1}/{num_samples} (generated {generated_part_len} new tokens in {generation_time:.2f}s, {chars_per_sec:.1f} tokens/s):")
+            logger.info(f"{'-' * 40}")
+            logger.info(sample)
+            logger.info(f"{'-' * 40}\n")
+
     return samples 

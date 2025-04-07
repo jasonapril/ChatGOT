@@ -20,13 +20,15 @@ class ProgressTracker:
         log_interval: int = 10,
         desc: str = "Training",
         position: int = 0,
-        leave: bool = True
+        leave: bool = True,
+        initial_step: int = 0
     ):
         self.total_steps = total_steps
         self.log_interval = log_interval
         self.desc = desc
         self.position = position
         self.leave = leave
+        self.initial_step = initial_step
         self.logger = logging.getLogger(self.__class__.__name__)
         
         # Initialize metrics tracking
@@ -50,7 +52,8 @@ class ProgressTracker:
                 position=self.position,
                 leave=self.leave,
                 dynamic_ncols=True,
-                mininterval=1.0
+                mininterval=1.0,
+                initial=self.initial_step
             )
         except Exception as e:
             self.logger.warning(f"Failed to initialize tqdm progress bar: {e}. Using simple logging.")

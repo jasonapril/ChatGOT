@@ -1,31 +1,44 @@
 """
-Character-Level Transformer for Text Generation
+Craft: A Modular Framework for AI Model Development
 
-A framework for experimenting with language models and AI architectures.
+This package provides building blocks and orchestration tools for configuring,
+building, training, and evaluating AI models, primarily using PyTorch and Hydra.
 """
 
 __version__ = "1.0.0"
 __author__ = "April Labs"
 
-# Minimal imports - let users import from submodules directly
-# Example: from craft.models import create_model_from_config
-# Example: from craft.data import PickledDataset
+# Expose key components for easier top-level access.
+# Users are still encouraged to import directly from submodules for clarity.
 
-# Maybe initialize logging here if desired system-wide
-# from .utils.logging import setup_logging
-# setup_logging()
+from .training.trainer import Trainer
+from .config.schemas import (
+    AppConfig,
+    ExperimentConfig,
+    TrainingConfig,
+    DataConfig,
+    AnyModelConfig
+    # Add other core schemas if desired
+)
+from .utils.common import set_seed, setup_device
+from .data.base import BaseDataset
 
+# Removed obsolete or internal items from __all__
 __all__ = [
-    # Data
+    # Core Classes & Configs
+    "Trainer",
+    "AppConfig",
+    "ExperimentConfig",
+    "TrainingConfig",
+    "DataConfig",
+    "AnyModelConfig",
     "BaseDataset",
-    # "load_data", # Removed
-    "DataManager",
-    "create_data_manager_from_config",
-    "create_dataset_from_config",
-    # "settings", # Removed from __all__
-    # "logger", # Removed from __all__
-    # "prepare_data",
-    "PickledDataset",
-    # "TransformerModel",
-    # "Trainer"
+
+    # Key Utilities
+    "set_seed",
+    "setup_device",
+
+    # Versioning/Info
+    "__version__",
+    "__author__",
 ] 

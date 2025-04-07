@@ -1,0 +1,24 @@
+# conf/model/transformer_debug.yaml
+# Configuration for a very small Transformer model for debugging or testing on low-memory GPUs
+
+_target_: craft.models.transformer.TransformerModel
+model_type: language # Should match the training task
+
+config:
+  # Note: The target path might need correction if LanguageModelConfig moved
+  _target_: craft.models.configs.LanguageModelConfig # Corrected path?
+  architecture: transformer
+  model_type: ${..model_type} # Refer to parent model_type
+  vocab_size: null      # Will be overridden based on tokenizer
+  d_model: 128          # Significantly reduced
+  n_layers: 2           # Significantly reduced
+  n_head: 4             # Reduced
+  d_hid: 512            # Significantly reduced (usually 4*d_model)
+  dropout: 0.1
+  layer_norm_eps: 1e-5
+  activation: gelu
+  bias: true
+  # Referencing experiment.data might be fragile if this model is used outside
+  # a standard experiment structure. Consider setting a default block_size here
+  # or ensuring it's always overridden.
+  max_seq_length: 256 # Set a small default block_size for debug model 

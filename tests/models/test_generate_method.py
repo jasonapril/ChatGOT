@@ -6,7 +6,7 @@ import torch
 from unittest.mock import MagicMock, patch
 from pydantic import ValidationError
 
-from craft.models.configs import GenerativeModelConfig
+from craft.config.schemas import GenerativeModelConfig
 from craft.models.base import GenerativeModel
 from .conftest import MockGenerativeModel
 
@@ -18,7 +18,7 @@ class TestGenerateMethod:
         """Provides a standard GenerativeModelConfig for generate tests."""
         # Need to ensure vocab_size and d_model are set as MockGenerativeModel uses them
         config = GenerativeModelConfig(
-            model_type="generative",
+            architecture="mock_generative_arch", # Add required discriminator
             max_seq_length=20
         )
         # Add required fields dynamically if not in base config schema
@@ -29,6 +29,11 @@ class TestGenerateMethod:
     @pytest.fixture
     def generative_model(self, gen_config):
         """Provides a MockGenerativeModel instance with mocked forward."""
+        mock_generative_config_dict = {
+            "vocab_size": gen_config.vocab_size,
+            "d_model": gen_config.d_model,
+            "max_seq_length": gen_config.max_seq_length
+        }
         model = MockGenerativeModel(
             vocab_size=gen_config.vocab_size, 
             d_model=gen_config.d_model,

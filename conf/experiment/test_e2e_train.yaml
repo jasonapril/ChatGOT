@@ -1,0 +1,55 @@
+# @package _global_
+# Minimal experiment config for integration testing (E2E train/generate)
+
+defaults:
+  - override /model: transformer_tiny # Use a tiny transformer config
+  - override /data: test_pickle_loader # Use a dataset loader for pickle files
+  - override /optimizer: adamw
+  - override /scheduler: cosine_annealing
+  - override /callbacks: default
+  - _self_
+
+# Override specific parameters for the test experiment
+experiment_name: test_e2e_run
+
+data:
+  # Override dataset parameters if needed (paths are set via CLI override in test)
+  batch_size: 4 # Small batch size for testing
+  num_workers: 0
+  block_size: 32 # Small block size
+  datasets:
+    train:
+      dataset:
+        # _target_ will come from data/test_pickle_loader.yaml
+        path: ??? # REQUIRED override from test script
+    val:
+      # Use same config as train for simplicity in test
+      dataset:
+        # _target_ will come from data/test_pickle_loader.yaml
+        path: ??? # REQUIRED override from test script
+    test: null # No test set needed for this basic test
+
+model:
+  # vocab_size is overridden by test script based on tokenizer
+  pass # Inherits from model/transformer_tiny.yaml
+
+training:
+  batch_size: 4 # Matches data batch size
+  max_steps: 1 # Overridden in test
+  num_epochs: 1
+  log_interval: 1
+  eval_interval: 0 # Disable eval during minimal test run
+  save_interval: 1 # Save frequently during minimal test run
+  use_amp: false # Disable AMP for simple CPU testing
+  # Other training params use defaults
+
+optimizer:
+  lr: 1e-4 # Use a default LR
+
+scheduler:
+  # T_max will be calculated/overridden by Trainer based on training.max_steps
+  T_max: ???
+
+callbacks:
+  # Use default callbacks (e.g., maybe just tensorboard)
+  pass 

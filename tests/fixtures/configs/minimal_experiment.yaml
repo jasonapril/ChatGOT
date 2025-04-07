@@ -1,0 +1,35 @@
+# tests/fixtures/configs/minimal_experiment.yaml
+# Composes a minimal experiment using other minimal configs in this directory.
+
+defaults:
+  - _self_
+  - /model: minimal_model
+  - /data: minimal_data
+  - /optimizer: minimal_optimizer
+  - /training: minimal_training
+  # Optional: Add minimal versions of scheduler, callbacks if needed for specific tests
+  # - /scheduler: minimal_scheduler 
+  # - /callbacks: minimal_callbacks
+
+# Override any specific parameters if needed for this minimal setup
+
+# Example: Override batch size if data config doesn't provide it directly
+# training:
+#  batch_size: 4
+
+# Ensure Hydra settings are compatible with testing
+hydra:
+  job:
+    # Allow tests to find configs relative to this directory
+    config:
+      override_dirname:
+        kv_sep: ':'
+        item_sep: ','
+        exclude_keys: []
+    # Avoid changing directory if tests rely on original CWD
+    chdir: false
+  run:
+    dir: outputs/tests/${now:%Y-%m-%d}/${now:%H-%M-%S}/${hydra.job.override_dirname}
+  sweep:
+    dir: multirun/tests/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num} 

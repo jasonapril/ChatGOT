@@ -14,13 +14,14 @@ import re # Import regex
 import glob # Keep glob for potential use, though maybe not needed after refactor
 from typing import Dict, Any, Optional, List, Tuple
 from omegaconf import DictConfig, OmegaConf
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pathlib import Path
-from ..data.tokenizers.base import BaseTokenizer
+from ..data.tokenizers.base import Tokenizer
 from dataclasses import dataclass, asdict # Import dataclasses
 from ..training.callbacks.base import CallbackList # Ensure CallbackList is imported if used directly
 from ..utils.logging import setup_logging
 from hydra.utils import get_original_cwd
+import time
 
 # Define constants for checkpoint filenames and patterns
 CHECKPOINT_FILE_PATTERN = r"checkpoint_step_(\d+)(?:_resumed)?\.pt"
@@ -34,40 +35,45 @@ class CheckpointLoadError(Exception):
     """Custom exception for checkpoint loading errors."""
     pass
 
-# Define TrainingState dataclass
-@dataclass
-class TrainingState:
-    """Dataclass to hold the state relevant for checkpointing."""
+class TrainingState(BaseModel):
+    """Represents the state to be saved in a checkpoint."""
     epoch: int
     global_step: int
     model_state_dict: Dict[str, Any]
     optimizer_state_dict: Optional[Dict[str, Any]] = None
     scheduler_state_dict: Optional[Dict[str, Any]] = None
     scaler_state_dict: Optional[Dict[str, Any]] = None
-    config: Optional[Dict[str, Any]] = None
-    callbacks_state: Optional[Dict[str, Any]] = None
-    tokenizer_path: Optional[str] = None
-    best_val_metric: Optional[float] = None
-    metrics: Optional[Dict[str, Any]] = None
-    tensorboard_log_dir: Optional[str] = None
+    best_val_metric: Optional[float] = None # Store the best validation metric achieved so far
+    metrics: Optional[Dict[str, float]] = None # Last validation metrics or epoch metrics
+    config: Optional[Dict[str, Any]] = None # Full experiment config
+    tensorboard_log_dir: Optional[str] = None # Path to TB logs for linking
+    callbacks_state: Optional[Dict[str, Any]] = None # State from callbacks
 
-    # Add a class method to load from a dictionary, handling missing keys
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TrainingState":
-        return cls(
-            model_state_dict=data.get('model_state_dict'), # Required, should raise error if missing later?
-            optimizer_state_dict=data.get('optimizer_state_dict'), # Required
-            epoch=data.get('epoch', 0),
-            global_step=data.get('global_step', 0),
-            scheduler_state_dict=data.get('scheduler_state_dict'),
-            scaler_state_dict=data.get('scaler_state_dict'),
-            config=data.get('config'),
-            metrics=data.get('metrics', {}),
-            best_val_metric=data.get('best_val_metric', float('inf')),
-            tensorboard_log_dir=data.get('tensorboard_log_dir'),
-            callbacks_state=data.get('callbacks_state'),
-            tokenizer_path=data.get('tokenizer_path')
-        )
+    # Allow extra fields if needed, though prefer explicit definition
+    model_config = ConfigDict(extra='allow')
+
+    # def __init__(self, **data: Any):
+    #     super().__init__(**data)
+    #     # Optional: Add logging here if needed, accessing attributes via self.* after super init
+    #     # logger.error(f"[DEBUG TrainingState] Initializing with: step={self.global_step}, epoch={self.epoch}")
+
+    # Example method to load state into components
+    def load_state(self, model: torch.nn.Module, optimizer=None, scheduler=None, scaler=None, callbacks=None):
+        """Utility method to load state dictionaries into PyTorch components."""
+        model.load_state_dict(self.model_state_dict)
+        if optimizer and self.optimizer_state_dict:
+            optimizer.load_state_dict(self.optimizer_state_dict)
+        if scheduler and self.scheduler_state_dict:
+            scheduler.load_state_dict(self.scheduler_state_dict)
+        if scaler and self.scaler_state_dict:
+            try:
+                # Safely check if the scaler has the load_state_dict method
+                if hasattr(scaler, 'load_state_dict'):
+                    scaler.load_state_dict(self.scaler_state_dict)
+                else:
+                    logger.warning("Scaler object does not have load_state_dict method.")
+            except Exception as e:
+                logger.error(f"Failed to load scaler state: {e}")
 
 class CheckpointManager:
     """Manages saving and loading model checkpoints."""
@@ -81,7 +87,7 @@ class CheckpointManager:
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         scaler: Optional[torch.amp.GradScaler] = None,
         device: Optional[torch.device] = None,
-        tokenizer: Optional[BaseTokenizer] = None,
+        tokenizer: Optional[Tokenizer] = None,
         keep_last_n: int = 3,
         keep_best_n: int = 1,
         config: Optional[Dict[str, Any]] = None, # Keep config dict for saving
@@ -105,6 +111,7 @@ class CheckpointManager:
         self.max_checkpoints_to_keep = max_checkpoints_to_keep
         self.save_best_only = save_best_only
         self.experiment_name = experiment_name
+        self._MARKER_SUFFIX = "._SAVED"
 
         # Determine checkpoint directory
         if checkpoint_dir:
@@ -112,21 +119,34 @@ class CheckpointManager:
             self.checkpoint_dir = Path(checkpoint_dir)
             self.logger.info(f"Using explicitly provided checkpoint directory: {self.checkpoint_dir}")
         else:
-            # Construct checkpoint directory based on original CWD and experiment name (fallback)
+            # Try getting current Hydra run directory first
             try:
-                original_cwd = get_original_cwd()
-                self.checkpoint_dir = Path(original_cwd) / "outputs" / "experiments" / self.experiment_name / "checkpoints"
-                self.logger.info(f"Constructed checkpoint directory based on original CWD: {self.checkpoint_dir}")
-            except Exception as e:
-                self.logger.warning(f"Could not get original CWD via Hydra ({e}). Falling back to relative path for checkpoints.")
-                self.checkpoint_dir = Path("outputs") / "experiments" / self.experiment_name / "checkpoints"
+                from hydra.core.hydra_config import HydraConfig # Local import
+                from hydra.utils import get_original_cwd # Keep for fallback
+                hydra_run_dir = Path(HydraConfig.get().run.dir)
+                # Construct path relative to Hydra's run dir
+                self.checkpoint_dir = hydra_run_dir / "checkpoints"
+                self.logger.info(f"Constructed checkpoint directory based on current Hydra run dir: {self.checkpoint_dir}")
+            except Exception as hydra_e:
+                 self.logger.warning(f"Could not get current Hydra run directory ({hydra_e}). Falling back to original CWD/relative path logic.")
+                 # Fallback logic using get_original_cwd (as before)
+                 try:
+                     original_cwd = get_original_cwd()
+                     self.checkpoint_dir = Path(original_cwd) / "outputs" / "experiments" / self.experiment_name / "checkpoints"
+                     self.logger.info(f"Constructed checkpoint directory based on original CWD (fallback): {self.checkpoint_dir}")
+                 except Exception as e:
+                     self.logger.warning(f"Could not get original CWD via Hydra ({e}) as fallback. Using relative path.")
+                     # Fallback to relative path from script location? Or just raise?
+                     # Using a simpler relative path for now if all else fails.
+                     self.checkpoint_dir = Path("checkpoints") # Simplest relative path
+                     self.logger.warning(f"Using simple relative checkpoint directory (fallback): {self.checkpoint_dir.resolve()}")
 
-        # Ensure the main checkpoint directory exists
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        if not self.checkpoint_dir.is_dir():
-            self.logger.error(f"Failed to create or confirm checkpoint directory exists: {self.checkpoint_dir}")
-            raise OSError(f"Failed to create or confirm checkpoint directory exists: {self.checkpoint_dir}")
-        self.logger.info(f"CheckpointManager using directory: {self.checkpoint_dir}")
+        # Ensure the final checkpoint directory exists
+        try:
+            self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as mkdir_e:
+             self.logger.error(f"Failed to create checkpoint directory {self.checkpoint_dir}: {mkdir_e}")
+             raise # Re-raise if directory creation fails critical path
 
         # Track saved checkpoints
         self.saved_checkpoints: List[Tuple[str, bool]] = [] # List of (path, is_best)
@@ -190,10 +210,11 @@ class CheckpointManager:
         state: TrainingState, # Use TrainingState type hint
         filename: str, 
         metrics: Optional[Dict[str, float]] = None, # Metrics can still be passed separately for logging/best logic
-        is_best: bool = False
+        is_best: bool = False,
+        save_tokenizer: bool = True
     ) -> None:
         """Saves a checkpoint of the model and training state using a state dict.
-           Tokenizer is assumed static and not saved in the checkpoint.
+           Optionally saves the tokenizer to a standard location within the run directory.
         """
         # Skip saving regular checkpoints if save_best_only is True and this is not the best
         if self.save_best_only and not is_best:
@@ -202,39 +223,62 @@ class CheckpointManager:
             
         self.logger.info(f"[CheckpointManager] Received save request for filename: {filename}")
 
-        # Ensure the save directory exists (using self.checkpoint_dir)
-        # self.checkpoint_dir.mkdir(parents=True, exist_ok=True) # Already created in __init__
+        # --- Determine Save Path & Create Directory --- #
+        # Ensure filename is just the name, not a full path initially
+        filename = Path(filename).name
+        # Construct the full path using the manager's checkpoint_dir
+        save_path = self.checkpoint_dir / filename
+        # Ensure the directory exists BEFORE trying to save
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        save_path = Path(self.checkpoint_dir) / filename
-        self.logger.info(f"[CheckpointManager] Attempting to save checkpoint state to: {save_path}")
+        # --- Save Tokenizer (if available and requested) --- #
+        if self.tokenizer and save_tokenizer:
+            # Save to a fixed location relative to the main run output dir
+            # Assumes self.checkpoint_dir is like .../outputs/<run_name>/checkpoints
+            tokenizer_save_dir = self.checkpoint_dir.parent / "tokenizer"
+            try:
+                # Save only if the directory doesn't already exist (or maybe always overwrite?)
+                # Let's overwrite for simplicity, assuming tokenizer doesn't change.
+                # If it could change, need a different strategy.
+                tokenizer_save_dir.mkdir(parents=True, exist_ok=True)
+                self.tokenizer.save(str(tokenizer_save_dir))
+                self.logger.info(f"Saved tokenizer to {tokenizer_save_dir}")
+            except NotImplementedError:
+                 self.logger.warning(f"Tokenizer type {type(self.tokenizer).__name__} does not support save(). Skipping tokenizer save.")
+            except Exception as e:
+                self.logger.error(f"Failed to save tokenizer to {tokenizer_save_dir}: {e}", exc_info=True)
+                # Continue saving checkpoint even if tokenizer fails
 
+        # --- Prepare State Dictionary --- #
+        state_dict_to_save = state.model_dump()
+
+        # --- Save the main state dictionary --- #
         try:
-            # Ensure parent directory exists before saving
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Ensure tokenizer_path is None in the state before saving
-            state.tokenizer_path = None 
-            state_dict_to_save = asdict(state)
+            self.logger.info(f"Saving checkpoint state for step {state.global_step} to: {save_path}")
+            # Use logging level consistent with intent (DEBUG for internal steps)
+            self.logger.debug(f"[DEBUG CheckpointManager] Saving state for step {state.global_step} to ABSOLUTE path {save_path.resolve()}")
             torch.save(state_dict_to_save, save_path)
-            self.logger.info(f"[CheckpointManager] Successfully saved checkpoint state to {save_path}")
-            
-            # --- REMOVED Tokenizer Saving Logic --- #
 
-            # Add to tracking list (only non-best, numbered checkpoints)
-            # Also track if save_best_only=True, otherwise cleanup might remove best 
-            if "best.pt" not in filename: # Check filename pattern
-                 self._add_saved_checkpoint(str(save_path), is_best)
-            
-            # Handle best checkpoint link/copy
-            if is_best:
-                best_path = Path(self.checkpoint_dir) / "best.pt"
-                # Use copy2 to preserve metadata if preferred, or copyfile for simplicity
-                shutil.copyfile(save_path, best_path) 
-                self.logger.info(f"Saved new best checkpoint link to {best_path} based on metrics: {metrics}")
+            # --- Marker File --- #
+            marker_path = Path(f"{save_path}._SAVED")
+            try:
+                # Use logging level consistent with intent (DEBUG for internal steps)
+                self.logger.debug(f"[DEBUG CheckpointManager] Creating marker file at ABSOLUTE path {marker_path.resolve()}")
+                marker_path.touch(exist_ok=True) # Create the marker file
+                # Check existence immediately after touch(), log as DEBUG
+                if marker_path.exists():
+                     self.logger.debug(f"[DEBUG CheckpointManager] Marker file {marker_path.resolve()} EXISTS immediately after touch().")
+                else:
+                     self.logger.warning(f"[DEBUG CheckpointManager] Marker file {marker_path.resolve()} DOES NOT EXIST immediately after touch(). Potential filesystem delay? ")
+            except Exception as e_marker:
+                self.logger.error(f"Failed to create marker file {marker_path}: {e_marker}", exc_info=True)
+
+            # Prune old checkpoints if enabled
+            self._manage_checkpoints()
 
         except Exception as e:
-            self.logger.error(f"Failed to save checkpoint {filename}: {e}", exc_info=True)
-            raise # Re-raise the caught exception
+            self.logger.error(f"Failed to save checkpoint to {save_path}: {e}", exc_info=True)
+            raise CheckpointLoadError(f"Failed to save checkpoint to {save_path}: {e}") from e
 
     def _parse_checkpoint_name(self, filename: str) -> Optional[Tuple[int, int]]:
         """Parses epoch and step from a checkpoint filename."""
@@ -417,27 +461,17 @@ class CheckpointManager:
             elif self.scaler:
                 self.logger.warning("Checkpoint does not contain 'scaler_state_dict'. AMP scaler state not loaded.")
 
-            # --- Load Tokenizer State (if available and exists) --- #
-            if self.tokenizer and "tokenizer_path" in checkpoint_dict and checkpoint_dict["tokenizer_path"]:
-                tokenizer_rel_path = checkpoint_dict["tokenizer_path"]
-                # Assume tokenizer path is relative to the *checkpoint's* directory
-                tokenizer_abs_path = load_path.parent / tokenizer_rel_path
-                self.logger.info(f"Attempting to load tokenizer from checkpoint path: {tokenizer_abs_path}")
-                if tokenizer_abs_path.exists() and tokenizer_abs_path.is_dir():
-                    try:
-                        self.tokenizer.load(str(tokenizer_abs_path))
-                        self.logger.info(f"Successfully loaded tokenizer state from {tokenizer_abs_path}")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to load tokenizer from {tokenizer_abs_path}: {e}. Continuing without loading tokenizer.")
-                else:
-                    self.logger.warning(f"Tokenizer directory specified in checkpoint ({tokenizer_abs_path}) does not exist. Tokenizer not loaded.")
-            elif self.tokenizer:
-                self.logger.warning("No tokenizer path found in checkpoint or tokenizer not provided to manager. Tokenizer state not loaded.")
-            # --- End Tokenizer Loading --- #
-
             # Callbacks state
+            self.logger.info(f"DEBUG LOAD: Checking callbacks state. self.callbacks is None: {self.callbacks is None}")
+            if self.callbacks:
+                self.logger.info(f"DEBUG LOAD: Type of self.callbacks: {type(self.callbacks)}")
+                self.logger.info(f"DEBUG LOAD: callbacks_state in checkpoint_dict: {'callbacks_state' in checkpoint_dict}")
+                if 'callbacks_state' in checkpoint_dict:
+                    self.logger.info(f"DEBUG LOAD: checkpoint_dict['callbacks_state'] is None: {checkpoint_dict['callbacks_state'] is None}")
+            
             if self.callbacks and "callbacks_state" in checkpoint_dict and checkpoint_dict["callbacks_state"] is not None:
                 try:
+                    self.logger.info("DEBUG LOAD: Attempting to call self.callbacks.load_state_dict...")
                     self.callbacks.load_state_dict(checkpoint_dict["callbacks_state"])
                     self.logger.info("Loaded callbacks state.")
                 except Exception as e:
@@ -446,24 +480,23 @@ class CheckpointManager:
                 self.logger.warning("Callbacks state not found in checkpoint.")
 
             # Create and return TrainingState object from the loaded dictionary
-            loaded_state_obj = TrainingState.from_dict(checkpoint_dict)
+            # Use model_validate for Pydantic models
+            loaded_state_obj = TrainingState.model_validate(checkpoint_dict)
 
             self.logger.info(f"Successfully loaded checkpoint from {load_path} into TrainingState object.")
 
             # --- Callbacks Hook --- #
-            if self.callbacks:
-                self.logger.debug("Calling on_load_checkpoint for individual callbacks...")
-                # Iterate through the actual callback instances
+            self.logger.debug("Calling on_load_checkpoint for individual callbacks...")
+            if self.callbacks and hasattr(self.callbacks, 'callbacks'):
                 for cb in self.callbacks.callbacks:
                     if hasattr(cb, 'on_load_checkpoint') and callable(getattr(cb, 'on_load_checkpoint')):
+                        self.logger.debug(f"  Calling on_load_checkpoint for {cb.__class__.__name__}")
                         try:
-                            self.logger.debug(f"  Calling on_load_checkpoint for {cb.__class__.__name__}")
-                            # Pass the fully constructed TrainingState object to the callback
-                            cb.on_load_checkpoint(trainer_state=loaded_state_obj)
-                        except Exception as e:
-                            self.logger.error(f"Error calling on_load_checkpoint for {cb.__class__.__name__}: {e}", exc_info=True)
-                    else:
-                         self.logger.debug(f"  Callback {cb.__class__.__name__} does not have on_load_checkpoint method.")
+                            # Pass the state object and the filename
+                            cb.on_load_checkpoint(state=loaded_state_obj, filename=load_path)
+                        except Exception as cb_e:
+                            self.logger.error(f"Error calling on_load_checkpoint for {cb.__class__.__name__}: {cb_e}", exc_info=True)
+                            # Decide whether to continue or re-raise
             # --- End Callbacks Hook ---
 
             return loaded_state_obj

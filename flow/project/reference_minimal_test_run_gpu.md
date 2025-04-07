@@ -27,7 +27,7 @@
 *   **Effective Settings:**
     *   Model: Default (`transformer_model` - `d_model=768`, `n_layers=10`, etc.)
     *   Block Size (Sequence Length): 256
-    *   Batch Size: 32 (from `conf/data/got_char_level.yaml`)
+    *   Batch Size: 32 (from `conf/data/got_char.yaml`)
     *   AMP: Enabled (`use_amp: True` from `conf/training/default.yaml`)
 
 ## Notes

@@ -19,7 +19,7 @@ import re
 # Module under test
 from craft.training.checkpointing import CheckpointManager, CheckpointLoadError, TrainingState
 from craft.models.base import Model, BaseModelConfig # Keep Base models for MockModel
-from craft.data.tokenizers.base import BaseTokenizer
+from craft.data.tokenizers.base import Tokenizer # Replaced BaseTokenizer
 from craft.training.callbacks import CallbackList, Callback
 
 # --- Fixtures (Copied/Adapted from original test_checkpointing.py) --- #
@@ -50,7 +50,7 @@ class MockPydanticConfig(BaseModelConfig):
 
 @pytest.fixture
 def mock_tokenizer_fixture():
-    tokenizer = MagicMock(spec=BaseTokenizer)
+    tokenizer = MagicMock(spec=Tokenizer)
     tokenizer.save = MagicMock()
     tokenizer.load = MagicMock() # Add mock load method
     return tokenizer
@@ -87,7 +87,7 @@ def mock_objects_for_cm(mock_tokenizer_fixture):
     mock_scaler.is_enabled.return_value = True
     
     # --- Configure CallbackList Mock --- #
-    mock_callbacks = MagicMock(spec=CallbackList)
+    mock_callbacks = MagicMock()
     mock_callbacks.state_dict = MagicMock(return_value={"callback_state": 4})
     mock_callbacks.load_state_dict = MagicMock()
     
@@ -115,7 +115,7 @@ def mock_objects_for_cm(mock_tokenizer_fixture):
 @pytest.fixture
 def checkpoint_manager(mock_objects_for_cm, tmp_path):
     """Provides an initialized CheckpointManager instance."""
-    exp_name = "load_test_exp"
+    exp_name = "test_load_exp"
     with patch('os.getcwd', return_value=str(tmp_path)):
         # Add experiment_name
         manager = CheckpointManager(**mock_objects_for_cm, experiment_name=exp_name)
@@ -429,7 +429,7 @@ def test_load_checkpoint_optional_states(checkpoint_manager, mock_objects_for_cm
         scaler=None, # No scaler
         callbacks=None, # No callbacks
         tokenizer=None, # No tokenizer
-        experiment_name="load_minimal_exp",
+        experiment_name="test_load_minimal_exp",
         config=mock_objects_for_cm["config"],
         device=mock_objects_for_cm["device"]
     )
@@ -480,8 +480,8 @@ def test_load_checkpoint_callback_called(checkpoint_manager, mock_objects_for_cm
     mock_individual_cb.on_load_checkpoint.assert_called_once()
     # Optional: Check the argument passed
     call_args = mock_individual_cb.on_load_checkpoint.call_args
-    assert isinstance(call_args.kwargs['trainer_state'], TrainingState)
-    assert call_args.kwargs['trainer_state'].global_step == step
+    assert isinstance(call_args.kwargs['state'], TrainingState)
+    assert call_args.kwargs['state'].global_step == step
 
 def test_load_checkpoint_error_handling(checkpoint_manager, tmp_path):
     """Test wrapping of exceptions during loading into CheckpointLoadError."""
@@ -515,3 +515,14 @@ def test_load_checkpoint_error_handling(checkpoint_manager, tmp_path):
             checkpoint_manager.load_checkpoint(str(save_path_bad_state))
             
         mock_load_state_dict.assert_called_once() 
+
+# Fixtures
+@pytest.fixture
+def mock_pydantic_config():
+    """Provides a mock Pydantic config including the required architecture field."""
+    # Add required architecture field
+    return MockPydanticConfig(param=10, architecture='mock_arch')
+
+@pytest.fixture
+def mock_model(mock_pydantic_config):
+    return MockModel(config=mock_pydantic_config) 

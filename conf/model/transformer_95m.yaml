@@ -1,8 +1,27 @@
 # Model architecture configuration for ~95M parameter transformer
-vocab_size: 32000  # Will be overridden by tokenizer vocab size
+_target_: craft.models.transformer.TransformerModel
+model_type: language
+
+vocab_size: null  # Set to null, will be overridden by tokenizer vocab size
 block_size: 256
 n_layer: 12
 n_head: 12
 n_embd: 768
 dropout: 0.1
-bias: true 
+bias: true
+
+# Nested config structure expected by TransformerModel
+config:
+  _target_: craft.models.configs.LanguageModelConfig
+  architecture: transformer
+  model_type: language
+  vocab_size: ${..vocab_size} # Refer to parent vocab_size
+  d_model: ${..n_embd}
+  n_layers: ${..n_layer}
+  n_head: ${..n_head}
+  d_hid: null # Calculate or set appropriately if needed, else default
+  dropout: ${..dropout}
+  layer_norm_eps: 1e-5 # Default value
+  activation: gelu # Default value
+  bias: ${..bias}
+  max_seq_length: ${..block_size} 
