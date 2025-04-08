@@ -7,13 +7,17 @@ import pickle
 from pathlib import Path
 import logging
 
+# Initialize logger at module level
+logger = logging.getLogger(__name__)
+
 class CharTokenizer(Tokenizer):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         # **Call super().__init__ FIRST** to initialize base attributes
         # including special tokens and their IDs based on kwargs.
         super().__init__(**kwargs)
 
         # Initialize CharTokenizer specific attributes
+        self.vocab_file: Optional[str] = kwargs.get('vocab_file') # Store vocab file path
         self.char_to_idx: Dict[str, int] = {}
         self.idx_to_char: Dict[int, str] = {}
         self.vocab_size: int = 0
@@ -27,13 +31,12 @@ class CharTokenizer(Tokenizer):
         self.config.setdefault('model_type', 'char') # Ensure model_type is set
 
         # No need to call _update_unk_from_base here, as base class handles it.
-        logger = logging.getLogger(__name__)
         logger.debug(f"CharTokenizer initialized. UNK token: '{self.unk_token}', ID: {self.unk_id}")
         logger.debug(f"Internal unk_token_id set to: {self.unk_token_id}")
 
     def train(self, text_file: str, output_dir: str) -> None:
         """Train the tokenizer by building character vocabulary."""
-        char_freq = defaultdict(int)
+        char_freq: Dict[str, int] = defaultdict(int)
         chars = set()
         with open(text_file, 'r', encoding='utf-8') as f:
             for line in f:
@@ -41,7 +44,7 @@ class CharTokenizer(Tokenizer):
                     chars.add(char)
                     char_freq[char] += 1
 
-        logger = logging.getLogger(__name__)
+        # logger = logging.getLogger(__name__) # Removed: Use module-level logger
         
         # Get special tokens directly from base class attributes
         special_tokens_to_add = {
@@ -76,9 +79,9 @@ class CharTokenizer(Tokenizer):
         os.makedirs(output_dir, exist_ok=True)
         self.save(output_dir) # save method now uses base class attributes
 
-    def _sync_special_ids_with_vocab(self):
+    def _sync_special_ids_with_vocab(self) -> None:
          """Update base class special token IDs and self.unk_token_id based on the final vocabulary."""
-         logger = logging.getLogger(__name__)
+         # logger = logging.getLogger(__name__) # Removed: Use module-level logger
          # Iterate through the special tokens defined in the base class
          for token_name, id_name in [("pad_token", "pad_id"), 
                                      ("unk_token", "unk_id"), 
@@ -102,7 +105,8 @@ class CharTokenizer(Tokenizer):
          logger.debug(f"Post-sync: internal unk_token_id set to: {self.unk_token_id}")
 
     @classmethod
-    def load(cls, load_dir: str):
+    # Renamed from load, added return hint
+    def load_from_dir(cls, load_dir: str) -> "CharTokenizer":
         """Load the tokenizer config and vocabulary from files in a directory."""
         config_path = os.path.join(load_dir, 'tokenizer_config.json')
         vocab_path = os.path.join(load_dir, 'vocab.json')
@@ -113,7 +117,7 @@ class CharTokenizer(Tokenizer):
         loaded_idx_map = None
         special_tokens_from_config = {}
 
-        logger = logging.getLogger(__name__)
+        # logger = logging.getLogger(__name__) # Removed: Use module-level logger
         # Try loading from JSON files first
         if os.path.exists(config_path) and os.path.exists(vocab_path):
             logger.info(f"Loading CharTokenizer from JSON: {config_path}, {vocab_path}")
@@ -230,7 +234,6 @@ class CharTokenizer(Tokenizer):
         config_to_save['special_tokens'] = {k: v for k, v in special_tokens_dict.items() if v is not None}
 
         # Save configuration
-        logger = logging.getLogger(__name__)
         logger.info(f"Saving CharTokenizer config to: {config_path}")
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config_to_save, f, indent=2)
@@ -240,4 +243,41 @@ class CharTokenizer(Tokenizer):
         if not self.char_to_idx:
              logger.warning("Vocabulary (char_to_idx) is empty, saving empty vocab file.")
         with open(vocab_path, 'w', encoding='utf-8') as f:
-            json.dump(self.char_to_idx, f, indent=2) 
+            json.dump(self.char_to_idx, f, indent=2)
+
+    def get_special_tokens(self) -> List[str]:
+        """Return a list of defined special tokens used by the tokenizer."""
+        tokens = [
+            self.pad_token,
+            self.unk_token,
+            self.bos_token,
+            self.eos_token,
+            # Add any other special tokens defined in the base class if needed
+        ]
+        return [t for t in tokens if t is not None]
+
+    @classmethod
+    def load_from_vocab_file(cls, vocab_file: str, **kwargs: Any) -> "CharTokenizer":
+        """Load tokenizer from a vocabulary file."""
+        if not os.path.exists(vocab_file):
+            raise FileNotFoundError(f"Vocabulary file not found: {vocab_file}")
+        return cls(vocab_file=vocab_file, **kwargs)
+
+    def load(self, model_path: str) -> None:
+        """Loads the tokenizer state. For CharTokenizer, state is usually set during init."""
+        # Typically, CharTokenizer is fully configured by its vocab file during __init__.
+        # This method might be needed if there were additional state to load (e.g., config).
+        # We check if the provided path matches the expected vocab file for consistency.
+        if self.vocab_file is None:
+            logger.warning("CharTokenizer instance was not initialized with a vocab_file path. Cannot perform load consistency check.")
+            pass # Or return early, depending on desired behavior
+            return
+
+        expected_vocab_file = os.path.join(model_path, os.path.basename(self.vocab_file))
+        if not os.path.exists(expected_vocab_file):
+            logger.warning(f"Expected vocab file {expected_vocab_file} not found at model_path {model_path}. State might be incomplete.") # Use module logger
+        elif expected_vocab_file != self.vocab_file:
+             logger.warning(f"Loading from path {model_path}, but tokenizer was initialized with {self.vocab_file}. Using initialized vocab.") # Use module logger
+        # No explicit state loading needed beyond __init__ for this simple tokenizer.
+        logger.debug(f"CharTokenizer.load called with path {model_path}. State relies on initial vocab file.") # Use module logger
+        pass 

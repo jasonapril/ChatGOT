@@ -2,14 +2,22 @@
 import typer
 import logging
 import os
-import sys # Import sys
+import sys
 import glob
 import traceback
-import pickle # Import pickle
-import numpy as np # Import numpy
-from typing import Optional, List, Tuple # Import List, Tuple
-# import yaml # No longer needed if config file isn't used
-from pathlib import Path # Use Path
+import pickle
+import numpy as np
+from typing import Optional, List, Tuple, cast # Added cast
+from pathlib import Path
+
+# Import the SentencePiece training function
+from ..data.tokenizers.sentencepiece_trainer import train_sentencepiece_model
+# Import SentencePieceTokenizer for prepare command
+from ..data.tokenizers.sentencepiece import SentencePieceTokenizer
+# Import char processor
+from ..data.char_processor import process_char_data
+# Import IO utils
+from ..utils.io import ensure_directory
 
 # Create Typer app for dataset commands
 dataset_app = typer.Typer(help="Commands for dataset operations")
@@ -19,7 +27,75 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__) # Get logger
+logger = logging.getLogger(__name__)
+console = typer.echo
+
+@dataset_app.command("train-tokenizer")
+def train_tokenizer_command(
+    # Accept comma-separated string directly
+    input_files: str = typer.Option(..., "--input-files", "-i", help="Comma-separated list of input text file paths."),
+    output_dir: Path = typer.Option(..., "--output-dir", "-o", help="Directory to save the trained tokenizer model and vocab files.", file_okay=False, resolve_path=True),
+    vocab_size: int = typer.Option(..., "--vocab-size", "-v", help="Vocabulary size for the tokenizer."),
+    model_prefix: str = typer.Option("spm", "--model-prefix", help="Prefix for the output model and vocab files (e.g., 'spm')."),
+    model_type: str = typer.Option("bpe", "--model-type", help="SentencePiece model type (e.g., 'bpe', 'unigram', 'char', 'word')."),
+    character_coverage: float = typer.Option(0.9995, "--char-coverage", help="Character coverage for SentencePiece training."),
+    num_threads: Optional[int] = typer.Option(None, "--num-threads", help="Number of threads for SentencePiece training (uses os.cpu_count() if None)."),
+    force: bool = typer.Option(False, "--force", "-f", help="Force training even if output files already exist."),
+) -> None: # Added return type hint
+    """Train a SentencePiece tokenizer model.
+    
+    Example:
+        python -m craft.cli.run dataset train-tokenizer -i data/input1.txt,data/input2.txt -o data/tokenizer -v 32000
+    """
+    console(f"Starting SentencePiece tokenizer training...")
+    # Basic validation on input_files string
+    if not input_files:
+         logger.error("--input-files cannot be empty.")
+         raise typer.Exit(code=1)
+    # Log the files being used
+    logger.info(f"  Input Files: {input_files}") 
+    logger.info(f"  Output Directory: {output_dir}")
+    logger.info(f"  Vocab Size: {vocab_size}")
+    logger.info(f"  Model Type: {model_type}")
+    logger.info(f"  Model Prefix: {model_prefix}")
+    logger.info(f"  Character Coverage: {character_coverage}")
+    logger.info(f"  Num Threads: {'Default (os.cpu_count)' if num_threads is None else num_threads}")
+    logger.info(f"  Force: {force}")
+
+    try:
+        # Pass arguments directly to the updated function
+        model_path: Path
+        vocab_path: Path
+        model_path, vocab_path = train_sentencepiece_model(
+            input_files=input_files, 
+            output_dir=output_dir,
+            vocab_size=vocab_size,
+            model_prefix=model_prefix,
+            model_type=model_type,
+            character_coverage=character_coverage,
+            num_threads=num_threads, # Pass Optional[int] directly
+            force=force
+        )
+        
+        console(f"SentencePiece tokenizer training successful!")
+        console(f"  Model saved to: {model_path}")
+        console(f"  Vocabulary saved to: {vocab_path}")
+
+    except ImportError as e:
+        if "sentencepiece" in str(e):
+             logger.error("SentencePiece library not found. Please install it: pip install sentencepiece")
+        else:
+             logger.exception(f"Import error: {e}")
+        raise typer.Exit(code=1)
+    except FileExistsError as e:
+         logger.error(f"Error: {e}") # Message already includes details
+         raise typer.Exit(code=1)
+    except FileNotFoundError as e:
+         logger.error(f"Error: {e}")
+         raise typer.Exit(code=1)
+    except Exception as e:
+        logger.exception(f"An unexpected error occurred during tokenizer training: {str(e)}")
+        raise typer.Exit(code=1)
 
 @dataset_app.command("prepare")
 def prepare_dataset(
@@ -27,9 +103,9 @@ def prepare_dataset(
     output_dir: Path = typer.Option(..., "--output-dir", "-o", help="Directory to save the processed data.", file_okay=False, resolve_path=True),
     type: str = typer.Option("char", "--type", "-t", help="Type of processing: 'char' or 'subword'.", case_sensitive=False),
     split_ratios: Optional[List[float]] = typer.Option(None, "--split-ratios", help="Train/Val/Test ratios (e.g., '0.9,0.05,0.05'). Default for char: 0.9,0.05,0.05. Required for subword.", callback=lambda v: [float(x) for x in v.split(',')] if v else None),
-    tokenizer_path: Optional[Path] = typer.Option(None, "--tokenizer-path", help="Required for type='subword'. Path to the directory containing the pre-trained tokenizer files.", exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+    tokenizer_path: Optional[Path] = typer.Option(None, "--tokenizer-path", help="Required for type='subword'. Path to the trained SentencePiece tokenizer model prefix (e.g., /path/to/spm)."), # Clarified help text
     force: bool = typer.Option(False, "--force", "-f", help="Force reprocessing by deleting existing files/dirs in the output directory"),
-):
+) -> None: # Added return type hint
     """Prepare a dataset for training (char or subword tokenization and splitting)."""
     logger.info(f"Starting dataset preparation...")
     logger.info(f"  Input Path: {input_path}")
@@ -50,7 +126,7 @@ def prepare_dataset(
             splits_tuple = (0.9, 0.05, 0.05)
             logger.info(f"Using default char split ratios: {splits_tuple}")
         elif len(split_ratios) == 3 and abs(sum(split_ratios) - 1.0) < 1e-6:
-            splits_tuple = tuple(split_ratios)
+            splits_tuple = cast(Tuple[float, float, float], tuple(split_ratios))
             logger.info(f"Using provided char split ratios: {splits_tuple}")
         else:
             logger.error(f"Invalid split ratios for char type: {split_ratios}. Must be 3 numbers summing to 1.0 or omitted.")
@@ -59,7 +135,7 @@ def prepare_dataset(
         if split_ratios is None or len(split_ratios) != 3 or not abs(sum(split_ratios) - 1.0) < 1e-6:
              logger.error(f"Invalid split ratios for subword type: {split_ratios}. Must provide 3 numbers summing to 1.0 via --split-ratios.")
              raise typer.Exit(code=1)
-        splits_tuple = tuple(split_ratios)
+        splits_tuple = cast(Tuple[float, float, float], tuple(split_ratios))
         logger.info(f"Using provided subword split ratios: {splits_tuple}")
     else:
          logger.error(f"Invalid processing type specified: {type}")
@@ -67,13 +143,8 @@ def prepare_dataset(
     # ------------------------ #
 
     try:
-        # Use absolute import based on src being in PYTHONPATH or adjusted relative paths
-        from ..data.char_processor import process_char_data
-        from ..data.tokenizers.sentencepiece import SentencePieceTokenizer # Assuming only SP for subword now
-        from ..utils.io import ensure_directory
-
-        # Ensure output directory exists
-        ensure_directory(output_dir)
+        # Ensure output directory exists (pass string)
+        ensure_directory(str(output_dir))
         logger.info(f"Ensured output directory exists: {output_dir}")
 
         # Handle --force: Clean the target directory
@@ -88,13 +159,14 @@ def prepare_dataset(
             if metadata_file.exists():
                  try: metadata_file.unlink(); logger.info(f"Deleted {metadata_file}")
                  except OSError as e: logger.error(f"Error deleting file {metadata_file}: {e}")
-            # Delete tokenizer directory
-            tokenizer_dir = output_dir / "tokenizer"
-            if tokenizer_dir.is_dir():
-                try:
-                    import shutil
-                    shutil.rmtree(tokenizer_dir); logger.info(f"Deleted tokenizer directory: {tokenizer_dir}")
-                except OSError as e: logger.error(f"Error deleting tokenizer directory {tokenizer_dir}: {e}")
+            # Delete tokenizer directory (Only makes sense for char type where tokenizer is saved within output)
+            if type == 'char':
+                tokenizer_dir = output_dir / "tokenizer"
+                if tokenizer_dir.is_dir():
+                    try:
+                        import shutil
+                        shutil.rmtree(tokenizer_dir); logger.info(f"Deleted char tokenizer directory: {tokenizer_dir}")
+                    except OSError as e: logger.error(f"Error deleting char tokenizer directory {tokenizer_dir}: {e}")
 
         # Execute the appropriate data preparation
         logger.info(f"Starting data preparation with type: {type}")
@@ -107,11 +179,14 @@ def prepare_dataset(
             )
 
         elif type == 'subword':
-            # --- Subword logic replicated from script --- #
             # 1. Load Tokenizer
-            logger.info(f"Loading SentencePiece tokenizer from: {tokenizer_path}")
+            # Tokenizer path now points to the model prefix (e.g., /path/to/spm), not a directory
+            logger.info(f"Loading SentencePiece tokenizer model from prefix: {tokenizer_path}")
             try:
-                tokenizer = SentencePieceTokenizer.load(str(tokenizer_path))
+                # Ensure tokenizer_path is not None before passing to str()
+                if tokenizer_path is None:
+                     raise ValueError("tokenizer_path cannot be None for subword type.")
+                tokenizer = SentencePieceTokenizer.load_from_prefix(str(tokenizer_path))
                 logger.info(f"Tokenizer loaded. Vocab size: {tokenizer.get_vocab_size()}")
             except Exception as e:
                 logger.error(f"Failed to load tokenizer from {tokenizer_path}: {e}", exc_info=True)

@@ -1,27 +1,38 @@
 # Configuration (`conf/`)
 
+This directory holds configuration files for the Craft framework, primarily using YAML format managed by [Hydra](https://hydra.cc/) and [OmegaConf](https://omegaconf.readthedocs.io/).
+
 ## Purpose
 
-This directory stores default configuration files for the project, primarily using YAML format managed by [Hydra](https://hydra.cc/) / [OmegaConf](https://omegaconf.readthedocs.io/). It allows for flexible and reproducible experiment setup by providing composable defaults.
-
-**Validation:** While these files define default *values*, the *structure* and *types* are enforced by the Pydantic schemas defined in `src/craft/config/schemas.py`. Hydra loads these YAML files, composes them based on the `defaults` list in an experiment config, and the resulting configuration object is typically validated against the corresponding Pydantic schema (e.g., `TrainingConfig`, `AppConfig`) upon instantiation or use.
+- **Define Default Parameters:** Set default values for model architectures, data processing, training hyperparameters, logging, etc.
+- **Enable Experimentation:** Easily define and manage different experiment configurations by overriding defaults.
+- **Component Instantiation:** Use Hydra's `_target_` key to specify the Python classes to be instantiated for various components (models, datasets, optimizers, etc.).
+- **Configuration Validation:** Configurations defined here (or overridden via CLI) are validated at runtime against Pydantic schemas defined in `src/craft/config/schemas.py`. This ensures type safety and consistency.
 
 ## Structure
 
-Configurations are organized into groups based on their function:
--   `conf/`
-    -   `config.yaml`: **Main configuration entry point**. Defines top-level settings and Hydra behavior. **Crucially, it mandates that an `experiment` configuration must be specified** (e.g., `experiment=my_exp`).
-    -   `generate.yaml`: Standalone configuration for the generation script (`scripts/generate.py`).
-    -   `experiment/`: Contains complete experiment configurations. These files compose settings from other groups using the `defaults` list (e.g., `- /model: transformer_small`, `- /data: my_dataset`).
-    -   `data/`: Configurations related to datasets, tokenizers, and data loading. Should specify a `_target_` for instantiation (e.g., `craft.data.dataset.PickledDataset`).
-    -   `model/`: Configurations defining model architectures and hyperparameters. Should specify a `_target_` (e.g., `craft.models.transformer.TransformerModel`).
-    -   `training/`: Configurations for the training loop itself (e.g., epochs, batch size, learning rate, intervals). Parameters here correspond to the `TrainingConfig` Pydantic schema.
-    -   `optimizer/`: Configurations for different optimizers. Must specify a `_target_` (e.g., `torch.optim.AdamW`) and relevant parameters.
-    -   `scheduler/`: Configurations for learning rate schedulers. Must specify a `_target_` (e.g., `torch.optim.lr_scheduler.CosineAnnealingLR`).
-    -   `callbacks/`: Configurations defining training callbacks. Each callback needs a `_target_` (e.g., `craft.training.callbacks.TensorBoardLogger`). The top-level file (e.g., `default.yaml`) typically defines a dictionary of callbacks.
-    -   `generation/`: Default configurations for text generation parameters (used during training sampling and potentially by `generate.yaml`).
-    -   `hydra/`: Internal Hydra configuration (logging, sweep settings, run directories).
-    -   `README.md`: This file.
+Configurations are organized into logical groups:
+
+```
+conf/
+├── config.yaml             # Main entry point, defines defaults group
+├── data/                   # Data loading and processing configs
+│   ├── my_dataset.yaml
+│   └── ...
+├── model/                  # Model architecture configs
+│   ├── transformer_small.yaml
+│   └── ...
+├── training/               # Training loop, optimizer, scheduler configs
+│   ├── default.yaml
+│   └── ...
+├── callbacks/              # Callback configurations
+│   └── ...
+├── logging/                # Logging setup
+│   └── default.yaml
+└── experiment/             # Complete experiment configurations (optional)
+    ├── experiment_001.yaml
+    └── ...
+```
 
 ## Composition Logic (Important!)
 

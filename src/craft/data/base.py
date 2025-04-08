@@ -86,7 +86,7 @@ class BaseDataset(Dataset, ABC):
         """
         return sample
 
-    def summary(self):
+    def summary(self) -> None:
         """Prints a basic summary of the dataset."""
         try:
             length = len(self)

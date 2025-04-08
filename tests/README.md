@@ -1,36 +1,52 @@
-# Tests (`tests/`)
+# Testing (`tests/`)
 
-This directory contains automated tests for the Craft framework, using the `pytest` framework.
+This directory contains all the tests for the Craft framework.
 
 ## Structure
 
-Tests are organized mirroring the `src/craft/` structure:
+Tests are organized mirroring the structure of the `src/craft/` directory:
 
-- `tests/config/`: Tests for configuration loading and schema validation.
-- `tests/models/`: Tests for specific model implementations and base classes.
-- `tests/data/`: Tests for datasets, tokenizers, and data utilities.
-- `tests/training/`: Tests for the Trainer, training loop, callbacks, checkpointing, etc.
-- `tests/cli/`: Tests for the command-line interface.
-- `tests/utils/`: Tests for common utility functions.
-- `tests/conftest.py`: Contains shared fixtures used across multiple test files.
+```
+tests/
+├── conftest.py             # Global fixtures and test setup (e.g., mocking)
+├── data/                   # Tests for data loading, tokenizers, datasets
+│   ├── test_datasets.py
+│   └── test_tokenizers.py
+├── models/                 # Tests for model architectures and base classes
+│   └── test_transformer.py
+├── training/               # Tests for the Trainer, callbacks, checkpointing
+│   ├── test_trainer.py
+│   ├── test_callbacks.py
+│   └── test_checkpointing.py
+├── cli/                    # Tests for the command-line interface
+│   └── test_cli_commands.py
+├── utils/                  # Tests for utility functions
+│   └── test_utils.py
+└── integration/            # Integration tests covering multiple components (optional)
+    └── test_full_training_run.py 
+```
 
 ## Running Tests
 
-Tests can be run from the project root directory using `pytest`:
+Tests are typically run using `pytest` from the project root directory:
 
 ```bash
 pytest
 ```
 
-To run specific tests:
+Specific tests or test files can be run by providing their path:
 
 ```bash
-pytest tests/training/trainer/test_trainer_init.py
-pytest tests/models/test_transformer.py::TestTransformerModel::test_forward_pass_shape
+pytest tests/training/test_trainer.py
 ```
 
-Coverage reports can be generated if `pytest-cov` is installed:
+## Key Files
 
-```bash
-pytest --cov=src/craft
-```
+- **`conftest.py`**: Contains shared fixtures (e.g., temporary directories, mock objects, pre-configured components) used across different test files. This promotes code reuse and simplifies test setup.
+- **Test Modules (`test_*.py`)**: Each module focuses on testing a specific component or functionality from the corresponding `src/craft/` module.
+
+## Philosophy
+
+- **Unit Tests:** Focus on testing individual functions or classes in isolation, often using mocking to replace dependencies.
+- **Integration Tests:** (Optional, often placed in `tests/integration/`) Test the interaction between multiple components (e.g., a short training run).
+- **Fixtures:** Leverage pytest fixtures extensively for setup and teardown, making tests cleaner and more maintainable.

@@ -3,17 +3,20 @@ Metrics calculation utilities for model training and evaluation.
 """
 import math
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import torch
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_tokens_per_second(
     num_tokens: int,
     elapsed_time: float,
     window_size: int = 10,
-    history: List[float] = None
+    history: Optional[List[float]] = None
 ) -> float:
     """
     Calculate tokens processed per second with smoothing.
@@ -76,10 +79,15 @@ def calculate_model_size(model: torch.nn.Module) -> Dict[str, Any]:
     # Calculate activation memory (approximate)
     batch_size = 1  # Just for estimation
     seq_len = 1024  # Typical sequence length
-    if hasattr(model, 'd_model'):
-        d_model = model.d_model
+    d_model: int
+    if hasattr(model, 'd_model') and isinstance(getattr(model, 'd_model'), int):
+        d_model = getattr(model, 'd_model')
     else:
         d_model = 768  # Default for standard models
+        if hasattr(model, 'd_model'):
+            logger.warning(f"model.d_model found but is not an integer ({type(getattr(model, 'd_model', None))}). Using default d_model=768.")
+        else:
+            logger.warning(f"model.d_model not found. Using default d_model=768.")
 
     # Estimated memory for activations in a forward pass
     # This is a rough estimate and will vary by architecture

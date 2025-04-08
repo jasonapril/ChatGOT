@@ -4,9 +4,10 @@ Memory optimization utilities for training large models.
 import logging
 import gc
 import torch
+from typing import Optional
 
 
-def get_memory_optimized_settings(available_memory_gb: float = None) -> dict:
+def get_memory_optimized_settings(available_memory_gb: Optional[float] = None) -> dict:
     """
     Get memory-optimized settings based on available GPU memory.
 
@@ -78,7 +79,7 @@ def get_memory_optimized_settings(available_memory_gb: float = None) -> dict:
     return settings
 
 
-def preallocate_gpu_memory(fraction: float = 0.9):
+def preallocate_gpu_memory(fraction: float = 0.9) -> None:
     """
     Preallocate GPU memory to avoid fragmentation.
 
@@ -113,7 +114,7 @@ def preallocate_gpu_memory(fraction: float = 0.9):
     logging.info("GPU memory preallocation completed")
 
 
-def reduce_gpu_memory_usage(model: torch.nn.Module):
+def reduce_gpu_memory_usage(model: torch.nn.Module) -> torch.nn.Module:
     """
     Apply techniques to reduce GPU memory usage during training.
 
@@ -122,7 +123,7 @@ def reduce_gpu_memory_usage(model: torch.nn.Module):
     """
     # Enable gradient checkpointing if supported
     if hasattr(model, 'gradient_checkpointing_enable'):
-        model.gradient_checkpointing_enable()
+        model.gradient_checkpointing_enable() # type: ignore[operator]
         logging.info("Enabled gradient checkpointing")
 
     # Use CPU offloading for optimizer states
@@ -134,7 +135,7 @@ def reduce_gpu_memory_usage(model: torch.nn.Module):
     return model
 
 
-def log_memory_usage():
+def log_memory_usage() -> None:
     """Log current GPU memory usage."""
     if torch.cuda.is_available():
         allocated = torch.cuda.memory_allocated() / 1e9

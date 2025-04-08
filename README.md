@@ -13,6 +13,26 @@ A modular PyTorch framework designed for building, training, and evaluating AI m
 
 - **Adherence to Conventions**: This project strives to follow established best practices and common conventions within the Python and ML ecosystems. Deviations are made thoughtfully, primarily when necessitated by critical performance requirements or essential custom implementations not suitably addressed by standard approaches.
 
+### Dependency Management Guidelines
+
+Adding external dependencies increases complexity and potential risks. Before adding a new dependency, please consider the following:
+
+1.  **Necessity First**: Can the desired functionality be achieved reasonably using existing project dependencies or Python's standard library?
+2.  **Value Assessment**: Does the library offer substantial benefits (unique functionality, significant performance improvement, major development time savings) that justify adding it?
+3.  **Reputation & Maintenance**: Is the library well-maintained, actively developed, and widely used or recognized within its domain? Check for recent activity, open issues, and documentation quality.
+4.  **License Compatibility**: Ensure the library's license (e.g., MIT, Apache 2.0, BSD) is permissive and compatible with the project's usage and potential future distribution.
+5.  **Minimalism**: If alternatives exist, prefer libraries that are more focused or introduce fewer transitive dependencies, unless a heavier option provides significantly more value.
+6.  **Security**: Be mindful of potential security implications. Check for known vulnerabilities if possible (e.g., using `pip-audit` or GitHub's Dependabot).
+
+## Core Technology Rationale
+
+Craft leverages several key frameworks and libraries, chosen for specific benefits:
+
+- **PyTorch**: Selected as the core deep learning framework for its flexibility, strong community support, extensive ecosystem, and Pythonic design, facilitating rapid research and development.
+- **Hydra**: Used for configuration management. Its ability to compose configurations from YAML files, manage outputs, and handle command-line overrides is crucial for reproducible experiments and flexible setup without extensive code changes.
+- **Pydantic**: Employed for defining configuration schemas (`src/craft/config/schemas.py`). It provides data validation, type hints, and clear settings documentation, enhancing robustness and ensuring configuration integrity before potentially expensive runs.
+- **Typer**: Powers the command-line interface (CLI). Chosen for its ease of use, automatic help generation, and seamless integration, making interactions with the framework straightforward.
+
 ## Overview
 
 Craft provides a flexible architecture for experimenting with different model types, training methods, and data sources. It is designed for rapid prototyping, research, and building complex training pipelines driven by configuration, with a focus on clear structure and validation.
@@ -156,4 +176,76 @@ pytest
 
 ## TODO
 
-(Add any planned features or known issues here)
+## Active Tasks
+
+- Finish implementing mypy.
+- Get testing in the green.
+
+## Misc
+
+**Experiment Artifact Colocation**: Do we want Hydra to output to outputs/<experiment_name>/YYYY-MM-DD/HH-MM-SS/? Likewise, other logs would go to outputs/<experiment_name>/ and checkpoints would be saved in outputs/<experiment_name>/checkpoints/. This would make finding the most recent checkpoint for an experiment trivial.
+
+**Standards/Guidelines**: Set PEP8 as a standard here? Ensure that it's not in the other README's by the SSOT principle. Establish SSOT as a standard here, too? Anything else along these lines? Merge with existing section?
+
+**Source Code Standards/Guidlines**: Differentiate the standards for the source code from other aspects of the project? PEP8 would go here. Also, are maintainability and debuggability code-level goals? What does that even mean?
+
+### Test Features
+
+1. Data Preparation: Is this working? Do we have sufficient tests for this feature?
+2. Model Development: We need a method for building model configurations.
+3. Training: We need a method for setting up training runs.
+    - Logging
+        - Throughput: T/s
+        - VRAM/CUDA Utilization
+    - Checkpointing
+        - Saving
+        - Resuming
+    - Sample Generation
+4. Evaluation & Analysis
+    - Visualize Loss
+
+### Review Configuration System
+
+- Explore deeper integration with Hydra's Structured Configs (using dataclasses).
+
+### Review Goals
+
+- We should define the precise goals that we wish to attain with this project, and work backwards from there to ensure that the project's implementations are ideal for fulfilling those goals.
+- Add: Develop AI models that work on low-spec devices (performance critical)
+- Add: Experiment with cutting edge AI architectures
+
+### Review Dependency Rationale
+
+- Mention that this project uses mypy? Document *why* we're using it?
+- Review role of Pydantic. Is integration with Hydra conventional?
+- Are we using TensorBoard? Why or why not? Ensure logs go to outputs/<experiment_name>/
+
+### Review Testing
+
+- Are we using any smoke tests?
+- Can we design tests around features or model development phases like data prep, model architecture design, training, evaluation, analysis, inference
+- Improve test coverage.
+- Expand integration testing.
+- Address TODOs and FIXMEs in the code.
+- Standardize docstrings (NumPy style?)
+
+### Meta
+
+- Refactor this README.md -- it contains some redundant information. Review how this document is structured including names and order of headings. Note that this document is to help an AI Agent understand the project at a glance (in addition to the other README.md files, local to subfolders), for the time being, at least.
+- Is there a better location for documentation like this?
+- Would it be helpful to link to larger sets of tasks, projects, plans, or roadmaps from this document for the AI Agent to use as a sort of long-term memory?
+
+### Experiments
+
+**ChatGOT-char**: Train 1M, 10M, and 100M parameter models on GOT scripts using character-level tokens.
+
+**ChatGOT-subword**: Train 1M, 10M, and 100M parameter models on GOT scripts using subword-level tokens.
+
+### Feature Enhancements
+
+**Add Support for Different Model Architectures**: Diffusion, RNN, etc.
+
+**Add Ability to Train on MNIST**
+- This marks a major transition to multimodality. This will also ensure a higher degree of modularity.
+
+**Add Support for Third-Party Models**

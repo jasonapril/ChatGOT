@@ -270,7 +270,7 @@ class TestSentencePieceTokenizer:
         """Test load raises FileNotFoundError if metadata file is missing."""
         model_prefix = str(tmp_path / "nonexistent")
         with pytest.raises(FileNotFoundError) as excinfo:
-            SentencePieceTokenizer.load(model_prefix)
+            SentencePieceTokenizer.load_from_prefix(model_prefix)
         # Expect error about metadata file (.json)
         assert f"SentencePiece metadata file not found: {model_prefix}.json" in str(excinfo.value)
 
@@ -552,7 +552,7 @@ class TestSentencePieceTokenizer:
 
         # Load the tokenizer
         model_prefix_to_load = str(tmp_path / "load_success_test" / "sp_load_test")
-        tokenizer = SentencePieceTokenizer.load(model_prefix_to_load)
+        tokenizer = SentencePieceTokenizer.load_from_prefix(model_prefix_to_load)
 
         # Assertions
         mock_processor.load.assert_called_once_with(str(mock_model_path))
@@ -568,7 +568,7 @@ class TestSentencePieceTokenizer:
     def test_load_failure(self, mock_sp_processor_cls, tmp_path):
         model_prefix = str(tmp_path / "nonexistent")
         with pytest.raises(FileNotFoundError) as excinfo:
-            SentencePieceTokenizer.load(model_prefix)
+            SentencePieceTokenizer.load_from_prefix(model_prefix)
         # Expect error about metadata file (.json)
         assert f"SentencePiece metadata file not found: {model_prefix}.json" in str(excinfo.value)
 
@@ -584,3 +584,11 @@ class TestSentencePieceTokenizer:
 
         # get_vocab_size should work even if not initialized
         assert tokenizer.get_vocab_size() == 100
+
+    # Test loading with missing model file
+    if (model_prefix / SentencePieceTokenizer.MODEL_FILENAME).is_file():
+        (model_prefix / SentencePieceTokenizer.MODEL_FILENAME).unlink()
+    with pytest.raises(FileNotFoundError):
+        SentencePieceTokenizer.load_from_prefix(model_prefix) # Changed load to load_from_prefix
+    # Recreate dummy file for next test if needed
+    (model_prefix / SentencePieceTokenizer.MODEL_FILENAME).touch()

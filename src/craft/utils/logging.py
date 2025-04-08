@@ -43,7 +43,7 @@ def setup_logging(
 
 
 def setup_logger(
-    name: str = None,
+    name: Optional[str] = None,
     level: int = logging.INFO,
     log_file: Optional[str] = None,
     console: bool = True

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class PickledDataset(BaseDataset):
     """PyTorch Dataset for loading data pre-tokenized and saved in a .pkl file."""
 
-    def __init__(self, file_path: str, block_size: int, vocab_path: Optional[str] = None, **kwargs):
+    def __init__(self, file_path: str, block_size: int, vocab_path: Optional[str] = None, **kwargs: Any):
         """
         Initializes the Dataset from a .pkl file containing a list or numpy array of token IDs.
         Metadata (like vocab size, mappings) must be provided via the external `vocab_path` JSON file.
@@ -35,10 +35,10 @@ class PickledDataset(BaseDataset):
         self.logger.info(f"Initializing PickledDataset with file: {self.file_path}")
         # Ignore any extra kwargs passed (e.g., by Hydra instantiation)
         if kwargs:
-            self.logger.debug(f"Ignoring unexpected arguments: {kwargs.keys()}")
+            self.logger.debug(f"Ignoring unexpected arguments: {list(kwargs.keys())}")
         
         self._vocab_path = vocab_path # Store path to potential external vocab
-        self._metadata = None # Cache for metadata
+        self._metadata: Optional[Dict[str, Any]] = None # Cache for metadata
 
         if not self.file_path.exists():
             raise FileNotFoundError(f"Pickled dataset file not found: {self.file_path}")

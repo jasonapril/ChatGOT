@@ -3,9 +3,10 @@ Custom utilities for Automatic Mixed Precision (AMP) training.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 
 import torch
+import torch.optim as optim
 # Import the newer GradScaler location (torch.amp)
 from torch.amp import GradScaler 
 
@@ -66,7 +67,7 @@ class SafeGradScaler(GradScaler):
         if not enabled:
             logger.info("SafeGradScaler initialized but AMP is disabled.")
 
-    def scale(self, loss):
+    def scale(self, outputs: torch.Tensor) -> torch.Tensor: # type: ignore[override]
         """
         Scales the loss tensor. Checks for NaN/Inf before scaling.
         If fallback is triggered or AMP is disabled, returns the unscaled loss.
@@ -75,11 +76,11 @@ class SafeGradScaler(GradScaler):
         if not self._enabled:
             # If AMP is already disabled (manually or by fallback), return unscaled loss
             logger.warning("Mixed precision is disabled. Loss scaling skipped.")
-            return loss
+            return outputs
 
-        if torch.isnan(loss).any() or torch.isinf(loss).any():
+        if torch.isnan(outputs).any() or torch.isinf(outputs).any():
             self._consecutive_nan_skips += 1
-            loss_val_str = f"{loss.item() if not torch.isinf(loss).all() else 'inf'}"
+            loss_val_str = f"{outputs.item() if not torch.isinf(outputs).all() else 'inf'}"
             logger.warning(
                 f"NaN/Inf detected in loss before scaling: {loss_val_str} "
                 f"(occurrence {self._consecutive_nan_skips}/{self.max_consecutive_nan_skip})"
@@ -94,16 +95,16 @@ class SafeGradScaler(GradScaler):
 
             # Return unscaled loss to potentially continue training (caller should check)
             # Or, if fallback triggered, we are now in full precision mode anyway.
-            return loss
+            return outputs
         else:
             # Reset counter slightly if loss is normal (prevents single spikes disabling AMP)
             if self._consecutive_nan_skips > 0:
                 self._consecutive_nan_skips = max(0, self._consecutive_nan_skips - 1) # Gradually decrease counter
 
         # If we reach here, AMP is enabled and loss is valid, proceed with scaling
-        return super().scale(loss)
+        return super().scale(outputs)
 
-    def step(self, optimizer, *args, **kwargs):
+    def step(self, optimizer: optim.Optimizer, *args: Any, **kwargs: Any) -> Any:
         """
         Performs the optimizer step. Includes safety checks for NaN/Inf gradients.
         If AMP fallback is active, performs a regular optimizer step.
@@ -139,7 +140,7 @@ class SafeGradScaler(GradScaler):
             logger.error(f"Unexpected error during SafeGradScaler.step: {e}")
             raise
 
-    def update(self, new_scale=None):
+    def update(self, new_scale: Union[float, torch.Tensor, None] = None) -> None:
         """
         Updates the scale factor. Skips if AMP is disabled.
         """
@@ -147,7 +148,7 @@ class SafeGradScaler(GradScaler):
             return # Do nothing if fallback is active
         super().update(new_scale=new_scale)
 
-    def state_dict(self):
+    def state_dict(self) -> Dict[str, Any]:
         """Returns the state dict, adding fallback status."""
         state_dict = super().state_dict()
         state_dict["_consecutive_nan_skips"] = self._consecutive_nan_skips
@@ -156,7 +157,7 @@ class SafeGradScaler(GradScaler):
         # Note: _enabled state is implicitly saved via scale factor etc.
         return state_dict
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         """Loads the state dict, restoring fallback status."""
         self._consecutive_nan_skips = state_dict.get("_consecutive_nan_skips", 0)
         self._internal_enabled = state_dict.get("_internal_enabled", True)

@@ -6,82 +6,91 @@ Contains the abstract Callback base class and the CallbackList container.
 """
 
 import logging
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable, TYPE_CHECKING, Iterator
 from abc import ABC, abstractmethod
+
+# Added TYPE_CHECKING block for forward references
+if TYPE_CHECKING:
+    from ..trainer import Trainer  # Assuming Trainer is in trainer.py
+    from ..checkpointing import TrainingState # Corrected import from checkpointing.py
 
 logger = logging.getLogger(__name__)
 
 class Callback(ABC):
     """Abstract base class for callbacks."""
-    def __init__(self):
+    def __init__(self) -> None:
+        # Type hint for trainer uses forward reference string implicitly
         self.trainer: Optional['Trainer'] = None # Will be set by Trainer
         # Get a logger specific to the callback subclass
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    def set_trainer(self, trainer: 'Trainer'):
+    def set_trainer(self, trainer: 'Trainer') -> None:
         """Sets the trainer instance for the callback."""
         self.trainer = trainer
 
-    def on_init_end(self, **kwargs):
+    def on_init_end(self, **kwargs: Any) -> None:
         """Called at the end of Trainer.__init__."""
         pass
 
-    def on_train_begin(self, **kwargs):
+    def on_train_begin(self, **kwargs: Any) -> None:
         """Called at the beginning of training."""
         pass
 
-    def on_train_end(self, metrics: Optional[Dict[str, Any]] = None, **kwargs):
+    def on_train_end(self, metrics: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
         """Called at the end of training."""
         pass
 
-    def on_epoch_begin(self, epoch: int, **kwargs):
+    def on_epoch_begin(self, epoch: int, **kwargs: Any) -> None:
         """Called at the beginning of an epoch."""
         pass
 
-    def on_epoch_end(self, epoch: int, global_step: int, metrics: Dict[str, Any], **kwargs):
+    def on_epoch_end(self, epoch: int, global_step: int, metrics: Dict[str, Any], **kwargs: Any) -> None:
         """Called at the end of an epoch."""
         pass
 
-    def on_step_begin(self, step: int, **kwargs):
+    def on_step_begin(self, step: int, **kwargs: Any) -> None:
         """Called at the beginning of a training step."""
         pass
 
-    def on_step_end(self, step: int, global_step: int, metrics: Dict[str, Any], **kwargs):
+    def on_step_end(self, step: int, global_step: int, metrics: Dict[str, Any], **kwargs: Any) -> None:
         """Called at the end of a training step."""
         pass
 
-    def on_evaluation_begin(self, **kwargs):
+    def on_evaluation_begin(self, **kwargs: Any) -> None:
         """Called before evaluation starts."""
         pass
 
-    def on_evaluation_end(self, metrics: Dict[str, Any], **kwargs):
+    def on_evaluation_end(self, metrics: Dict[str, Any], **kwargs: Any) -> None:
         """Called after evaluation ends."""
         pass
 
-    def on_save_checkpoint(self, state: 'TrainingState', filename: str, **kwargs):
+    def on_save_checkpoint(self, state: 'TrainingState', filename: str, **kwargs: Any) -> None:
         """Called when a checkpoint is saved."""
         pass
 
-    def on_load_checkpoint(self, state: 'TrainingState', filename: str, **kwargs):
+    def on_load_checkpoint(self, state: 'TrainingState', filename: str, **kwargs: Any) -> None:
         """Called when a checkpoint is loaded."""
         pass
 
-    def on_exception(self, exception: Exception, **kwargs):
+    def on_exception(self, exception: Exception, **kwargs: Any) -> None:
         """Called when an exception occurs during training."""
         pass
 
 class CallbackList:
     """Manages a list of callbacks."""
-    def __init__(self, callbacks: Optional[List[Callback]] = None):
+    def __init__(self, callbacks: Optional[List[Callback]] = None, *, trainer: Optional['Trainer'] = None) -> None:
         self.callbacks = callbacks if callbacks else []
-        self.trainer = None # Add trainer attribute
+        self.trainer = trainer # Store trainer if provided during init
+        # Set trainer for existing callbacks if provided
+        if self.trainer:
+            self.set_trainer(self.trainer)
 
-    def add_callback(self, callback: Callback):
+    def add_callback(self, callback: Callback) -> None:
         self.callbacks.append(callback)
 
-    def set_trainer(self, trainer: 'Trainer'):
+    def set_trainer(self, trainer: 'Trainer') -> None:
         """Set the trainer instance for this list and all contained callbacks."""
-        self.trainer = trainer
+        self.trainer = trainer # Initialize self.trainer here
         for callback in self.callbacks:
             if isinstance(callback, Callback):
                 callback.set_trainer(trainer)
@@ -90,7 +99,8 @@ class CallbackList:
                 if hasattr(callback, 'set_trainer') and callable(getattr(callback, 'set_trainer')):
                    callback.set_trainer(trainer)
                 else:
-                   self.logger.warning(f"Item in CallbackList ({type(callback)}) does not have a callable set_trainer method. Skipping.")
+                   # Use module-level logger instead of self.logger
+                   logger.warning(f"Item in CallbackList ({type(callback)}) does not have a callable set_trainer method. Skipping.")
 
     def __getattr__(self, name: str) -> Callable[..., None]:
         """Dynamically call the corresponding method on all callbacks."""
@@ -102,104 +112,48 @@ class CallbackList:
             'on_exception'
         ]
         if name not in known_methods:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}' or it's not a valid callback method")
+            raise AttributeError(f"'{self.__class__.__name__}\' object has no attribute '{name}' or it's not a valid callback method")
 
-        def method(*args, **kwargs):
+        def method(*args: Any, **kwargs: Any) -> None:
+            # Ensure trainer is set before dispatching calls that might need it
+            # It's the responsibility of the caller (Trainer) to ensure set_trainer was called.
+            # We could add a check here, but it might add overhead.
+            # if not hasattr(self, 'trainer') or self.trainer is None:
+            #     logger.warning(f"CallbackList.{name} called before trainer was set.")
+            #     # Depending on the method, we might need to raise an error or return early.
+
             for callback in self.callbacks:
                 # Check if the callback instance has the method before calling
                 if hasattr(callback, name) and callable(getattr(callback, name)):
                     try:
+                        # Forward all args and kwargs
                         getattr(callback, name)(*args, **kwargs)
                     except Exception as e:
-                        logger.error(f"Error in callback {callback.__class__.__name__}.{name}: {e}")
+                        logger.error(f"Error in callback {callback.__class__.__name__}.{name}: {e}", exc_info=True) # Added exc_info
                         # Optionally re-raise or handle differently
                         # raise e # Re-raise to stop execution if needed
 
         return method
 
-    def on_epoch_begin(self, trainer: 'Trainer', current_epoch: int, global_step: int, **kwargs):
-        """Calls on_epoch_begin on all contained callbacks."""
-        for callback in self.callbacks:
-            if hasattr(callback, 'on_epoch_begin') and callable(getattr(callback, 'on_epoch_begin')):
-                try:
-                    # Pass trainer, current_epoch, global_step, and any other kwargs
-                    callback.on_epoch_begin(trainer=trainer, current_epoch=current_epoch, global_step=global_step, **kwargs)
-                except Exception as e:
-                    logger.error(f"Error in callback {callback.__class__.__name__}.on_epoch_begin: {e}", exc_info=True)
+    # Removed explicit on_epoch_begin method
+    # Removed explicit on_train_begin method
+    # Removed explicit on_train_end method
+    # Removed explicit on_epoch_end method
+    # Removed explicit on_step_begin method
+    # Removed explicit on_step_end method
 
-    # --- Specific method for on_train_begin (overrides __getattr__ for this method) ---
-    def on_train_begin(self, **kwargs):
-        """Called when training begins. Passes kwargs to individual callbacks."""
-        if not self.trainer:
-            logger.warning("CallbackList.on_train_begin called before trainer was set.")
-            # Decide if we should return or raise an error here.
-            # Returning might silently fail later if callbacks rely on the trainer.
-            # Raising an error might be safer.
-            # For now, just log and continue.
-        for callback in self.callbacks:
-            if hasattr(callback, 'on_train_begin') and callable(getattr(callback, 'on_train_begin')):
-                try:
-                    # Pass any kwargs received by CallbackList down to the individual callback
-                    callback.on_train_begin(**kwargs)
-                except Exception as e:
-                    logger.error(f"Error in callback {callback.__class__.__name__}.on_train_begin: {e}")
-    # --- End specific method ---
-
-    def on_train_end(self, metrics: Optional[Dict[str, Any]] = None, **kwargs):
-        """Called when training ends."""
-        if not self.trainer:
-            logger.warning("CallbackList.on_train_end called before trainer was set.")
-            return
-        metrics = metrics or {}
-        for callback in self.callbacks:
-            if hasattr(callback, 'on_train_end') and callable(getattr(callback, 'on_train_end')):
-                try:
-                     # Pass metrics dict and any other kwargs
-                    callback.on_train_end(metrics=metrics, **kwargs)
-                except Exception as e:
-                    logger.error(f"Error in callback {callback.__class__.__name__}.on_train_end: {e}", exc_info=True)
-
-    def on_epoch_end(self, epoch: int, global_step: int, metrics: Dict[str, Any], **kwargs):
-        """Called at the end of each epoch."""
-        if not self.trainer:
-            logger.warning("CallbackList.on_epoch_end called before trainer was set.")
-            return
-        metrics = metrics or {}
-        for callback in self.callbacks:
-            if hasattr(callback, 'on_epoch_end') and callable(getattr(callback, 'on_epoch_end')):
-                try:
-                    callback.on_epoch_end(epoch=epoch, global_step=global_step, metrics=metrics, **kwargs)
-                except Exception as e:
-                     logger.error(f"Error in callback {callback.__class__.__name__}.on_epoch_end: {e}", exc_info=True)
-
-    def on_step_begin(self, step: int, logs: Optional[Dict[str, Any]] = None):
-        """Called at the beginning of each step."""
-        if not self.trainer:
-            logger.warning("CallbackList.on_step_begin called before trainer was set.")
-            return
-        logs = logs or {}
-        for callback in self.callbacks:
-            callback.on_step_begin(step, **logs)
-
-    def on_step_end(self, step: int, logs: Optional[Dict[str, Any]] = None):
-        """Called at the end of each step."""
-        if not self.trainer:
-            logger.warning("CallbackList.on_step_end called before trainer was set.")
-            return
-        logs = logs or {}
-        for callback in self.callbacks:
-            callback.on_step_end(step, **logs)
-
-    def append(self, callback: Callback):
+    def append(self, callback: Callback) -> None:
         """Adds a callback to the list."""
         self.callbacks.append(callback)
 
-    def state_dict(self):
-        # Implementation of state_dict method
-        pass
+    def state_dict(self) -> Dict[str, Any]:
+        # Implementation of state_dict method needs to be added
+        # Should likely aggregate state_dicts from individual callbacks that have them
+        logger.warning("CallbackList.state_dict is not fully implemented.")
+        return {"callbacks": [cb.__class__.__name__ for cb in self.callbacks]} # Placeholder
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Callback]:
         return iter(self.callbacks)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.callbacks) 

@@ -101,7 +101,8 @@ def generate_text_manual_sampling(
             next_token_id = next_token.item()
 
             # Append to generated sequence and update context
-            generated_token_ids.append(next_token_id)
+            # Explicitly cast to int to satisfy mypy
+            generated_token_ids.append(int(next_token_id))
             context = torch.cat((context, next_token.to(context.device)), dim=1)
 
             # Check for EOS token
@@ -112,8 +113,8 @@ def generate_text_manual_sampling(
 
     # Decode the full sequence of generated IDs
     try:
-        # Pass skip_special_tokens=True to avoid including EOS/PAD in final output typically
-        decoded_text = tokenizer.decode(generated_token_ids, skip_special_tokens=True)
+        # Remove skip_special_tokens=True as base Tokenizer may not support it
+        decoded_text = tokenizer.decode(generated_token_ids)
     except Exception as e:
         logger.error(f"Failed to decode generated token IDs: {e}", exc_info=True)
         decoded_text = f"[Decoding Error: {e}]"
@@ -129,7 +130,7 @@ def generate_samples_manual_sampling(
     temperature: float = 0.8,
     device: Optional[torch.device] = None,
     log_samples: bool = True,
-    **kwargs
+    **kwargs: Any
 ) -> List[str]:
     """
     Generate multiple text samples from a trained model using manual sampling.

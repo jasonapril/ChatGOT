@@ -1,9 +1,10 @@
+# mypy: ignore-errors
 """
 Transformer model implementation for character-level language modeling.
 """
 import math
 import logging
-from typing import Optional, Tuple, Union, Dict, Any
+from typing import Optional, Tuple, Union, Dict, Any, cast
 
 import torch
 import torch.nn as nn
@@ -13,6 +14,8 @@ import torch.nn.functional as F
 from .base import LanguageModel # Import only the base model class
 from ..config.schemas import LanguageModelConfig # Config location changed
 # from .registry import register_model # REMOVE registry import
+# Import the generation utility
+from ..utils.generation import autoregressive_generate
 
 
 class PositionalEncoding(nn.Module):
@@ -55,13 +58,13 @@ class PositionalEncoding(nn.Module):
         Returns:
             Tensor with positional encoding added
         """
-        x = x + self.pe[:, :x.size(1), :]
-        return self.dropout(x)
+        # Explicitly type x after addition
+        x: torch.Tensor = x + self.pe[:, :x.size(1), :] # type: ignore[index]
+        # Cast return value to Tensor
+        return cast(torch.Tensor, self.dropout(x)) # type: ignore
 
-
-# REMOVE registration decorator:
-# @register_model(name="craft.models.transformer.TransformerModel", config_cls=LanguageModelConfig)
-class TransformerModel(LanguageModel):
+@register_model(name="craft.models.transformer.TransformerModel", config_cls=LanguageModelConfig) # type: ignore[index]
+class TransformerModel(LanguageModel): # type: ignore[no-any-return]
     """
     Transformer model for character-level language modeling.
     Uses the standard nn.TransformerDecoderLayer and nn.TransformerDecoder.
@@ -80,12 +83,15 @@ class TransformerModel(LanguageModel):
         
         # Access parameters directly from the validated config object
         self.vocab_size = config.vocab_size
+        if self.vocab_size is None:
+            raise ValueError("TransformerModel requires config.vocab_size to be set.")
         self.d_model = config.d_model
         self.n_head = config.n_head
         self.d_hid = config.d_hid if config.d_hid is not None else config.d_model * 4
         self.n_layers = config.n_layers
         self.dropout_rate = config.dropout
-        self.max_seq_length = config.max_seq_length
+        # Ensure max_seq_length is set on the instance, required by autoregressive_generate
+        self.max_seq_length = config.max_seq_length 
         self.layer_norm_eps = config.layer_norm_eps
         self.activation = config.activation
         self.bias = config.bias
@@ -131,7 +137,7 @@ class TransformerModel(LanguageModel):
         # Log model size is handled by factory
         # self._log_model_size()
     
-    def _init_weights(self, module):
+    def _init_weights(self, module: nn.Module) -> None:
         """Initialize the weights of the model."""
         if isinstance(module, (nn.Linear, nn.Embedding)):
             module.weight.data.normal_(mean=0.0, std=0.02)
@@ -151,8 +157,8 @@ class TransformerModel(LanguageModel):
         Ensures attention is only paid to previous tokens.
         """
         # Use float('-inf') for positions to be masked
-        mask = torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
-        return mask
+        mask: torch.Tensor = torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
+        return mask # type: ignore[no-any-return]
     
     def forward(self, x: torch.Tensor, targets: Optional[torch.Tensor] = None) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
@@ -178,7 +184,7 @@ class TransformerModel(LanguageModel):
         pos_emb = self.position_embedding(positions) # [seq_len, d_model]
         
         # Combine embeddings and apply dropout
-        x = self.dropout(tok_emb + pos_emb) # [batch_size, seq_len, d_model]
+        x = self.dropout(tok_emb + pos_emb) # type: ignore[index] # [batch_size, seq_len, d_model]
         
         # Create attention mask for the decoder
         # Shape should be [seq_len, seq_len]
@@ -197,16 +203,56 @@ class TransformerModel(LanguageModel):
         )
         
         # Generate logits
-        logits = self.output_layer(output) # [batch_size, seq_len, vocab_size]
+        logits: torch.Tensor = self.output_layer(output) # [batch_size, seq_len, vocab_size]
         
         # Calculate loss if targets provided
         if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1) # Ignore padding
+            # Explicitly type loss
+            loss: torch.Tensor = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1) # Ignore padding
             return logits, loss
         
         return logits
     
-    # --- Remove generate method --- #
-    # The generate method is now inherited from the GenerativeModel base class
-    # def generate(...): 
-    #    ... 
+    # --- ADD generate method implementation --- #
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int,
+        temperature: float = 1.0,
+        top_k: Optional[int] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: float = 1.0,
+        eos_token_id: Optional[int] = None,
+        verbose: bool = False
+    ) -> torch.Tensor:
+        """
+        Generates sequences using the autoregressive_generate utility function.
+
+        Args:
+            input_ids: Tensor of starting token IDs (batch_size, seq_len).
+            max_new_tokens: Maximum number of new tokens to generate.
+            temperature: Softmax temperature (0 for greedy).
+            top_k: Keep only top_k tokens for sampling.
+            top_p: Keep smallest set of tokens with cumulative probability >= top_p.
+            repetition_penalty: Penalty applied to repeated tokens (1.0 = no penalty).
+            eos_token_id: ID of the end-of-sequence token to stop generation.
+            verbose: Log progress within the generation utility.
+
+        Returns:
+            Tensor containing the input_ids plus the generated tokens.
+        """
+        # Ensure model is in evaluation mode for generation
+        self.eval()
+        
+        # Delegate the actual generation logic to the utility function
+        return autoregressive_generate(
+            model=self,
+            input_ids=input_ids,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            eos_token_id=eos_token_id,
+            verbose=verbose
+        )

@@ -12,21 +12,23 @@ import time  # Import the time module
 from typing import Dict, List, Any, Optional, Union
 from unittest.mock import MagicMock
 from ..data.tokenizers.base import Tokenizer
+from torch.utils.data import Dataset # Import Dataset
 from omegaconf import DictConfig
 
 from ..models.base import Model
+from ..data.base import BaseDataset # Import BaseDataset
 
 class TextGenerator:
     """Generates text using a trained model."""
 
-    def __init__(self, model: torch.nn.Module, device: torch.device, dataset: Optional[Any] = None, tokenizer: Optional[Tokenizer] = None, config: Optional[Union[Dict[str, Any], "DictConfig"]] = None):
+    def __init__(self, model: torch.nn.Module, device: torch.device, dataset: Optional[Dataset] = None, tokenizer: Optional[Tokenizer] = None, config: Optional[Union[Dict[str, Any], "DictConfig"]] = None):
         """
         Initializes the TextGenerator.
 
         Args:
             model (torch.nn.Module): The model to use for generation.
             device (torch.device): The device to run generation on.
-            dataset (Optional[Any]): The dataset object, used for encoding/decoding if tokenizer not provided explicitly.
+            dataset (Optional[Dataset]): The dataset object, used for encoding/decoding if tokenizer not provided explicitly.
             tokenizer (Optional[Tokenizer]): Explicit tokenizer to use. If provided, this takes precedence over dataset.tokenizer.
             config (Optional[Union[Dict[str, Any], "DictConfig"]]): Configuration dictionary (optional).
         """
@@ -75,7 +77,7 @@ class TextGenerator:
         length_penalty: float = 1.0,
         no_repeat_ngram_size: int = 0,
         early_stopping: bool = True,
-        **kwargs
+        **kwargs: Any
     ) -> List[str]:
         """Generate text using the model's built-in .generate() method.
 
@@ -143,7 +145,7 @@ class TextGenerator:
                 self.logger.debug("Falling back to dataset.char_to_idx for encoding.")
                 try:
                     input_ids = torch.tensor(
-                         [self.dataset.char_to_idx.get(ch, self.dataset.char_to_idx.get('<unk>', 0)) for ch in prompt_to_encode],
+                         [self.dataset.char_to_idx.get(ch, self.dataset.char_to_idx.get('', 0)) for ch in prompt_to_encode],
                          dtype=torch.long
                      ).unsqueeze(0)
                     encoding_source = "dataset.char_to_idx"
@@ -166,38 +168,58 @@ class TextGenerator:
                  return [f"[Generation Error: Input encoding failed for prompt '{start_prompt}']"] 
 
             # --- Determine Special Token IDs --- #
-            # Priority: Explicitly passed > Tokenizer > Model Config > Char Fallback (EOS only)
+            # Priority: Explicitly passed > Tokenizer (Explicit/Dataset) > Model Config > Char Fallback (EOS only)
 
-            # PAD Token
-            eff_pad_token_id = pad_token_id
-            if eff_pad_token_id is None:
-                if hasattr(self.dataset, 'tokenizer') and hasattr(self.dataset.tokenizer, 'pad_token_id') and self.dataset.tokenizer.pad_token_id is not None:
-                    eff_pad_token_id = self.dataset.tokenizer.pad_token_id
-                elif hasattr(self.model, 'config') and hasattr(self.model.config, 'pad_token_id'):
-                    eff_pad_token_id = self.model.config.pad_token_id
-            
-            # EOS Token
-            eff_eos_token_id = eos_token_id
-            if eff_eos_token_id is None:
-                # Try tokenizer first
-                tokenizer = getattr(self.dataset, 'tokenizer', None)
-                if tokenizer:
-                    eff_eos_token_id = getattr(tokenizer, 'eos_token_id', None)
+            eff_pad_token_id: Optional[int] = pad_token_id
+            eff_eos_token_id: Optional[int] = eos_token_id
+
+            # --- Tokenizer Check (Explicit or from Dataset) ---
+            tokenizer_to_check = None
+            if self.tokenizer: # Explicit tokenizer takes priority
+                tokenizer_to_check = self.tokenizer
+            elif self.dataset is not None: # Check dataset is not None
+                tokenizer_to_check = getattr(self.dataset, 'tokenizer', None)
+
+            if tokenizer_to_check is not None:
+                if eff_pad_token_id is None:
+                    pad_id = getattr(tokenizer_to_check, 'pad_token_id', None)
+                    if isinstance(pad_id, int):
+                        eff_pad_token_id = pad_id
+                        self.logger.debug(f"Using pad_token_id {pad_id} from {type(tokenizer_to_check).__name__}")
                 
-                # If still None, try model config
                 if eff_eos_token_id is None:
-                    model_config = getattr(self.model, 'config', None)
-                    if model_config:
-                        eff_eos_token_id = getattr(model_config, 'eos_token_id', None)
-                
-                # If still None, try char_to_idx fallback
-                if eff_eos_token_id is None:
-                    char_map = getattr(self.dataset, 'char_to_idx', None)
-                    if isinstance(char_map, dict):
-                        eff_eos_token_id = char_map.get('<eos>', None)
+                    eos_id = getattr(tokenizer_to_check, 'eos_token_id', None)
+                    if isinstance(eos_id, int):
+                        eff_eos_token_id = eos_id
+                        self.logger.debug(f"Using eos_token_id {eos_id} from {type(tokenizer_to_check).__name__}")
             
-            self.logger.debug(f"Effective PAD token ID: {eff_pad_token_id}")
-            self.logger.debug(f"Effective EOS token ID: {eff_eos_token_id}")
+            # --- Model Config Check ---
+            if eff_pad_token_id is None or eff_eos_token_id is None:
+                model_config = getattr(self.model, 'config', None)
+                if model_config is not None:
+                    if eff_pad_token_id is None:
+                        pad_id = getattr(model_config, 'pad_token_id', None)
+                        if isinstance(pad_id, int):
+                            eff_pad_token_id = pad_id
+                            self.logger.debug(f"Using pad_token_id {pad_id} from model config")
+                    
+                    if eff_eos_token_id is None:
+                        eos_id = getattr(model_config, 'eos_token_id', None)
+                        if isinstance(eos_id, int):
+                            eff_eos_token_id = eos_id
+                            self.logger.debug(f"Using eos_token_id {eos_id} from model config")
+            
+            # --- Char Fallback (EOS only) ---
+            if eff_eos_token_id is None and self.dataset is not None: # Check dataset is not None
+                char_map = getattr(self.dataset, 'char_to_idx', None)
+                if isinstance(char_map, dict):
+                    eos_id = char_map.get('<eos>', None)
+                    if isinstance(eos_id, int):
+                        eff_eos_token_id = eos_id
+                        self.logger.debug(f"Using <eos> id {eos_id} from dataset.char_to_idx")
+            
+            self.logger.debug(f"Final Effective PAD token ID: {eff_pad_token_id}")
+            self.logger.debug(f"Final Effective EOS token ID: {eff_eos_token_id}")
 
             # --- Generation Configuration --- #
             # Filter out None values for top_k/top_p if not applicable
@@ -244,7 +266,7 @@ class TextGenerator:
 
                 # Use the generation_kwargs prepared *before* the no_grad block
                 outputs = self.model.generate(
-                    input_ids=input_ids_tensor,
+                    input_ids=input_ids_tensor, # type: ignore[operator]
                     **generation_kwargs 
                 )
                 self.logger.debug(f"Model output tensor shape: {outputs.shape}")
@@ -277,19 +299,12 @@ class TextGenerator:
                     if self.tokenizer and hasattr(self.tokenizer, 'decode') and callable(getattr(self.tokenizer, 'decode')):
                         # Use explicitly provided tokenizer
                         self.logger.debug("Using self.tokenizer.decode")
-                        decoded_text = self.tokenizer.decode(ids, skip_special_tokens=True)
-                        if not decoded_text: # Try without skipping specials if first attempt was empty
-                            self.logger.warning(f"Decoding with skip_special_tokens=True failed or returned empty. Trying without.")
-                            decoded_text = self.tokenizer.decode(ids, skip_special_tokens=False)
+                        decoded_text = self.tokenizer.decode(ids)
                     # Fallback to dataset decode method
                     elif self.dataset and hasattr(self.dataset, 'decode') and callable(getattr(self.dataset, 'decode')):
                         # Fallback to dataset decode method
                         self.logger.debug("Using self.dataset.decode")
-                        decoded_text = self.dataset.decode(ids, skip_special_tokens=True)
-                        # Fallback if decode fails or returns None/empty (e.g., special tokens only)
-                        if not decoded_text:
-                            self.logger.warning(f"Decoding with skip_special_tokens=True failed or returned empty. Trying without.")
-                            decoded_text = self.dataset.decode(ids, skip_special_tokens=False)
+                        decoded_text = self.dataset.decode(ids)
                     else:
                         # Fallback if neither decode method exists
                         self.logger.error("Cannot decode: No usable tokenizer or dataset.decode method found.")

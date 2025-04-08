@@ -29,16 +29,16 @@ app = typer.Typer(
 )
 
 # Add subcommands from imported modules
-app.add_typer(train_app, name="train")
-app.add_typer(dataset_app, name="dataset")
-app.add_typer(evaluate_app, name="evaluate")
-app.add_typer(generate_app, name="generate")
+app.add_typer(train_app, name="train", help="Training related commands")
+app.add_typer(dataset_app, name="data", help="Data processing and tokenization commands")
+app.add_typer(evaluate_app, name="eval", help="Evaluation related commands")
+app.add_typer(generate_app, name="generate", help="Text generation related commands")
 
 # Global console (optional, can be shared or each module can have its own)
 console = Console()
 
 # Shared logging setup function
-def setup_logging(log_level: str = "INFO"):
+def setup_logging(log_level: str = "INFO") -> None:
     """Set up logging with rich handler."""
     # Make sure logging level is valid
     numeric_level = getattr(logging, log_level.upper(), None)
@@ -56,20 +56,18 @@ def setup_logging(log_level: str = "INFO"):
 
 # Main app callback for global options like log level
 @app.callback()
-def callback(
+def run_command(ctx: typer.Context) -> None:
+    """
+    Top-level callback, can be used for global setup based on context.
+    """
     # Consider removing verbose, let log_level control it directly
     # verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output (sets log level to DEBUG)"),
-    log_level: str = typer.Option("INFO", "--log-level", "-l", help="Set log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"),
-):
-    """
-    Craft - A framework for developing AI models.
-    """
-    level_to_set = log_level.upper()
+    log_level: str = ctx.params.get("log_level", "INFO")
     # if verbose:
     #     level_to_set = "DEBUG"
     try:
-        setup_logging(level_to_set)
-        logging.getLogger(__name__).debug(f"Log level set to {level_to_set}")
+        setup_logging(log_level)
+        logging.getLogger(__name__).debug(f"Log level set to {log_level}")
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)
@@ -78,6 +76,11 @@ def callback(
         console.print(f"[bold red]Error setting up logging:[/bold red] {e}")
         raise typer.Exit(code=1)
 
-# Main execution guard
+def main() -> None:
+    """Main entry point for the CLI application."""
+    # Potentially add global setup here if needed
+    # e.g., setup_logging(level="INFO") if not handled by commands
+    app()
+
 if __name__ == "__main__":
-    app() 
+    main() # -> None added by adding return type to main 

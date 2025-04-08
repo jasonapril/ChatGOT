@@ -1,8 +1,8 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union, cast
 import os
 # Alias the tokenizer library's Tokenizer to avoid name clash with our base class
-from tokenizers import Tokenizer as HFTokenizer 
-from tokenizers import models, pre_tokenizers, trainers
+from tokenizers import Tokenizer as HFTokenizer # type: ignore[import-untyped]
+from tokenizers import models, pre_tokenizers, trainers # type: ignore[import-untyped]
 from .base import Tokenizer # Import our base class
 import logging
 
@@ -14,9 +14,9 @@ class SubwordTokenizer(Tokenizer): # Inherit from our base Tokenizer
                  vocab_size: int, # Required for training
                  # Accept special tokens/IDs matching the base class signature
                  pad_token: str = "<pad>", 
-                 unk_token: str = "<unk>", 
-                 bos_token: str = "<s>", # Default specific to this type? OK.
-                 eos_token: str = "</s>", # Default specific to this type? OK.
+                 unk_token: str = "]", 
+                 bos_token: str = "[", # Default specific to this type? OK.
+                 eos_token: str = "]", # Default specific to this type? OK.
                  pad_id: int = -1, 
                  unk_id: int = 0, 
                  bos_id: int = 1, 
@@ -37,12 +37,13 @@ class SubwordTokenizer(Tokenizer): # Inherit from our base Tokenizer
         
         logger.info(f"SubwordTokenizer initialized.")
         
-    def train(self, files: List[str], output_dir: str) -> None:
-        """Train the tokenizer on a list of input text files."""
-        logger.info(f"Training SubwordTokenizer on {len(files)} files.")
+    def train(self, text_file: str, output_dir: str) -> None:
+        """Train the tokenizer on input text file(s). NOTE: Base expects single file."""
+        # Convert single file path to a list for consistency within this method
+        files = [text_file]
+        logger.info(f"Training SubwordTokenizer on files: {files}")
         if not files:
             raise ValueError("Input file list cannot be empty for training.")
-        logger.debug(f"Training files: {files}")
         
         # Initialize the Hugging Face Tokenizer instance using BPE model
         # Pass unk_token from base class attribute
@@ -93,7 +94,8 @@ class SubwordTokenizer(Tokenizer): # Inherit from our base Tokenizer
         if self.tokenizer is None:
             raise RuntimeError("Tokenizer not initialized. Call train() or load() first.")
         try:
-            return self.tokenizer.encode(text).ids
+            # Cast the return value to satisfy mypy
+            return cast(List[int], self.tokenizer.encode(text).ids)
         except Exception as e:
             logger.exception(f"Error during encoding text: '{text[:50]}...'")
             raise RuntimeError("Encoding failed") from e
@@ -110,7 +112,8 @@ class SubwordTokenizer(Tokenizer): # Inherit from our base Tokenizer
         if self.tokenizer is None:
             raise RuntimeError("Tokenizer not initialized. Call train() or load() first.")
         try:
-            return self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
+            # Cast the return value to satisfy mypy
+            return cast(str, self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens))
         except Exception as e:
             logger.exception(f"Error during decoding IDs: '{token_ids[:10]}...'")
             raise RuntimeError("Decoding failed") from e
@@ -118,7 +121,8 @@ class SubwordTokenizer(Tokenizer): # Inherit from our base Tokenizer
     def get_vocab_size(self) -> int:
         """Get the vocabulary size."""
         if self.tokenizer:
-            return self.tokenizer.get_vocab_size()
+            # Cast the return value to satisfy mypy
+            return cast(int, self.tokenizer.get_vocab_size())
         # Fallback to the size stored during init if tokenizer not loaded/trained yet
         logger.warning("Tokenizer not loaded, returning vocab_size from init.")
         return self.vocab_size 

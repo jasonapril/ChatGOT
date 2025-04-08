@@ -1,7 +1,8 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from typing import Optional
+from typing import Optional, Tuple, Union, cast
+from torch import Tensor
 
 # Import base class, config class, and registration decorator
 from .base import LanguageModel
@@ -13,14 +14,17 @@ class SimpleRNN(LanguageModel):
     """
     A simple RNN-based language model.
     """
-    def __init__(self, config: SimpleRNNConfig):
+    def __init__(self, config: SimpleRNNConfig) -> None:
         super().__init__(config) # Pass the specific config type
-        self.config = config # Store config for easy access in forward
 
         # Embedding layer
+        assert config.vocab_size is not None, "vocab_size must be provided in config"
+        assert config.d_model is not None, "d_model must be provided in config"
         self.embedding = nn.Embedding(config.vocab_size, config.d_model)
         
         # RNN layer - input size is the embedding dimension (d_model)
+        assert config.hidden_size is not None, "hidden_size must be provided in config"
+        assert config.num_layers is not None, "num_layers must be provided in config"
         self.rnn = nn.RNN(
             input_size=config.d_model, 
             hidden_size=config.hidden_size, 
@@ -35,7 +39,7 @@ class SimpleRNN(LanguageModel):
         # Apply weight initialization (optional but good practice)
         self.apply(self._init_weights)
 
-    def _init_weights(self, module):
+    def _init_weights(self, module: nn.Module) -> None:
         """Initialize weights."""
         if isinstance(module, nn.Linear):
             torch.nn.init.xavier_uniform_(module.weight)
@@ -50,7 +54,7 @@ class SimpleRNN(LanguageModel):
                 elif 'weight' in name:
                     torch.nn.init.xavier_uniform_(param)
 
-    def forward(self, x: torch.Tensor, targets: Optional[torch.Tensor] = None):
+    def forward(self, x: torch.Tensor, targets: Optional[torch.Tensor] = None) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass for the RNN model.
         Args:
@@ -66,7 +70,9 @@ class SimpleRNN(LanguageModel):
         
         # 2. Pass through RNN
         # Initialize hidden state
-        h0 = torch.zeros(self.config.num_layers, batch_size, self.config.hidden_size, device=x.device)
+        # Explicitly cast self.config to ensure mypy knows the type
+        rnn_config = cast(SimpleRNNConfig, self.config)
+        h0 = torch.zeros(rnn_config.num_layers, batch_size, rnn_config.hidden_size, device=x.device)
         # Get RNN outputs
         rnn_out, _ = self.rnn(emb, h0) # rnn_out shape: [batch_size, seq_len, hidden_size]
         
@@ -82,4 +88,5 @@ class SimpleRNN(LanguageModel):
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1) # Assuming -1 is padding index
             return logits, loss
             
-        return logits 
+        # Explicitly cast to Tensor to satisfy mypy's no-any-return rule
+        return cast(Tensor, logits) 

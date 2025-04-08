@@ -18,6 +18,7 @@ import logging
 import torch
 from typing import Dict, Any, Optional, Tuple
 from omegaconf import DictConfig, OmegaConf
+from torch.nn import ModuleList
 
 # Import from the new location within training
 from craft.training.memory_utils import preallocate_gpu_memory, get_memory_optimized_settings
@@ -76,14 +77,14 @@ def optimize_memory_usage(args: argparse.Namespace, device: torch.device) -> Non
     # Apply memory settings
     if mem_settings.get('preallocate', False):
         target_usage = mem_settings.get('target_usage', 0.7)
-        preallocate_gpu_memory(target_usage=target_usage)
+        preallocate_gpu_memory(fraction=target_usage)
         
     # Log memory stats
     allocated = torch.cuda.memory_allocated() / (1024**3)
     reserved = torch.cuda.memory_reserved() / (1024**3)
     logging.info(f"GPU memory after optimization: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
 
-def setup_torch_compile(args: argparse.Namespace, model: torch.nn.Module) -> torch.nn.Module:
+def setup_torch_compile(args: argparse.Namespace, model: torch.nn.Module) -> Any:
     """
     Set up torch.compile for the model if available and enabled.
 
@@ -124,16 +125,25 @@ def configure_activation_checkpointing(args: argparse.Namespace, model: torch.nn
         # For a transformer model, typically need to apply checkpointing to transformer blocks/layers
         
         if hasattr(model, 'transformer_layers'):
-            import torch.utils.checkpoint as checkpoint
-            
-            logging.info("Applying activation checkpointing to transformer layers")
-            
-            # Example - actual implementation depends on specific model architecture
-            for layer in model.transformer_layers:
-                layer.use_checkpoint = True
+            transformer_layers = getattr(model, 'transformer_layers')
+            # Check if the attribute is iterable (list or ModuleList)
+            if isinstance(transformer_layers, (list, ModuleList)):
+                import torch.utils.checkpoint as checkpoint
+                
+                logging.info("Applying activation checkpointing to transformer layers")
+                
+                # Iterate only if it's confirmed to be iterable
+                for layer in transformer_layers:
+                    # Check if layer itself supports setting use_checkpoint (optional but safer)
+                    if hasattr(layer, 'use_checkpoint'):
+                         layer.use_checkpoint = True
+                    else:
+                         logging.warning(f"Layer {type(layer)} does not support use_checkpoint attribute.")
+            else:
+                logging.warning(f"'transformer_layers' attribute found but is not iterable (type: {type(transformer_layers)}). Cannot apply checkpointing.")
                 
         else:
-            logging.warning("Model doesn't have expected structure for activation checkpointing")
+            logging.warning("Model doesn't have expected structure (missing 'transformer_layers') for activation checkpointing")
             
     except Exception as e:
         logging.warning(f"Failed to apply activation checkpointing: {e}") 

@@ -14,7 +14,7 @@ import logging
 import time
 import gc
 import contextlib
-from typing import Tuple, Dict, Any, Callable, List, Optional, Union
+from typing import Tuple, Dict, Any, Callable, List, Optional, Union, cast
 import numpy as np
 from tqdm import tqdm
 import torch.distributed as dist
@@ -26,13 +26,14 @@ try:
     _OMEGACONF_AVAILABLE = True
 except ImportError:
     _OMEGACONF_AVAILABLE = False
-    DictConfig = dict # Define as dict if not available
 
 # Use relative import for utils within the same package
 from ..utils.logging import force_flush_logs, format_time
 # from ..utils.memory import MemoryMonitor # Removed unused import
 from .callbacks import CallbackList, SampleGenerationCallback
 from .callbacks.sample_generation import SampleGenerationCallback # <-- Import specific callback
+from .callbacks.tensorboard import TensorBoardLogger # Corrected import
+from .callbacks.base import Callback # Added import
 from ..models.base import GenerativeModel # Import base model for type hinting
 from .progress import ProgressTracker  # Import ProgressTracker
 from .checkpointing import CheckpointManager, TrainingState # Import CheckpointManager and TrainingState
@@ -40,6 +41,7 @@ from craft.config.schemas import TrainingConfig
 
 class TrainingLoop:
     """Handles the core training loop logic."""
+    callbacks: CallbackList # <-- Add class-level type hint
     
     def __init__(
         self,
@@ -54,7 +56,7 @@ class TrainingLoop:
         gradient_accumulation_steps: int = 1,
         max_grad_norm: Optional[float] = None,
         log_interval: int = 10,
-        callbacks: Optional[List[Any]] = None,
+        callbacks: Optional[List[Callback]] = None, # Changed Any to Callback
         checkpoint_manager: Optional[CheckpointManager] = None, # Add checkpoint manager
         save_steps_interval: int = 0, # Add save interval
         time_save_interval_seconds: int = 0, # <-- Add time interval
@@ -89,6 +91,91 @@ class TrainingLoop:
         # Time tracking for interval-based actions
         self.last_time_based_save = time.time()
         self.last_time_based_sample = time.time()
+
+    def _prepare_training_state(self, epoch: int, global_step: int) -> TrainingState:
+        """Gathers component states and creates a TrainingState object."""
+        model_state = self.model.state_dict()
+        optimizer_state = self.optimizer.state_dict() if self.optimizer else None
+        scheduler_state = self.scheduler.state_dict() if self.scheduler else None
+        scaler_state = self.scaler.state_dict() if self.scaler and self.use_amp else None
+        
+        callbacks_state = None
+        if self.callbacks and hasattr(self.callbacks, 'state_dict') and callable(getattr(self.callbacks, 'state_dict')):
+            callbacks_state = self.callbacks.state_dict()
+
+        # TODO: Gather metrics more reliably if needed for the state object itself
+        # metrics = ...
+
+        # Get TB log dir (handle potential absence of callback)
+        tb_log_dir = None
+        if self.callbacks:
+            tb_logger = self.callbacks.get_callback(TensorBoardLogger)
+            if tb_logger and hasattr(tb_logger, 'resolved_log_dir'):
+                 tb_log_dir = tb_logger.resolved_log_dir
+        
+        serializable_config = None
+        if self.experiment_config and _OMEGACONF_AVAILABLE:
+            serializable_config = cast(Dict[str, Any], OmegaConf.to_container(self.experiment_config, resolve=True))
+        elif self.config: # Fallback to Pydantic config if OmegaConf not available/used
+            serializable_config = self.config.model_dump()
+
+        state = TrainingState(
+            epoch=epoch,
+            global_step=global_step,
+            model_state_dict=model_state,
+            optimizer_state_dict=optimizer_state,
+            scheduler_state_dict=scheduler_state,
+            scaler_state_dict=scaler_state,
+            # best_val_metric= # This should come from Trainer/Evaluator state passed in
+            # metrics=metrics,
+            config=serializable_config,
+            tensorboard_log_dir=tb_log_dir,
+            callbacks_state=callbacks_state,
+        )
+        assert self.checkpoint_manager is not None
+        return state
+
+    def _should_save_checkpoint(self, global_step: int, current_time: float) -> bool:
+        """Checks if a checkpoint should be saved based on step or time intervals."""
+        # Step-based trigger
+        step_trigger = (
+            self.checkpoint_manager
+            and self.save_steps_interval > 0
+            and global_step > 0 # Avoid saving at step 0
+            and global_step % self.save_steps_interval == 0
+        )
+        # Time-based trigger
+        time_trigger = False
+        if self.checkpoint_manager and self.time_save_interval_seconds > 0:
+            elapsed_since_last_save = current_time - self.last_time_based_save
+            if elapsed_since_last_save >= self.time_save_interval_seconds:
+                time_trigger = True
+                self.last_time_based_save = current_time # Reset timer *only* if triggered
+        
+        return step_trigger or time_trigger
+
+    def _should_generate_sample(self, global_step: int, current_time: float) -> bool:
+        """Checks if samples should be generated based on step or time intervals."""
+        # Find sample generation callback
+        sample_cb = self.callbacks.get_callback(SampleGenerationCallback)
+        if not sample_cb:
+            return False # No sampling if callback doesn't exist
+        
+        # Step-based trigger (use callback's interval)
+        step_trigger = (
+            sample_cb.sample_interval_steps > 0 
+            and global_step > 0
+            and global_step % sample_cb.sample_interval_steps == 0
+        )
+        # Time-based trigger (use callback's interval)
+        time_trigger = False
+        if sample_cb.sample_interval_seconds > 0:
+            elapsed_since_last_sample = current_time - self.last_time_based_sample
+            if elapsed_since_last_sample >= sample_cb.sample_interval_seconds:
+                time_trigger = True
+                self.last_time_based_sample = current_time # Reset timer *only* if triggered
+        
+        return step_trigger or time_trigger
 
     def train_epoch(
         self,
@@ -147,7 +234,7 @@ class TrainingLoop:
                 self.logger.info(f"Reached max_steps ({self.max_steps}) before processing batch {i+1}. Stopping epoch.")
                 break
 
-            step_logs = {}
+            step_logs: Dict[str, Any] = {}
             # Note: on_step_begin is called with the global_step *before* it's potentially incremented in this loop iteration
             self._callback_on_step_begin(global_step, logs=step_logs)
 
@@ -216,193 +303,160 @@ class TrainingLoop:
                     # <<< REPLACE DEBUG PRINT WITH LOGGER.ERROR >>>
                     self.logger.error(f"[DEBUG TrainingLoop] Checkpoint Eval: Step={global_step}, Interval={self.save_steps_interval}, Manager Exists={self.checkpoint_manager is not None}")
 
-                    # --- Periodic Checkpoint Save --- (MOVED: Now happens *before* max_steps check)
+                    # --- Periodic Checkpoint Save --- #
                     current_time = time.time()
-                    self.logger.debug(f"[Checkpoint Check] Checking step save: global_step={global_step}, interval={self.save_steps_interval}")
-                    step_save_triggered = False
-                    if self.checkpoint_manager and self.save_steps_interval > 0 and global_step > 0 and global_step % self.save_steps_interval == 0:
-                        # <<< ADD DEBUG PRINT HERE >>>
-                        print(f"[DEBUG TrainingLoop] Step {global_step}: Entering step-based checkpoint save block.", flush=True)
-                        self.logger.info(
-                            f"[TrainingLoop] Step {global_step}: CONDITION MET for step-based checkpoint save "
-                            f"(step % interval == {global_step % self.save_steps_interval}) (Filename: checkpoint_step_{global_step:06d}.pt)"
-                        )
-                        step_save_triggered = True
-                        # Construct the state and call checkpoint manager
+                    # Use the helper method to check trigger conditions
+                    if self._should_save_checkpoint(global_step, current_time):
+                        self.logger.info(f"[TrainingLoop] Triggering checkpoint save at step {global_step}.")
+                        # Use helper to prepare state
+                        training_state = self._prepare_training_state(current_epoch, global_step)
+                        # Pass the state object to the manager
                         filename = f"checkpoint_step_{global_step:06d}.pt"
                         try:
-                            serializable_config = None
-                            if self.experiment_config and _OMEGACONF_AVAILABLE:
-                                serializable_config = OmegaConf.to_container(self.experiment_config, resolve=True)
-                            elif self.config: # Fallback to Pydantic
-                                serializable_config = self.config.model_dump()
-                            
-                            tb_log_dir = None
-                            if self.callbacks:
-                                for cb in self.callbacks.callbacks:
-                                    if cb.__class__.__name__ == 'TensorBoardLogger' and hasattr(cb, 'resolved_log_dir'):
-                                        tb_log_dir = cb.resolved_log_dir
-                                        break
-                                
-                            state = TrainingState(
-                                epoch=current_epoch,
-                                global_step=global_step,
-                                model_state_dict=self.model.state_dict(),
-                                optimizer_state_dict=self.optimizer.state_dict() if self.optimizer else None,
-                                scheduler_state_dict=self.scheduler.state_dict() if self.scheduler else None,
-                                scaler_state_dict=self.scaler.state_dict() if hasattr(self, 'scaler') and self.scaler is not None else None,
-                                best_val_metric=float('inf'), # Step saves don't update best val metric here
-                                metrics={'loss': loss_val, 'lr': self.optimizer.param_groups[0]['lr'] if self.optimizer else None}, # Include current step metrics
-                                config=serializable_config,
-                                tensorboard_log_dir=tb_log_dir,
-                                callbacks_state=self.callbacks.state_dict() if hasattr(self.callbacks, 'state_dict') else None,
-                            )
-                            self.checkpoint_manager.save_checkpoint(
-                                state=state,
-                                filename=filename,
-                                metrics={'loss': loss_val}, # Pass current metrics for potential naming/selection
-                                is_best=False # Step saves are not based on validation metric
-                            )
-                        except Exception as e: # <<< CATCHES *ANY* EXCEPTION DURING STATE CREATION OR SAVE >>>
-                            self.logger.error(f"Error during step-based checkpoint save for step {global_step}: {e}", exc_info=True)
-                            raise e # Re-raise the exception to halt the process
-
-                    else:
-                        self.logger.debug(
-                            f"[TrainingLoop] Step {global_step}: Condition NOT MET for step-based save "
-                            f"(step % interval = {global_step % self.save_steps_interval if self.save_steps_interval > 0 else 'N/A'})"
-                        )
-                    # --- End Periodic Checkpoint Save ---
+                            # TODO: Determine metrics and is_best for saving
+                            # This likely requires state passed from Trainer or Evaluator
+                            metrics_for_ckpt = step_logs # Or epoch metrics? Needs clarity.
+                            is_best_for_ckpt = False # Need logic based on validation
+                            # Add check for None before calling
+                            if self.checkpoint_manager:
+                                self.checkpoint_manager.save_checkpoint(
+                                    state=training_state,
+                                    filename=filename,
+                                    metrics=metrics_for_ckpt, # Pass current metrics
+                                    is_best=is_best_for_ckpt # Pass best status
+                                )
+                            else:
+                                self.logger.warning("Checkpoint save triggered, but CheckpointManager is None.")
+                        except Exception as e:
+                            self.logger.error(f"Checkpoint saving failed at step {global_step}: {e}", exc_info=True)
                     
-                    # --- Time-Based Checkpoint Save --- (Also happens *before* max_steps check)
-                    elapsed_save_time = current_time - self.last_time_based_save
-                    self.logger.debug(f"[Time Check Save] Current: {current_time:.2f}, Last: {self.last_time_based_save:.2f}, Elapsed: {elapsed_save_time:.2f}, Interval: {self.time_save_interval_seconds}")
-                    if self.checkpoint_manager and self.time_save_interval_seconds > 0 and elapsed_save_time >= self.time_save_interval_seconds:
-                        self.logger.debug(f"[TIME SAVE BLOCK ENTERED] Step {global_step}. Condition met.")
-                        filename = f"checkpoint_step_{global_step:06d}_time.pt" # Differentiate time-based saves
-                        self.logger.info(f"[TrainingLoop] Step {global_step}: Triggering time-based checkpoint save (filename: {filename})")
-                        serializable_config_dict_time = self.config.model_dump() if isinstance(self.config, TrainingConfig) else self.config
-                        tb_log_dir = None
-                        if self.callbacks:
-                           for cb in self.callbacks.callbacks:
-                               if cb.__class__.__name__ == 'TensorBoardLogger' and hasattr(cb, 'resolved_log_dir'):
-                                   tb_log_dir = cb.resolved_log_dir
-                                   break
-                        
-                        current_metrics = {'loss': loss_val, 'lr': self.optimizer.param_groups[0]['lr'] if self.optimizer else None}
-                        state = TrainingState(
-                            epoch=current_epoch,
-                            global_step=global_step,
-                            model_state_dict=self.model.state_dict(),
-                            optimizer_state_dict=self.optimizer.state_dict() if self.optimizer else None,
-                            scheduler_state_dict=self.scheduler.state_dict() if self.scheduler else None,
-                            scaler_state_dict=self.scaler.state_dict() if hasattr(self, 'scaler') and self.scaler is not None else None,
-                            best_val_metric=float('inf'),
-                            metrics=current_metrics,
-                            config=serializable_config_dict_time,
-                            tensorboard_log_dir=tb_log_dir,
-                        )
-                        self.logger.debug(f"[TIME SAVE BLOCK] Calling checkpoint_manager.save_checkpoint...")
-                        self.checkpoint_manager.save_checkpoint(
-                            state=state,
-                            filename=filename,
-                            metrics=current_metrics,
-                            is_best=False
-                        )
-                        self.last_time_based_save = current_time
-                        self.logger.debug(f"[TIME SAVE BLOCK EXIT] Step {global_step}. Save completed, last_time_based_save updated.")
-                    # --- End Time-Based Checkpoint Save ---
-
-                    # --- Time-Based Sample Generation --- (Happens *before* max_steps check)
-                    elapsed_sample_time = current_time - self.last_time_based_sample
-                    self.logger.debug(f"[Time Check Sample] Current: {current_time:.2f}, Last: {self.last_time_based_sample:.2f}, Elapsed: {elapsed_sample_time:.2f}, Interval: {self.time_save_interval_seconds}")
-                    if self.time_save_interval_seconds > 0 and elapsed_sample_time >= self.time_save_interval_seconds:
-                        self.logger.debug(f"[TIME SAMPLE BLOCK ENTERED] Step {global_step}. Condition met.")
-                        self.logger.info(f"[TrainingLoop] Step {global_step}: Triggering time-based sample generation.")
-                        sample_cb_found = False
-                        if self.callbacks:
-                            self.logger.debug(f"[TIME SAMPLE BLOCK] Iterating through {len(self.callbacks.callbacks)} callbacks...")
-                            for idx, cb in enumerate(self.callbacks.callbacks):
-                                self.logger.debug(f"[TIME SAMPLE BLOCK] Checking callback #{idx}: {type(cb).__name__} (Instance of SampleGenerationCallback? {isinstance(cb, SampleGenerationCallback)})")
-                                if isinstance(cb, SampleGenerationCallback):
-                                    self.logger.debug(f"[TIME SAMPLE BLOCK] Found SampleGenerationCallback: {type(cb).__name__}. Calling generate_samples...")
-                                    cb.generate_samples(trainer, f"Step {global_step} (Time Interval)")
-                                    sample_cb_found = True
-                        if sample_cb_found:
-                            self.last_time_based_sample = current_time
-                            self.logger.debug(f"[TIME SAMPLE BLOCK EXIT] Step {global_step}. Sample generated, last_time_based_sample updated.")
+                    # --- Periodic Sample Generation --- #
+                    # Use the helper method to check trigger conditions
+                    if self._should_generate_sample(global_step, current_time):
+                        self.logger.info(f"[TrainingLoop] Triggering sample generation at step {global_step}.")
+                        # Trigger via a generic callback hook if possible,
+                        # or call the specific callback if necessary.
+                        sample_cb = self.callbacks.get_callback(SampleGenerationCallback)
+                        if sample_cb:
+                            try:
+                                # Pass context
+                                sample_cb.generate_samples(trigger_event=f"step {global_step}") 
+                            except Exception as e:
+                                self.logger.error(f"Sample generation failed at step {global_step}: {e}", exc_info=True)
                         else:
-                             self.logger.warning("Time interval reached for sample generation, but SampleGenerationCallback not found.")
-                    # --- End Time-Based Sample Generation ---
+                            self.logger.warning("Sample generation triggered, but SampleGenerationCallback not found.")
 
-                    # Check max_steps condition *AFTER* incrementing step and periodic saves/samples
-                    if self.max_steps is not None and global_step >= self.max_steps:
-                        self.logger.info(f"[TrainingLoop] Reached max_steps ({self.max_steps}) at step {global_step}. Breaking epoch loop after saves/samples.")
-                        break # Exit the inner batch loop
-
-                    # Calculate metrics for update
-                    current_lr = self.optimizer.param_groups[0]['lr'] if self.scheduler else None
+                    # --- Metric Logging & Progress Update --- #
+                    current_lr = self.optimizer.param_groups[0]["lr"]
                     step_time = time.time() - last_log_time
-                    tokens_per_sec = step_token_accumulator / step_time if step_time > 0 else 0
-                    step_logs['loss'] = loss_val
-                    step_logs['lr'] = current_lr
-                    step_logs['T/s'] = f"{tokens_per_sec:.0f}"
-                    progress.update(
-                        step=global_step,
-                        loss=loss_val,
-                        learning_rate=current_lr,
-                        tokens_per_second=tokens_per_sec,
-                        additional_metrics=None
-                    )
-                    step_time_accumulator = 0.0
-                    step_token_accumulator = 0
-                    last_log_time = time.time()
-                    step_logs['global_step'] = global_step
-                    self._callback_on_step_end(step=i, global_step=global_step, logs=step_logs)
+                    step_time_accumulator += step_time
+                    tokens_per_sec = step_token_accumulator / step_time_accumulator if step_time_accumulator > 0 else 0.0
 
-            except RuntimeError as e:
-                if "CUDA out of memory" in str(e):
-                    self.logger.error(f"CUDA OOM encountered at step {global_step}, batch {i+1}. Consider reducing batch size or enabling gradient accumulation/checkpointing.")
-                    raise e
-                else:
-                    self.logger.error(f"RuntimeError at step {global_step}, batch {i+1}: {e}", exc_info=True)
-                    raise e
+                    # Log metrics periodically or if it's the last step
+                    is_last_step_overall = (self.max_steps is not None and global_step >= self.max_steps)
+                    if global_step % self.log_interval == 0 or is_last_batch_step or is_last_step_overall:
+                        avg_step_loss = loss_val # Current step loss (avg over accumulation)
+                        progress.update(
+                             step=global_step,
+                             loss=avg_step_loss,
+                             learning_rate=current_lr,
+                             tokens_per_second=tokens_per_sec if tokens_per_sec > 0 else None
+                        )
+                        # Reset step accumulators after logging
+                        step_token_accumulator = 0
+                        step_time_accumulator = 0.0
 
-        # End of epoch calculations
-        avg_epoch_loss = epoch_loss / num_valid_steps_in_epoch if num_valid_steps_in_epoch > 0 else 0.0
-        epoch_time = time.time() - epoch_start_time
-        tokens_per_sec = total_tokens / epoch_time if epoch_time > 0 else 0
-        
-        # Restore epoch summary logging
-        self.logger.info(f"Epoch {current_epoch + 1} finished in {epoch_time:.2f}s. Avg Loss: {avg_epoch_loss:.4f}, Tokens/sec: {tokens_per_sec:.2f}")
+                    # Update progress bar description (Now just updates count)
+                    if progress.progress_bar:
+                        progress.progress_bar.update(1) # This call only increments the counter
 
-        epoch_metrics = {
+            except Exception as e:
+                self.logger.error(f"Error during training step {global_step}, batch {i+1}: {e}", exc_info=True)
+                # Decide how to handle: skip batch, stop epoch, stop training?
+                # For now, just log and continue (might lead to issues if persistent)
+                if should_step: # Ensure grads are zeroed if an error occurred before step
+                     self.optimizer.zero_grad(set_to_none=True)
+                continue # Move to next batch
+            finally:
+                # Ensure logs are flushed periodically? Or rely on higher level flushing?
+                # force_flush_logs() # Maybe too frequent here
+                # Potential CUDA memory cleanup (use cautiously)
+                # if torch.cuda.is_available():
+                #     torch.cuda.empty_cache()
+                # gc.collect()
+                pass
+
+            # Callbacks: on_step_end - called AFTER potential step and increment
+            # Pass metrics accumulated during the step (or micro-batches)
+            step_logs["loss"] = loss_val # Log the unscaled loss for this batch/step
+            if should_step:
+                 step_logs["lr"] = current_lr # Log LR only when optimizer stepped
+            self._callback_on_step_end(global_step, logs=step_logs)
+
+            # CHECK MAX STEPS *AFTER* THE STEP IS COMPLETED
+            if self.max_steps is not None and global_step >= self.max_steps:
+                self.logger.info(f"Reached max_steps ({self.max_steps}) after completing step {global_step}. Stopping epoch.")
+                break # Exit the batch loop
+
+        # --- Epoch End --- #
+        progress.close() # Close the progress bar for the epoch
+        epoch_duration = time.time() - epoch_start_time
+        avg_epoch_loss = epoch_loss / num_valid_steps_in_epoch if num_valid_steps_in_epoch > 0 else float('nan')
+        avg_tokens_per_sec = total_tokens / epoch_duration if epoch_duration > 0 else 0.0
+
+        self.logger.info(
+            f"Epoch {current_epoch+1} finished. Avg Loss: {avg_epoch_loss:.4f}, "
+            f"Duration: {format_time(epoch_duration)}, Avg Tokens/Sec: {avg_tokens_per_sec:.2f}"
+        )
+
+        # Return metrics collected during the epoch
+        # The global_step returned is the value *after* the last step completed in this epoch
+        epoch_metrics: Dict[str, Any] = {
             "loss": avg_epoch_loss,
-            "tokens_per_sec": tokens_per_sec,
-            "epoch_time_sec": epoch_time,
-            "final_global_step": global_step # Return the final global step
+            "epoch_duration_sec": epoch_duration,
+            "avg_tokens_per_sec": avg_tokens_per_sec,
+            "final_global_step": global_step # Return the final step count
         }
-
-        # Restore progress bar closing
-        progress.close()
+        # self.callbacks.on_epoch_end(epoch=current_epoch, global_step=global_step, metrics=epoch_metrics)
+        # ^^^ on_epoch_end should be called by Trainer after potential validation
 
         return epoch_metrics
 
-    def _callback_on_step_begin(self, step: int, logs: Optional[Dict[str, Any]] = None):
-        """Callback hook for step begin."""
-        logs = logs or {}
-        for callback in self.callbacks.callbacks:
-            if hasattr(callback, 'on_step_begin'):
-                callback.on_step_begin(step, logs=logs)
+    # Helper methods for callbacks to keep train_epoch cleaner
+    def _callback_on_step_begin(self, step: int, logs: Optional[Dict[str, Any]] = None) -> None:
+        if self.callbacks:
+            self.callbacks.on_step_begin(step=step, logs=logs)
 
-    def _callback_on_step_end(self, step: int, global_step: int, logs: Optional[Dict[str, Any]] = None):
-        """Callback hook for step end."""
-        logs = logs or {}
-        # Iterate over the list inside CallbackList
-        for callback in self.callbacks.callbacks:
-            if hasattr(callback, 'on_step_end') and callable(getattr(callback, 'on_step_end')):
-                try:
-                     # Pass step, global_step, and metrics dictionary
-                    callback.on_step_end(step=step, global_step=global_step, metrics=logs)
-                except Exception as e:
-                    self.logger.error(f"Error in callback {callback.__class__.__name__}.on_step_end: {e}", exc_info=True)
+    def _callback_on_step_end(self, step: int, logs: Optional[Dict[str, Any]] = None) -> None:
+        if self.callbacks:
+            # Ensure metrics dict exists
+            if logs is None: logs = {}
+            self.callbacks.on_step_end(step=step, logs=logs)
+
+    def run(self) -> Dict[str, Any]:
+        """Runs the full training loop over all epochs."""
+        # This run method might be simplified or moved entirely to Trainer?
+        # Keeping a basic structure here for now.
+        self.logger.info("Starting TrainingLoop run...")
+        start_time = time.time()
+        final_metrics: Dict[str, Any] = {}
+        # Assume initial epoch/step are handled by the caller (Trainer)
+        # Need to get initial state correctly (passed via __init__ or args?)
+        # For now, assume Trainer manages the outer epoch loop and calls train_epoch
+
+        # Placeholder logic: This loop structure belongs in the Trainer
+        # for epoch in range(self.num_epochs): # num_epochs is not attr here
+        #     epoch_metrics = self.train_epoch(epoch, self.global_step, ...)
+        #     self.global_step = epoch_metrics['final_global_step']
+        #     final_metrics.update(epoch_metrics)
+        #     # Call validation etc.
+
+        total_time = time.time() - start_time
+        self.logger.info(f"TrainingLoop run finished in {format_time(total_time)}.")
+        # Return metrics and final state needed by Trainer
+        return {
+            "metrics": final_metrics,
+            "total_train_time": total_time,
+            # "global_step": self.global_step, # Return updated state if managed here
+            # "epoch": self.epoch
+        }

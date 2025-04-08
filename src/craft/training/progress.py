@@ -7,7 +7,7 @@ This module handles progress tracking, logging, and metrics reporting during tra
 
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from tqdm import tqdm
 import numpy as np
 
@@ -22,7 +22,7 @@ class ProgressTracker:
         position: int = 0,
         leave: bool = True,
         initial_step: int = 0
-    ):
+    ) -> None:
         self.total_steps = total_steps
         self.log_interval = log_interval
         self.desc = desc
@@ -31,19 +31,19 @@ class ProgressTracker:
         self.initial_step = initial_step
         self.logger = logging.getLogger(self.__class__.__name__)
         
-        # Initialize metrics tracking
-        self.step_times = []
-        self.losses = []
-        self.learning_rates = []
-        self.tokens_per_second = []
-        self.start_time = None
-        self.last_log_time = None
+        # Initialize metrics tracking with types
+        self.step_times: List[float] = []
+        self.losses: List[float] = []
+        self.learning_rates: List[float] = []
+        self.tokens_per_second: List[float] = []
+        self.start_time: Optional[float] = None
+        self.last_log_time: Optional[float] = None
         
-        # Initialize progress bar
-        self.progress_bar = None
+        # Initialize progress bar with type hint
+        self.progress_bar: Optional[tqdm] = None
         self._setup_progress_bar()
 
-    def _setup_progress_bar(self):
+    def _setup_progress_bar(self) -> None:
         """Initialize the progress bar with tqdm."""
         try:
             self.progress_bar = tqdm(
@@ -59,7 +59,7 @@ class ProgressTracker:
             self.logger.warning(f"Failed to initialize tqdm progress bar: {e}. Using simple logging.")
             self.progress_bar = None
 
-    def start(self):
+    def start(self) -> None:
         """Start tracking progress."""
         self.start_time = time.time()
         self.last_log_time = self.start_time
@@ -71,12 +71,17 @@ class ProgressTracker:
         learning_rate: Optional[float] = None,
         tokens_per_second: Optional[float] = None,
         additional_metrics: Optional[Dict[str, Any]] = None
-    ):
+    ) -> None:
         """Update progress with current metrics."""
         current_time = time.time()
         
+        # Calculate step duration safely
+        step_duration = 0.0
+        if self.last_log_time is not None:
+            step_duration = current_time - self.last_log_time
+        self.step_times.append(step_duration)
+        
         # Update metrics
-        self.step_times.append(current_time - self.last_log_time)
         self.losses.append(loss)
         if learning_rate is not None:
             self.learning_rates.append(learning_rate)
@@ -108,9 +113,10 @@ class ProgressTracker:
         learning_rate: Optional[float],
         tokens_per_second: Optional[float],
         additional_metrics: Optional[Dict[str, Any]]
-    ):
+    ) -> None:
         """Log current metrics."""
-        elapsed_time = time.time() - self.start_time
+        # Calculate elapsed time safely
+        elapsed_time = time.time() - self.start_time if self.start_time is not None else 0.0
         avg_step_time = np.mean(self.step_times[-self.log_interval:]) if self.step_times else 0
         
         log_msg = f"Step: {step}/{self.total_steps} | "
@@ -139,7 +145,7 @@ class ProgressTracker:
             'avg_step_time': np.mean(self.step_times) if self.step_times else 0
         }
 
-    def close(self):
+    def close(self) -> None:
         """Clean up progress tracking."""
         if self.progress_bar is not None:
             self.progress_bar.close()

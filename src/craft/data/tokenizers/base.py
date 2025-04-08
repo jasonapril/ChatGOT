@@ -13,17 +13,17 @@ class Tokenizer(ABC):
         unk_id: Optional[int] = 0, 
         bos_id: Optional[int] = 1, 
         eos_id: Optional[int] = 2,
-        **kwargs
+        **kwargs: Any
     ):
         """Initializes the base tokenizer with special token definitions."""
-        self.pad_token = pad_token
-        self.unk_token = unk_token
-        self.bos_token = bos_token
-        self.eos_token = eos_token
-        self.pad_id = pad_id
-        self.unk_id = unk_id
-        self.bos_id = bos_id
-        self.eos_id = eos_id
+        self.pad_token: Optional[str] = pad_token
+        self.unk_token: Optional[str] = unk_token
+        self.bos_token: Optional[str] = bos_token
+        self.eos_token: Optional[str] = eos_token
+        self.pad_id: Optional[int] = pad_id
+        self.unk_id: Optional[int] = unk_id
+        self.bos_id: Optional[int] = bos_id
+        self.eos_id: Optional[int] = eos_id
         self._init_kwargs = kwargs
         if kwargs:
             logger = logging.getLogger(__name__)
@@ -35,6 +35,14 @@ class Tokenizer(ABC):
             self.bos_token: self.bos_id,
             self.eos_token: self.eos_id
         }
+
+        # Initialize the special tokens map
+        self.special_tokens_map: Dict[str, str] = {}
+        if self.pad_token is not None: self.special_tokens_map['pad'] = self.pad_token
+        if self.unk_token is not None: self.special_tokens_map['unk'] = self.unk_token
+        if self.bos_token is not None: self.special_tokens_map['bos'] = self.bos_token
+        if self.eos_token is not None: self.special_tokens_map['eos'] = self.eos_token
+        # Add other potential roles if needed
     
     @abstractmethod
     def train(self, text_file: str, output_dir: str) -> None:

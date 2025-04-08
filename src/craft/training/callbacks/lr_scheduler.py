@@ -1,7 +1,13 @@
 import logging
 import numpy as np
+from typing import Dict, Any, Optional, List
+import torch
 
-from .base import Callback
+from .base import Callback, TYPE_CHECKING
+
+# Added TYPE_CHECKING block
+if TYPE_CHECKING:
+    from ..trainer import Trainer
 
 logger = logging.getLogger(__name__)
 
@@ -13,8 +19,8 @@ class ReduceLROnPlateauOrInstability(Callback):
     if the loss increases significantly compared to a moving average or stays high.
     Also includes cooldown period after reduction.
     """
-    def __init__(self, monitor='loss', factor=0.5, patience=10, threshold=1.5,
-                 min_lr=1e-7, cooldown=5, window_size=20, verbose=True):
+    def __init__(self, monitor: str = 'loss', factor: float = 0.5, patience: int = 10, threshold: float = 1.5,
+                 min_lr: float = 1e-7, cooldown: int = 5, window_size: int = 20, verbose: bool = True) -> None:
         """
         Args:
             monitor (str): The metric key in logs to monitor (default: 'loss').
@@ -29,22 +35,23 @@ class ReduceLROnPlateauOrInstability(Callback):
         super().__init__()
         if factor >= 1.0:
             raise ValueError('Factor should be < 1.0.')
-        self.monitor = monitor
-        self.factor = factor
-        self.min_lr = min_lr
-        self.patience = patience
-        self.threshold = threshold
-        self.cooldown = cooldown
-        self.window_size = window_size
-        self.verbose = verbose
+        self.monitor: str = monitor
+        self.factor: float = factor
+        self.min_lr: float = min_lr
+        self.patience: int = patience
+        self.threshold: float = threshold
+        self.cooldown: int = cooldown
+        self.window_size: int = window_size
+        self.verbose: bool = verbose
 
         # Internal state
-        self.wait = 0           # Steps waited for improvement/stability
-        self.cooldown_counter = 0 # Steps remaining in cooldown
-        self.best_loss = float('inf') # Best loss observed so far (or lowest avg)
-        self.recent_losses = [] # Track recent losses for moving average
+        self.wait: int = 0           # Steps waited for improvement/stability
+        self.cooldown_counter: int = 0 # Steps remaining in cooldown
+        self.best_loss: float = float('inf') # Best loss observed so far (or lowest avg)
+        self.recent_losses: List[float] = [] # Track recent losses for moving average
+        self.optimizer: Optional[torch.optim.Optimizer] = None # Added type hint
 
-    def set_trainer(self, trainer):
+    def set_trainer(self, trainer: 'Trainer') -> None:
         """Set the trainer instance for this callback."""
         super().set_trainer(trainer)
         if hasattr(trainer, 'optimizer'):
@@ -52,15 +59,17 @@ class ReduceLROnPlateauOrInstability(Callback):
         else:
             self.logger.error("Trainer does not have an optimizer attribute")
 
-    def _get_lr(self):
+    def _get_lr(self) -> Optional[float]:
         """Get current learning rate from the optimizer."""
-        if hasattr(self, 'optimizer'):
-            return self.optimizer.param_groups[0]['lr']
+        if self.optimizer:
+            # Ensure return type is float
+            lr = self.optimizer.param_groups[0]['lr']
+            return float(lr)
         return None
 
-    def _set_lr(self, new_lr):
+    def _set_lr(self, new_lr: float) -> None:
         """Set new learning rate for the optimizer."""
-        if hasattr(self, 'optimizer'):
+        if self.optimizer:
             old_lr = self.optimizer.param_groups[0]['lr']
             if new_lr < old_lr:
                 self.optimizer.param_groups[0]['lr'] = new_lr
@@ -71,14 +80,20 @@ class ReduceLROnPlateauOrInstability(Callback):
         else:
             self.logger.error("Optimizer not set in ReduceLROnPlateauOrInstability callback.")
 
-    def on_step_end(self, step, logs=None):
+    def on_step_end(self, step: int, global_step: int, metrics: Dict[str, Any], **kwargs: Any) -> None:
         """Called at the end of each training step."""
-        logs = logs or {}
-        current_loss = logs.get(self.monitor)
+        # Use metrics instead of logs
+        current_loss = metrics.get(self.monitor)
         current_lr = self._get_lr()
 
         if current_loss is None or current_lr is None:
             return # Cannot operate without loss and current LR
+
+        # Ensure loss is float
+        if not isinstance(current_loss, (int, float)):
+             self.logger.warning(f"Monitored value '{self.monitor}' is not numeric ({type(current_loss)}). Skipping LR reduction check.")
+             return
+        current_loss = float(current_loss)
 
         # Add current loss to recent history
         self.recent_losses.append(current_loss)
@@ -86,7 +101,7 @@ class ReduceLROnPlateauOrInstability(Callback):
             self.recent_losses.pop(0)
 
         # Calculate moving average if window is full
-        moving_avg_loss = np.mean(self.recent_losses) if len(self.recent_losses) >= self.window_size else None
+        moving_avg_loss = float(np.mean(self.recent_losses)) if len(self.recent_losses) >= self.window_size else None
 
         if self.cooldown_counter > 0:
             self.cooldown_counter -= 1
@@ -127,7 +142,7 @@ class ReduceLROnPlateauOrInstability(Callback):
                 self.logger.info(f"Patience exceeded ({self.wait}/{self.patience}) but LR not reduced (already at min_lr or factor ineffective).")
                 self.wait = 0 # Reset wait counter even if LR not reduced
 
-    def on_train_begin(self, trainer, logs=None):
+    def on_train_begin(self, **kwargs: Any) -> None:
         """Reset state at the beginning of training."""
         self.wait = 0
         self.cooldown_counter = 0
@@ -135,15 +150,14 @@ class ReduceLROnPlateauOrInstability(Callback):
         self.recent_losses = []
         self.logger.info(f"ReduceLROnPlateauOrInstability enabled. Monitoring: '{self.monitor}'")
 
-    # Implement other abstract methods as no-ops if not used
-    def on_train_end(self, trainer, logs=None):
+    def on_train_end(self, metrics: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
         pass
 
-    def on_epoch_begin(self, trainer, epoch, logs=None):
+    def on_epoch_begin(self, epoch: int, **kwargs: Any) -> None:
         pass
 
-    def on_epoch_end(self, trainer, epoch, logs=None):
+    def on_epoch_end(self, epoch: int, global_step: int, metrics: Dict[str, Any], **kwargs: Any) -> None:
         pass
 
-    def on_step_begin(self, step: int, logs=None):
+    def on_step_begin(self, step: int, **kwargs: Any) -> None:
         pass 
