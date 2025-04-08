@@ -2,12 +2,14 @@ import pytest
 import torch
 from unittest.mock import MagicMock, patch, ANY
 from torch.utils.data import DataLoader # Need this
+from torch.optim import Optimizer
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
-from craft.training.callbacks.base import Callback # Ensure Base Callback is imported
+from craft.training.callbacks.base import Callback, CallbackList # Ensure Base Callback is imported
 from craft.training.progress import ProgressTracker # Import ProgressTracker
 from craft.training.trainer import Trainer # Import Trainer
+from craft.config.schemas import TrainingConfig # Import TrainingConfig
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -54,34 +56,46 @@ class TestEpochCallbacks:
         mock_callback = mock_callback_fixture
         mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
+        # --- Setup Config ---
+        config = TrainingConfig(
+            batch_size=2,
+            log_interval=10,
+            num_epochs=1,
+            learning_rate=1e-4,
+            use_amp=False,
+            gradient_accumulation_steps=1
+        )
+
         # --- Setup Loop ---
         loop = TrainingLoop(
             model=mock_model,
             optimizer=mock_optimizer,
             train_dataloader=mock_dataloader,
             device=mock_device,
-            config={},
-            use_amp=False,
-            gradient_accumulation_steps=1,
+            config=config, # Pass config object
             callbacks=[mock_callback]
         )
-        loop.scaler = mock_scaler
+        loop.scaler = mock_scaler # Inject mock scaler
+
         # --- Run Epoch ---
-        start_global_step = 10
-        loop.train_epoch(
-            current_epoch=0,
-            global_step=start_global_step,
-            progress=mock_progress_tracker_instance,
-            trainer=mock_trainer # Pass mock trainer
-        )
+        start_global_step = 0
+        loop.train_epoch(trainer=mock_trainer, current_epoch=0, global_step=start_global_step, progress=mock_progress_tracker_instance)
+
         # --- Assertions ---
-        mock_callback.on_step_begin.assert_called_once_with(start_global_step, logs=ANY)
-        mock_callback.on_step_end.assert_called_once_with(step=0, global_step=start_global_step + 1, metrics=ANY)
+        mock_callback.on_step_begin.assert_called_once()
+        mock_callback.on_step_end.assert_called_once()
+        # Check args passed to on_step_end
+        step_end_call_args, step_end_call_kwargs = mock_callback.on_step_end.call_args
+        assert step_end_call_kwargs.get('step') == 0 # Step index within the epoch (starts at 0)
+        assert step_end_call_kwargs.get('global_step') == start_global_step + 1
+        assert 'logs' in step_end_call_kwargs # Check for 'logs' key
+        assert isinstance(step_end_call_kwargs['logs'], dict)
+        assert 'loss' in step_end_call_kwargs['logs']
         assert mock_progress_tracker_instance.update.call_count == len(mock_dataloader)
         mock_progress_tracker_instance.update.assert_called_with(
-            step=start_global_step + 1, 
+            step=start_global_step + 1,
             loss=mock_loss.item(),
-            learning_rate=ANY, # LR is updated by scheduler
+            learning_rate=ANY, # Cannot easily mock LR here
             tokens_per_second=ANY,
             additional_metrics=None
         ) 

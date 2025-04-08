@@ -11,6 +11,7 @@ from craft.training.callbacks import Callback, CallbackList
 from craft.training.progress import ProgressTracker
 from craft.training.training_loop import TrainingLoop
 from craft.training.trainer import Trainer
+from craft.config.schemas import TrainingConfig
 
 # --- Mocks and Fixtures --- #
 
@@ -57,21 +58,25 @@ def mock_dataloader():
         data.append((input_ids, target_ids))
     return data
 
-# Basic Config Fixture (Copied and trimmed from original test_training.py)
+# Basic Config Fixture
 @pytest.fixture
 def base_training_config():
-    """Provides a base OmegaConf training config relevant for TrainingLoop."""
-    conf = OmegaConf.create({
-        "gradient_accumulation_steps": 1,
-        "max_grad_norm": 1.0,
-        "log_interval": 10,
-        "use_amp": False,
-        "torch_compile": False, # Added
-        "activation_checkpointing": False # Added
-        # Removed fields not directly used by TrainingLoop itself 
-        # (e.g., num_epochs, eval_interval, batch_size, lr, max_steps)
-    })
-    return conf
+    """Provides a base TrainingConfig object for TrainingLoop tests."""
+    # Return a Pydantic TrainingConfig object with minimal required fields
+    # Add default values for fields accessed by TrainingLoop.__init__
+    return TrainingConfig(
+        batch_size=4, # Required field
+        learning_rate=1e-4, # Required field
+        use_amp=False,
+        gradient_accumulation_steps=1,
+        log_interval=10,
+        save_interval=0, # Or some default if needed
+        time_save_interval_seconds=0,
+        max_steps=None,
+        num_epochs=1, # Need num_epochs or max_steps
+        max_grad_norm=1.0,
+        # Other fields will use their Pydantic defaults
+    )
 
 # --- Tests for TrainingLoop (Moved from original test_training.py) --- #
 
@@ -121,23 +126,23 @@ def test_training_loop_gradient_accumulation(base_training_config, mock_dataload
     """Test that optimizer.step() is called correctly with gradient accumulation."""
     model = MockTrainModel()
     optimizer = MagicMock(spec=AdamW)
+    # Configure param_groups for the mock optimizer to avoid AttributeError
+    optimizer.param_groups = [{'lr': 1e-3}]
     optimizer.zero_grad = MagicMock()
     optimizer.step = MagicMock()
     accumulation_steps = 2
-    # Update the config object directly
-    base_training_config.gradient_accumulation_steps = accumulation_steps
+    # Update the config object directly if needed for the test
+    config_for_test = base_training_config.model_copy(update={"gradient_accumulation_steps": accumulation_steps})
     total_steps = len(mock_dataloader)
     
-    # Pass accumulation steps directly during init as config might not be the only source
+    # Remove direct keyword arguments now covered by config
     training_loop = TrainingLoop(
         model=model,
         optimizer=optimizer,
         train_dataloader=mock_dataloader, # Expects list of batches
         device=torch.device("cpu"),
-        config=base_training_config, 
-        log_interval=total_steps + 1, # Ensure logging doesn't interfere
-        callbacks=CallbackList([]), 
-        gradient_accumulation_steps=accumulation_steps # Pass explicitly
+        config=config_for_test, # Pass the modified config
+        callbacks=CallbackList([]),
     )
     mock_progress_tracker = ProgressTracker(total_steps=total_steps)
     mock_progress_tracker.start() # Start the tracker
@@ -182,18 +187,18 @@ def test_training_loop_loss_decreases(base_training_config, mock_dataloader):
     model = MockTrainModel(vocab_size=10, d_model=8)
     optimizer = AdamW(model.parameters(), lr=1e-2) # Use a reasonable LR
     total_steps = len(mock_dataloader)
-    # Update config directly
-    base_training_config.log_interval = 1
-    base_training_config.gradient_accumulation_steps = 1
+    # Update config directly for test-specific needs
+    config_for_test = base_training_config.model_copy(update={
+        "log_interval": 1,
+        "gradient_accumulation_steps": 1
+    })
     
     training_loop = TrainingLoop(
         model=model,
         optimizer=optimizer,
         train_dataloader=mock_dataloader, # Expects list of batches
         device=torch.device("cpu"),
-        config=base_training_config,
-        gradient_accumulation_steps=1, # Pass explicitly
-        log_interval=1, # Pass explicitly
+        config=config_for_test, # Pass modified config
         callbacks=CallbackList([]) 
     )
     mock_progress_tracker = ProgressTracker(total_steps=total_steps)

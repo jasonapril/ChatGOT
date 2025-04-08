@@ -2,11 +2,13 @@ import pytest
 import torch
 from unittest.mock import MagicMock, patch, call, ANY
 from torch.utils.data import DataLoader # Need this
+from torch.optim import Optimizer
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
 from craft.training.progress import ProgressTracker # Import ProgressTracker
 from craft.training.trainer import Trainer # Import Trainer
+from craft.config.schemas import TrainingConfig # Import TrainingConfig
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -58,19 +60,26 @@ class TestEpochClipping:
             mock_scaler.scale = MagicMock(return_value=mock_loss)
             mock_params = mock_model.parameters()
 
+            # --- Setup Config ---
+            config = TrainingConfig(
+                batch_size=2,
+                log_interval=10,
+                num_epochs=1,
+                learning_rate=1e-4,
+                use_amp=False,
+                gradient_accumulation_steps=1,
+                max_grad_norm=1.0 # Set clipping value
+            )
+
             # --- Setup Loop ---
-            max_norm = 1.0
             loop = TrainingLoop(
                 model=mock_model,
                 optimizer=mock_optimizer,
                 train_dataloader=mock_dataloader,
                 device=mock_device,
-                config={},
-                use_amp=False,
-                gradient_accumulation_steps=1,
-                max_grad_norm=max_norm
+                config=config # Pass config object
             )
-            loop.scaler = mock_scaler
+            loop.scaler = mock_scaler # Inject mock scaler
             mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
             # --- Run Epoch with Patched isnan/isinf --- #
@@ -97,7 +106,7 @@ class TestEpochClipping:
             mock_item.assert_called_once() # Check loss.item() was called
             mock_loss.backward.assert_called_once()
             mock_scaler.unscale_.assert_called_once_with(mock_optimizer)
-            mock_clip_grad_norm.assert_called_once_with(mock_params, max_norm)
+            mock_clip_grad_norm.assert_called_once_with(mock_params, config.max_grad_norm)
             mock_optimizer.step.assert_called_once()
             mock_progress_tracker_instance.update.assert_called_once()
             # Get the call args and assert specific parts if necessary

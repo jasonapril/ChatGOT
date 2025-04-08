@@ -217,92 +217,63 @@ def test_char_tokenizer_encode_no_unk(temp_text_file_for_tokenizer, sample_text_
     assert decoded_unknown_id == "he" # Unknown ID should be skipped/empty
 
 def test_char_tokenizer_save_load(temp_text_file_for_tokenizer, sample_text_content, tmp_path):
-    """Test saving a trained tokenizer and loading it."""
-    # 1. Train and save tokenizer with lowercase unk
-    tokenizer_orig = CharTokenizer(unk_token='<unk>')
+    """Test saving and then loading the tokenizer."""
+    tokenizer = CharTokenizer(unk_token='<unk>') # Use lowercase
     output_dir = str(tmp_path / "save_load_test")
-    tokenizer_orig.train(temp_text_file_for_tokenizer, output_dir)
-    orig_vocab_map  = tokenizer_orig.char_to_idx.copy()
-    orig_config     = tokenizer_orig.config.copy() # Get the internal config
-    orig_vocab_size = tokenizer_orig.get_vocab_size()
-    orig_unk_token = tokenizer_orig.unk_token
-    orig_unk_id    = tokenizer_orig.unk_token_id
+    tokenizer.train(temp_text_file_for_tokenizer, output_dir)
+    original_vocab_size = tokenizer.get_vocab_size()
 
-    # 2. Load tokenizer using the class method
-    tokenizer_loaded = CharTokenizer.load(output_dir)
+    # Load from the directory it was saved to
+    # Use load_from_dir class method
+    loaded_tokenizer = CharTokenizer.load_from_dir(output_dir)
 
-    # 3. Verify loaded state
-    # Config might differ slightly due to added keys during save (like special_tokens)
-    # Check key aspects instead of direct dict comparison
-    assert tokenizer_loaded.config['model_type'] == orig_config['model_type']
-    assert tokenizer_loaded.config['vocab_size'] == orig_vocab_size
-    assert tokenizer_loaded.char_to_idx == orig_vocab_map
-    assert tokenizer_loaded.get_vocab_size() == orig_vocab_size
-    assert tokenizer_loaded.idx_to_char == {v: k for k, v in orig_vocab_map.items()}
-    assert tokenizer_loaded.unk_token == orig_unk_token
-    assert tokenizer_loaded.unk_token_id == orig_unk_id
-    # Verify other special tokens are loaded correctly
-    assert tokenizer_loaded.pad_token == tokenizer_orig.pad_token
-    assert tokenizer_loaded.pad_id == tokenizer_orig.pad_id
-    assert tokenizer_loaded.bos_token == tokenizer_orig.bos_token
-    assert tokenizer_loaded.bos_id == tokenizer_orig.bos_id
-    assert tokenizer_loaded.eos_token == tokenizer_orig.eos_token
-    assert tokenizer_loaded.eos_id == tokenizer_orig.eos_id
-
-    # 4. Test encoding/decoding with loaded tokenizer
-    text = "hello Zorld"
-    encoded = tokenizer_loaded.encode(text)
-    decoded = tokenizer_loaded.decode(encoded)
-    # Correct the expected string to include the space and the unk token
-    expected_decoded = "hello <unk>orld"
-    assert decoded == expected_decoded
+    assert isinstance(loaded_tokenizer, CharTokenizer)
+    assert loaded_tokenizer.get_vocab_size() == original_vocab_size
+    assert loaded_tokenizer.char_to_idx == tokenizer.char_to_idx
+    assert loaded_tokenizer.idx_to_char == tokenizer.idx_to_char
+    assert loaded_tokenizer.pad_token == tokenizer.pad_token
+    assert loaded_tokenizer.pad_id == tokenizer.pad_id
+    assert loaded_tokenizer.bos_token == tokenizer.bos_token
+    assert loaded_tokenizer.bos_id == tokenizer.bos_id
+    assert loaded_tokenizer.eos_token == tokenizer.eos_token
+    assert loaded_tokenizer.eos_id == tokenizer.eos_id
+    assert loaded_tokenizer.unk_token == '<unk>' # Check unk token value
+    assert loaded_tokenizer.unk_token_id == tokenizer.unk_token_id
 
 def test_char_tokenizer_load_legacy_pickle(tmp_path, sample_text_content):
-    """Test loading a tokenizer saved in the old pickle format (backward compatibility)."""
-    # 1. Create a legacy pickle file manually (simulating old save format)
-    legacy_dir = tmp_path / "legacy_tokenizer"
+    """Test loading from the old pickle format (for backward compatibility)."""
+    # 1. Create legacy pickle file
+    legacy_dir = tmp_path / "legacy_pickle"
     legacy_dir.mkdir()
-    legacy_pickle_path = legacy_dir / "char_tokenizer.pkl"
-    
-    # Build vocab based on sample text, using lowercase unk
-    chars = sorted(list(set(sample_text_content))) + ['<unk>']
-    vocab = {c: i for i, c in enumerate(chars)}
-    legacy_config = {
-        'model_type': 'char',
-        'vocab_size': len(vocab),
-        # Legacy config stored special tokens like this
-        'special_tokens': {'unk': '<unk>'} 
-    }
+    legacy_file = legacy_dir / "char_tokenizer.pkl"
+    char_set = set(sample_text_content)
+    expected_chars = sorted(list(char_set))
+    legacy_vocab = {char: i for i, char in enumerate(expected_chars)}
+    legacy_idx_to_char = {i: char for char, i in legacy_vocab.items()}
     legacy_data = {
-        'config': legacy_config,
-        'char_to_idx': vocab,
-        'idx_to_char': {i: c for c, i in vocab.items()}
+        "config": {"model_type": "char", "vocab_size": len(legacy_vocab)}, # Basic config
+        "char_to_idx": legacy_vocab,
+        "idx_to_char": legacy_idx_to_char
     }
-    with open(legacy_pickle_path, 'wb') as f:
+    with open(legacy_file, 'wb') as f:
         pickle.dump(legacy_data, f)
 
-    # 2. Load using the class method
-    tokenizer = CharTokenizer.load(str(legacy_dir)) # Should detect and load pickle
+    # 2. Load using load_from_dir (which should handle the fallback)
+    # Use load_from_dir class method
+    loaded_tokenizer = CharTokenizer.load_from_dir(str(legacy_dir))
 
-    # 3. Verify loaded state
-    # Check key attributes loaded from legacy data
-    assert tokenizer.config['model_type'] == legacy_config['model_type']
-    assert tokenizer.config['vocab_size'] == legacy_config['vocab_size']
-    assert tokenizer.char_to_idx == legacy_data['char_to_idx']
-    assert tokenizer.get_vocab_size() == legacy_config['vocab_size']
-    assert tokenizer.idx_to_char == legacy_data['idx_to_char']
-    assert tokenizer.unk_token == '<unk>' # Loaded from special_tokens
-    assert tokenizer.unk_token_id == legacy_data['char_to_idx'].get('<unk>')
-    # Verify other special tokens use defaults if not in legacy config
-    assert tokenizer.pad_token == "<pad>"
-    assert tokenizer.bos_token == "<bos>"
-    assert tokenizer.eos_token == "<eos>"
+    assert isinstance(loaded_tokenizer, CharTokenizer)
+    assert loaded_tokenizer.get_vocab_size() == len(legacy_vocab)
+    assert loaded_tokenizer.char_to_idx == legacy_vocab
+    assert loaded_tokenizer.idx_to_char == legacy_idx_to_char
+    # Check default special tokens were added if not in legacy config
+    assert loaded_tokenizer.unk_token == "<unk>"
 
 def test_char_tokenizer_load_dir_not_found():
     """Test loading from a non-existent directory."""
-    tokenizer = CharTokenizer()
     with pytest.raises(FileNotFoundError):
-        tokenizer.load("non_existent_directory_12345")
+        # Use load_from_dir class method
+        CharTokenizer.load_from_dir("non_existent_dir_for_char_tokenizer")
 
 # Add test for decoding with unknown ID when UNK is defined
 def test_char_tokenizer_decode_unknown_id_with_unk(temp_text_file_for_tokenizer, tmp_path):

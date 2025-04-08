@@ -211,11 +211,9 @@ def test_subword_lifecycle(integration_config: DictConfig, tiny_corpus: Path):
 
         # Instantiate Trainer
         trainer = Trainer(
-            model_config=model_config_dict,
             config=training_config_obj,
             experiment_config=experiment_config_node,
-            device=experiment_config_node.training.device, # Get device from config
-            experiment_name="integration_test"
+            experiment_name="subword_lifecycle_test"
         )
 
         # Run Setup and Train

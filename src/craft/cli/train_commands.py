@@ -86,7 +86,7 @@ CONFIG_NAME = "config" # Main config file name
 # This might be better placed in a shared CLI utility module if reused elsewhere
 
 def load_hydra_config(
-    config_path: str = "../conf", # Relative path to config directory from this file
+    config_path: str = "../../../conf", # Relative path from this file to conf dir
     config_name: str = "config", # Main config file name
     experiment_name: Optional[str] = None, # The experiment config to load from conf/experiment
     overrides: Optional[List[str]] = None
@@ -105,10 +105,10 @@ def load_hydra_config(
     if overrides is None:
         overrides = []
 
-    # Construct the absolute path to the config directory
-    abs_config_path = Path(__file__).parent.parent.parent / config_path
-    if not abs_config_path.is_dir():
-        raise FileNotFoundError(f"Hydra config directory not found at: {abs_config_path}")
+    # # Construct the absolute path to the config directory - REMOVED, not needed for initialize
+    # abs_config_path = Path(__file__).parent.parent.parent / config_path
+    # if not abs_config_path.is_dir():
+    #     raise FileNotFoundError(f"Hydra config directory not found at: {abs_config_path}")
 
     # Add experiment override if provided
     if experiment_name:
@@ -123,8 +123,8 @@ def load_hydra_config(
              overrides.insert(0, experiment_override)
 
     hydra.core.global_hydra.GlobalHydra.instance().clear() # Clear previous Hydra instance if any
-    # Initialize Hydra without changing CWD or creating output dirs here
-    hydra.initialize(config_path=str(abs_config_path), job_name="craft_cli_train")
+    # Initialize Hydra using the relative config_path
+    hydra.initialize(config_path=config_path, job_name="craft_cli_train", version_base=None) # Added version_base=None
     try:
         cfg = hydra.compose(config_name=config_name, overrides=overrides)
         OmegaConf.resolve(cfg) # Resolve interpolations immediately
@@ -174,121 +174,22 @@ def run_training(
             overrides=overrides if overrides else []
         )
 
-        # 2. Basic Setup (Seed, Device)
-        set_seed(cfg.get('seed', 42))
-        device = setup_device(cfg.get('device', 'auto'))
-        setup_logging(level=cfg.get('log_level', 'INFO'))
+        # <<< DEBUG PRINT >>>
+        logger.debug(f"Full composed cfg object:\n{OmegaConf.to_yaml(cfg)}") # Print the whole config
+        # <<< END DEBUG PRINT >>>
 
-        # 3. Validate Core Config Schemas
-        try:
-            # Directly convert/validate OmegaConf config section to Pydantic model
-            training_cfg = OmegaConf.to_object(cfg.training) # type: ignore
-            # Add runtime check as to_object might return Any if schema mismatch
-            if not isinstance(training_cfg, TrainingConfig):
-                logger.error(f"OmegaConf.to_object(cfg.training) did not return a TrainingConfig object, got {type(training_cfg)}.")
-                # Optionally log the structure if it helps debug:
-                # logger.debug(f"Structure of cfg.training: {OmegaConf.to_yaml(cfg.training)}")
-                raise typer.Exit(code=1)
-        except ValidationError as e:
-             logger.error(f"Training configuration validation failed: {e}")
-             raise typer.Exit(code=1)
-        except (OmegaConfErrors.MissingMandatoryValue, dictconfig.MissingMandatoryValue, OmegaConfKeyError) as e:
-            logger.error(f"Missing mandatory value or key error in training configuration: {e}")
-            raise typer.Exit(code=1)
-
-        logger.info("Configuration validated successfully.")
-
-        # 4. Instantiate Components using Factories
-        logger.info("--- Instantiating Components ---")
-        tokenizer = create_tokenizer(cfg.get("data.tokenizer"))
-
-        dataloaders = create_dataloaders(cfg.data, tokenizer=tokenizer)
-        train_loader = dataloaders.get('train')
-        val_loader = dataloaders.get('val')
-
-        if train_loader is None:
-            raise ValueError("Training dataloader ('train') is required but was not created.")
-
-        model = create_model(cfg.model, tokenizer=tokenizer)
-        model.to(device)
-
-        optimizer = create_optimizer(cfg.optimizer, model=model)
-
-        # Use .get() for optional scheduler config and check type
-        scheduler: Optional[_LRScheduler] = None # Initialize as None
-        scheduler_cfg = cfg.get("scheduler")
-        if scheduler_cfg is not None:
-            if isinstance(scheduler_cfg, (DictConfig, dict)):
-                try:
-                     scheduler = create_scheduler(scheduler_cfg, optimizer=optimizer)
-                except Exception as e:
-                     logger.warning(f"Failed to create scheduler: {e}. Continuing without scheduler.", exc_info=True)
-            else:
-                 logger.warning(f"Scheduler config found but is not a dictionary ({type(scheduler_cfg)}). Skipping scheduler creation.")
-
-        amp_cfg = cfg.training.get('amp', {})
-        amp_enabled = amp_cfg.get('enabled', False)
-        amp_dtype = amp_cfg.get('dtype', 'float16')
-        scaler = create_grad_scaler(amp_enabled, amp_dtype)
-
-        callbacks_list = create_callbacks(cfg.get("callbacks"))
-
-        evaluator: Optional[Evaluator] = None
-        eval_cfg = cfg.get('eval')
-        if val_loader is not None and eval_cfg is not None:
-            try:
-                # Ensure eval_cfg is DictConfig before passing
-                if isinstance(eval_cfg, DictConfig):
-                    evaluator = create_evaluator(
-                        cfg=eval_cfg, # Now guaranteed to be DictConfig
-                        model=model,
-                        val_dataloader=val_loader,
-                        device=device,
-                        tokenizer=tokenizer
-                    )
-                else:
-                    logger.warning(f"Evaluation config ('eval') is not a DictConfig (type: {type(eval_cfg)}). Skipping evaluator creation.")
-            except Exception as e:
-                 logger.warning(f"Failed to create evaluator: {e}. Continuing without evaluation.", exc_info=True)
-        elif val_loader is None:
-            logger.info("Validation dataloader not available. Skipping evaluator creation.")
-        elif eval_cfg is None:
-             logger.info("Evaluation config ('eval') not found. Skipping evaluator creation.")
-
-        checkpoint_manager = create_checkpoint_manager(
-            config=training_cfg,
-            experiment_config=cfg.get('experiment'), # Pass the section or None
-            model=model,
-            optimizer=optimizer,
-            callbacks=callbacks_list,
-            scheduler=scheduler,
-            scaler=scaler,
-            tokenizer=tokenizer,
-        )
-        logger.info("--- Component Instantiation Complete ---")
-
+        # 4. Instantiate Trainer (which will handle component instantiation & config validation)
+        logger.info("--- Initializing Trainer (instantiating components from config) ---")
         trainer = Trainer(
-            config=training_cfg,
-            model=model,
-            optimizer=optimizer,
-            train_dataloader=train_loader,
-            val_dataloader=val_loader,
-            scheduler=scheduler,
-            tokenizer=tokenizer,
-            callbacks=callbacks_list,
-            evaluator=evaluator,
-            checkpoint_manager=checkpoint_manager,
-            scaler=scaler,
-            device=device,
+            cfg=cfg, # Pass the raw OmegaConf DictConfig
             resume_from_checkpoint=resume_from,
-            compile_model=compile_model,
-            # Get experiment_name directly from top-level config or default
-            experiment_name=cfg.get("experiment_name", "default_exp")
+            compile_model=compile_model
+            # experiment_name=cfg.get("experiment_name", "default_exp") # Removed, Trainer gets from validated cfg
         )
 
         logger.info("--- Trainer Setup Complete ---")
 
-        # 7. Run Training
+        # 5. Run Training
         trainer.train()
 
         logger.info("Training finished successfully.")

@@ -5,6 +5,9 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf, DictConfig
 import sys
 import os
+import tempfile
+import json
+import shutil
 
 # Ensure the config directory is discoverable by Hydra
 # Assuming tests are run from the project root
@@ -56,23 +59,30 @@ def test_stage1_config_loading_and_validation(experiment_name):
 # --- Minimal Test for CharTokenizer Loading --- 
 # Keep this? It tests CharTokenizer.load directly, which is useful and independent of factory/Hydra.
 def test_minimal_char_tokenizer_load():
-    """Directly tests CharTokenizer.load without Hydra/factory."""
-    tokenizer_dir = os.path.join(PROJECT_ROOT, "data", "processed", "got", "char", "tokenizer")
-    print(f"\n[Minimal Test] Attempting CharTokenizer.load with path: '{tokenizer_dir}' (Type: {type(tokenizer_dir)})")
+    """Test loading a minimal pre-saved CharTokenizer."""
+    # Setup: Create a minimal tokenizer setup manually
+    temp_dir = Path(tempfile.mkdtemp(prefix="test_char_tok_"))
+    config_path = temp_dir / "tokenizer_config.json"
+    vocab_path = temp_dir / "vocab.json"
     
-    # Ensure the directory and required files exist before calling load
-    assert os.path.isdir(tokenizer_dir), f"Tokenizer directory not found: {tokenizer_dir}"
-    assert os.path.exists(os.path.join(tokenizer_dir, 'tokenizer_config.json')), "tokenizer_config.json missing"
-    assert os.path.exists(os.path.join(tokenizer_dir, 'vocab.json')), "vocab.json missing"
-
+    char_to_idx = {'a': 0, 'b': 1, '<unk>': 2}
+    config_data = {
+        "model_type": "char",
+        "vocab_size": 3,
+        "special_tokens": {"unk_token": "<unk>", "unk_id": 2}
+    }
+    
+    with open(config_path, 'w') as f: json.dump(config_data, f)
+    with open(vocab_path, 'w') as f: json.dump(char_to_idx, f)
+    
     try:
-        from src.craft.data.tokenizers.char import CharTokenizer # Import locally
-        tokenizer = CharTokenizer.load(tokenizer_dir) # Pass the string path directly
-        
-        assert tokenizer is not None, "CharTokenizer.load returned None"
-        assert isinstance(tokenizer, CharTokenizer), f"Loaded object is not a CharTokenizer, but {type(tokenizer)}"
-        assert tokenizer.vocab_size > 0, "Loaded tokenizer vocab size is not positive"
-        print("[Minimal Test] CharTokenizer.load successful!")
-
+        # Load using the class method
+        tokenizer = CharTokenizer.load_from_dir(str(temp_dir))
+        assert isinstance(tokenizer, CharTokenizer)
+        assert tokenizer.vocab_size == 3
+        assert tokenizer.unk_token == "<unk>"
+        assert tokenizer.unk_token_id == 2
     except Exception as e:
-        pytest.fail(f"Minimal CharTokenizer.load test failed with error: {type(e).__name__}: {e}", pytrace=True) 
+        pytest.fail(f"Minimal CharTokenizer.load test failed with error: {e}")
+    finally:
+        shutil.rmtree(temp_dir) 

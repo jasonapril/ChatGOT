@@ -50,47 +50,41 @@ class TrainingLoop:
         train_dataloader: torch.utils.data.DataLoader,
         device: torch.device,
         config: TrainingConfig, # Type hint as TrainingConfig (Pydantic)
-        experiment_config: Optional[DictConfig] = None, # Add experiment_config (OmegaConf)
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
-        use_amp: bool = False,
-        gradient_accumulation_steps: int = 1,
-        max_grad_norm: Optional[float] = None,
-        log_interval: int = 10,
-        callbacks: Optional[List[Callback]] = None, # Changed Any to Callback
+        callbacks: Optional[List[Callback]] = None,
         checkpoint_manager: Optional[CheckpointManager] = None, # Add checkpoint manager
-        save_steps_interval: int = 0, # Add save interval
-        time_save_interval_seconds: int = 0, # <-- Add time interval
-        max_steps: Optional[int] = None # Add max_steps
     ):
         self.model = model
         self.optimizer = optimizer
         self.train_dataloader = train_dataloader
         self.device = device
         self.config = config # Store Pydantic TrainingConfig
-        self.experiment_config = experiment_config # Store OmegaConf DictConfig
         self.scheduler = scheduler
-        self.use_amp = use_amp
-        self.gradient_accumulation_steps = max(1, gradient_accumulation_steps)
-        self.max_grad_norm = max_grad_norm
-        self.log_interval = log_interval
+        
+        # Access parameters from config
+        self.use_amp = config.use_amp
+        self.gradient_accumulation_steps = max(1, config.gradient_accumulation_steps)
+        self.max_grad_norm = config.max_grad_norm
+        self.log_interval = config.log_interval
+        self.save_interval = config.save_interval if config.save_interval is not None else 0
+        self.time_save_interval_seconds = config.time_save_interval_seconds if config.time_save_interval_seconds is not None else 0
+        self.max_steps = config.max_steps
+        
         # Handle callbacks: Use provided CallbackList or create one
         if isinstance(callbacks, CallbackList):
             self.callbacks = callbacks
         else:
             self.callbacks = CallbackList(callbacks if callbacks is not None else [])
         self.logger = logging.getLogger(self.__class__.__name__)
-        
-        # Initialize scaler for AMP using the recommended method
-        # No need to import GradScaler specifically here if torch.amp is sufficient
+
+        # Initialize scaler for AMP
         self.scaler = torch.amp.GradScaler(self.device.type, enabled=self.use_amp)
         self.checkpoint_manager = checkpoint_manager # Store manager
-        self.save_steps_interval = save_steps_interval # Store interval
-        self.time_save_interval_seconds = time_save_interval_seconds # <-- Store time interval
-        self.max_steps = max_steps # Store max_steps
 
         # Time tracking for interval-based actions
         self.last_time_based_save = time.time()
         self.last_time_based_sample = time.time()
+        self._last_sample_time = time.time() # Initialize _last_sample_time
 
     def _prepare_training_state(self, epoch: int, global_step: int) -> TrainingState:
         """Gathers component states and creates a TrainingState object."""
@@ -114,10 +108,10 @@ class TrainingLoop:
                  tb_log_dir = tb_logger.resolved_log_dir
         
         serializable_config = None
-        if self.experiment_config and _OMEGACONF_AVAILABLE:
-            serializable_config = cast(Dict[str, Any], OmegaConf.to_container(self.experiment_config, resolve=True))
-        elif self.config: # Fallback to Pydantic config if OmegaConf not available/used
+        if self.config: 
             serializable_config = self.config.model_dump()
+        else:
+            pass # config is None, serializable_config remains None
 
         state = TrainingState(
             epoch=epoch,
@@ -137,45 +131,50 @@ class TrainingLoop:
 
     def _should_save_checkpoint(self, global_step: int, current_time: float) -> bool:
         """Checks if a checkpoint should be saved based on step or time intervals."""
-        # Step-based trigger
+        # Step-based trigger using self.save_interval from config
         step_trigger = (
             self.checkpoint_manager
-            and self.save_steps_interval > 0
+            and self.save_interval > 0
             and global_step > 0 # Avoid saving at step 0
-            and global_step % self.save_steps_interval == 0
+            and global_step % self.save_interval == 0
         )
-        # Time-based trigger
+        # Time-based trigger using self.time_save_interval_seconds from config
         time_trigger = False
         if self.checkpoint_manager and self.time_save_interval_seconds > 0:
             elapsed_since_last_save = current_time - self.last_time_based_save
             if elapsed_since_last_save >= self.time_save_interval_seconds:
                 time_trigger = True
                 self.last_time_based_save = current_time # Reset timer *only* if triggered
-        
+
         return step_trigger or time_trigger
 
     def _should_generate_sample(self, global_step: int, current_time: float) -> bool:
-        """Checks if samples should be generated based on step or time intervals."""
-        # Find sample generation callback
-        sample_cb = self.callbacks.get_callback(SampleGenerationCallback)
-        if not sample_cb:
-            return False # No sampling if callback doesn't exist
+        """Check if sample generation should occur based on interval."""
+        if not self.callbacks:
+            return False
+
+        # Find the SampleGenerationCallback instance by iterating
+        sample_cb: Optional[SampleGenerationCallback] = None
+        for cb in self.callbacks:
+            if isinstance(cb, SampleGenerationCallback):
+                sample_cb = cb
+                break
         
-        # Step-based trigger (use callback's interval)
-        step_trigger = (
-            sample_cb.sample_interval_steps > 0 
-            and global_step > 0
-            and global_step % sample_cb.sample_interval_steps == 0
-        )
-        # Time-based trigger (use callback's interval)
-        time_trigger = False
-        if sample_cb.sample_interval_seconds > 0:
-            elapsed_since_last_sample = current_time - self.last_time_based_sample
-            if elapsed_since_last_sample >= sample_cb.sample_interval_seconds:
-                time_trigger = True
-                self.last_time_based_sample = current_time # Reset timer *only* if triggered
+        if sample_cb is None:
+            # self.logger.debug("SampleGenerationCallback not found in CallbackList.")
+            return False # No sampling callback found
         
-        return step_trigger or time_trigger
+        # Check if generation interval is met
+        if sample_cb.generation_interval_seconds <= 0:
+            return False # Interval disabled
+            
+        now = current_time # Use the provided current time
+        if (now - self._last_sample_time) >= sample_cb.generation_interval_seconds:
+            self._last_sample_time = now
+            # self.logger.debug(f"Sample generation triggered at step {global_step}.")
+            return True
+            
+        return False
 
     def train_epoch(
         self,
@@ -264,7 +263,8 @@ class TrainingLoop:
 
                     if is_loss_invalid:
                         self.logger.warning(f"Step {global_step}, Batch {i+1}/{total_batches}: NaN/Inf loss detected: {loss_val}. Skipping backward/step.")
-                        if should_step: self.optimizer.zero_grad(set_to_none=True) # Still zero grad if skipping step
+                        if should_step: 
+                            self.optimizer.zero_grad(set_to_none=True) # Still zero grad if skipping step
                         continue
 
                     loss = loss_unscaled / self.gradient_accumulation_steps
@@ -300,8 +300,11 @@ class TrainingLoop:
                     # Increment global step *after* a successful optimizer step
                     global_step += 1
 
+                    # Call step end callback *after* step increment and actions
+                    self._callback_on_step_end(i, global_step, step_logs)
+
                     # <<< REPLACE DEBUG PRINT WITH LOGGER.ERROR >>>
-                    self.logger.error(f"[DEBUG TrainingLoop] Checkpoint Eval: Step={global_step}, Interval={self.save_steps_interval}, Manager Exists={self.checkpoint_manager is not None}")
+                    self.logger.error(f"[DEBUG TrainingLoop] Checkpoint Eval: Step={global_step}, Interval={self.save_interval}, Manager Exists={self.checkpoint_manager is not None}")
 
                     # --- Periodic Checkpoint Save --- #
                     current_time = time.time()
@@ -356,12 +359,31 @@ class TrainingLoop:
                     is_last_step_overall = (self.max_steps is not None and global_step >= self.max_steps)
                     if global_step % self.log_interval == 0 or is_last_batch_step or is_last_step_overall:
                         avg_step_loss = loss_val # Current step loss (avg over accumulation)
+                        # Prepare metrics dict for logging and callbacks
+                        log_metrics = {
+                            "loss": avg_step_loss,
+                            "lr": current_lr,
+                            "tokens_per_sec": tokens_per_sec
+                        }
+                        # Add GPU memory usage if available
+                        if torch.cuda.is_available():
+                             log_metrics["vram_allocated_gb"] = torch.cuda.memory_allocated(self.device) / (1024**3)
+                             log_metrics["vram_max_allocated_gb"] = torch.cuda.max_memory_allocated(self.device) / (1024**3)
+                             # Reset peak memory stats periodically if desired
+                             # torch.cuda.reset_peak_memory_stats(self.device)
+                        
+                        # Update progress tracker (ensure it can handle these new metrics)
                         progress.update(
                              step=global_step,
-                             loss=avg_step_loss,
-                             learning_rate=current_lr,
-                             tokens_per_second=tokens_per_sec if tokens_per_sec > 0 else None
+                             loss=log_metrics["loss"],
+                             learning_rate=log_metrics.get("lr"), # Pass LR if available
+                             tokens_per_second=log_metrics.get("tokens_per_sec") # Pass T/s if available
+                             # Pass other specific metrics if ProgressTracker supports them
+                             # **log_metrics # Reverted: Pass only expected args
                         )
+                        # Add metrics to step_logs for on_step_end callback
+                        step_logs.update(log_metrics)
+                        
                         # Reset step accumulators after logging
                         step_token_accumulator = 0
                         step_time_accumulator = 0.0
@@ -388,10 +410,17 @@ class TrainingLoop:
 
             # Callbacks: on_step_end - called AFTER potential step and increment
             # Pass metrics accumulated during the step (or micro-batches)
-            step_logs["loss"] = loss_val # Log the unscaled loss for this batch/step
-            if should_step:
-                 step_logs["lr"] = current_lr # Log LR only when optimizer stepped
-            self._callback_on_step_end(global_step, logs=step_logs)
+            # Ensure standard loss is always included
+            if "loss" not in step_logs:
+                 step_logs["loss"] = loss_val 
+            # Add tokens/sec if calculated (might not be if not a logging step)
+            # If step_logs already contains tokens_per_sec from the periodic log, this won't overwrite.
+            # If it wasn't a logging step, we might want the *instantaneous* T/s?
+            # For now, only log T/s periodically via log_metrics update above.
+            # if "tokens_per_sec" not in step_logs and step_time_accumulator > 0:
+            #      step_logs["tokens_per_sec"] = step_token_accumulator / step_time_accumulator
+            
+            self._callback_on_step_end(i, global_step, step_logs)
 
             # CHECK MAX STEPS *AFTER* THE STEP IS COMPLETED
             if self.max_steps is not None and global_step >= self.max_steps:
@@ -427,11 +456,11 @@ class TrainingLoop:
         if self.callbacks:
             self.callbacks.on_step_begin(step=step, logs=logs)
 
-    def _callback_on_step_end(self, step: int, logs: Optional[Dict[str, Any]] = None) -> None:
+    def _callback_on_step_end(self, step: int, global_step: int, logs: Optional[Dict[str, Any]] = None) -> None:
         if self.callbacks:
             # Ensure metrics dict exists
             if logs is None: logs = {}
-            self.callbacks.on_step_end(step=step, logs=logs)
+            self.callbacks.on_step_end(step=step, global_step=global_step, logs=logs)
 
     def run(self) -> Dict[str, Any]:
         """Runs the full training loop over all epochs."""

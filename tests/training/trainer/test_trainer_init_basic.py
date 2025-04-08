@@ -1,26 +1,23 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from omegaconf import OmegaConf, DictConfig
 import torch
 from torch.utils.data import DataLoader
-from pydantic import ValidationError
-import logging
+from omegaconf import DictConfig
 
-# Assuming fixtures (setup_minimal_trainer_env, etc.) and
-# create_instantiate_side_effect are available from conftest.py
+# Assuming fixtures (setup_minimal_trainer_env, setup_optional_trainer_env)
+# and create_instantiate_side_effect are available from conftest.py
 from craft.training.trainer import Trainer
 from craft.config.schemas import TrainingConfig
-from craft.training.callbacks.base import CallbackList, Callback # Needed for setup_callbacks test
-from craft.training.evaluation import Evaluator # Needed?
-from craft.training.checkpointing import CheckpointManager # Needed?
-from torch.cuda.amp import GradScaler as CudaGradScaler # For setup_optionals test
+from craft.training.callbacks.base import CallbackList, Callback # For mock_callback_list_instance
+from torch.cuda.amp import GradScaler as CudaGradScaler # For mock_scaler
 
-# Dummy class needed for callback test target
+# Dummy class needed for callback test target within test_init_with_optionals
+# (even though the test file containing the definition might change later)
 class MockCallbackTarget:
     pass
 
 # =================================
-# Initialization Tests - Basic
+# Initialization Tests - Basic & Optionals
 # =================================
 def test_init_minimal_required(setup_minimal_trainer_env: dict):
     """Test Trainer initialization with the minimal required configuration using instantiate patch."""
@@ -36,9 +33,9 @@ def test_init_minimal_required(setup_minimal_trainer_env: dict):
     mock_loader_instance = env["mock_train_loader"]
 
     # Patch DataLoader *in the trainer module*
-    with patch('craft.training.trainer.instantiate', side_effect=instantiate_side_effect) as mock_instantiate, \
-         patch('hydra.utils.get_class', return_value=mock_model_class) as mock_get_class, \
-         patch('craft.training.trainer.DataLoader', return_value=mock_loader_instance) as mock_dataloader_patch:
+    with (patch('craft.training.trainer.instantiate', side_effect=instantiate_side_effect) as mock_instantiate,
+          patch('hydra.utils.get_class', return_value=mock_model_class) as mock_get_class,
+          patch('craft.training.trainer.DataLoader', return_value=mock_loader_instance) as mock_dataloader_patch):
 
         # Act
         trainer = Trainer(cfg=cfg)
@@ -74,7 +71,7 @@ def test_init_minimal_required(setup_minimal_trainer_env: dict):
         env["mock_model"].to.assert_called_with(torch.device(trainer.device))
 
 
-@patch('tests.training.trainer.test_trainer_init.MockCallbackTarget')
+@patch('tests.training.trainer.test_trainer_init.MockCallbackTarget') # Patch original location
 def test_init_with_optionals(
     MockCallbackTarget_p, # Keep callback patch
     setup_optional_trainer_env, # Use optional env
@@ -106,11 +103,11 @@ def test_init_with_optionals(
         raise ValueError(f"Unexpected DataLoader dataset: {type(dataset)}")
     mock_dataloader_init = MagicMock(side_effect=dataloader_side_effect)
 
-    with patch('craft.training.trainer.instantiate', side_effect=instantiate_side_effect) as mock_instantiate, \
-            patch('hydra.utils.get_class', return_value=mock_model_class) as mock_get_class, \
-            patch('craft.training.trainer.DataLoader', mock_dataloader_init) as mock_dataloader_patch, \
-            patch("craft.training.trainer.CallbackList", return_value=mock_callback_list_instance) as mock_callbacklist_init, \
-            patch("torch.cuda.amp.GradScaler", return_value=mock_scaler) as mock_gradscaler_init:
+    with (patch('craft.training.trainer.instantiate', side_effect=instantiate_side_effect) as mock_instantiate,
+            patch('hydra.utils.get_class', return_value=mock_model_class) as mock_get_class,
+            patch('craft.training.trainer.DataLoader', mock_dataloader_init) as mock_dataloader_patch,
+            patch("craft.training.trainer.CallbackList", return_value=mock_callback_list_instance) as mock_callbacklist_init,
+            patch("torch.cuda.amp.GradScaler", return_value=mock_scaler) as mock_gradscaler_init):
 
         # Act
         try:
@@ -158,11 +155,4 @@ def test_init_with_optionals(
         mock_gradscaler_init.assert_called_once_with(enabled=True)
 
         # Use torch.device in assertion
-        env["mock_model"].to.assert_called_with(torch.device(trainer.device))
-
-
-# =================================
-# Original file ended here after removing tests
-# =================================
-
-    
+        env["mock_model"].to.assert_called_with(torch.device(trainer.device)) 

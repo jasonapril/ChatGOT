@@ -8,10 +8,13 @@ A modular PyTorch framework designed for building, training, and evaluating AI m
 - **Configuration Driven**: Enable flexible experimentation and reproducible runs primarily through configuration files, minimizing code changes.
 - **Robustness & Futureproofing**: Aim for a stable, well-tested codebase with clear interfaces and adaptable design to facilitate long-term development and integration of new techniques.
 - **Usability**: Offer a clear command-line interface (CLI) and well-defined workflows for common tasks like training, generation, and data preparation.
+- **Performance & Resource Efficiency**: Optimize for fast training and inference times while maximizing the utilization of available system resources (RAM/VRAM) within configurable limits, particularly targeting effectiveness on low-spec hardware.
+- **Experimentation & Innovation**: Facilitate the rapid development, testing, and iteration of novel AI architectures and techniques (including custom ideas and published research) with a focus on discovering efficient and effective methods suitable for various hardware constraints. Enable modification and use of third-party models where feasible.
 
 ## Guiding Principles
 
 - **Adherence to Conventions**: This project strives to follow established best practices and common conventions within the Python and ML ecosystems. Deviations are made thoughtfully, primarily when necessitated by critical performance requirements or essential custom implementations not suitably addressed by standard approaches.
+- **Workflow-Driven Development**: Development focuses on establishing and refining working end-to-end workflows (e.g., data preparation, training, generation). Components (models, data loaders, tests, etc.) are built and improved incrementally to support and expand these core functional pipelines. This approach prioritizes functional integration and robust core capabilities.
 
 ### Dependency Management Guidelines
 
@@ -24,12 +27,20 @@ Adding external dependencies increases complexity and potential risks. Before ad
 5.  **Minimalism**: If alternatives exist, prefer libraries that are more focused or introduce fewer transitive dependencies, unless a heavier option provides significantly more value.
 6.  **Security**: Be mindful of potential security implications. Check for known vulnerabilities if possible (e.g., using `pip-audit` or GitHub's Dependabot).
 
+## Development Standards & Guidelines
+
+- **PEP 8 Compliance**: All Python code should adhere to the PEP 8 style guide.
+- **Single Source of Truth (SSOT)**: Documentation should follow the SSOT principle. Information relevant to a specific component (e.g., configuration details) should ideally reside close to that component (e.g., in its `README.md` or docstrings), while this main `README.md` provides the high-level overview and project status.
+- **Maintainability & Debuggability**: Code should be written clearly, be well-documented (docstrings, comments for non-obvious logic), and accompanied by comprehensive tests to facilitate understanding, modification, and troubleshooting.
+- **Experiment Artifact Colocation**: Hydra outputs (logs, checkpoints, etc.) should be organized per experiment. The standard structure within the `outputs/` directory is `<experiment_name>/<run_id>/` (where `<run_id>` is typically `YYYY-MM-DD/HH-MM-SS/` by default), with checkpoints specifically saved to `outputs/<experiment_name>/<run_id>/checkpoints/` and logs potentially to `outputs/<experiment_name>/<run_id>/logs/`. This structure makes finding artifacts for a specific run straightforward.
+- **Pre-Commit Checks**: Use `mypy src` for type checking and `pytest` to run tests before committing changes.
+
 ## Core Technology Rationale
 
 Craft leverages several key frameworks and libraries, chosen for specific benefits:
 
 - **PyTorch**: Selected as the core deep learning framework for its flexibility, strong community support, extensive ecosystem, and Pythonic design, facilitating rapid research and development.
-- **Hydra**: Used for configuration management. Its ability to compose configurations from YAML files, manage outputs, and handle command-line overrides is crucial for reproducible experiments and flexible setup without extensive code changes.
+- **Hydra**: Used for configuration management. Its ability to compose configurations from YAML files (`conf/`).
 - **Pydantic**: Employed for defining configuration schemas (`src/craft/config/schemas.py`). It provides data validation, type hints, and clear settings documentation, enhancing robustness and ensuring configuration integrity before potentially expensive runs.
 - **Typer**: Powers the command-line interface (CLI). Chosen for its ease of use, automatic help generation, and seamless integration, making interactions with the framework straightforward.
 
@@ -66,7 +77,7 @@ The project is organized into several key directories:
     -   Relies heavily on the `_target_` key to link configurations to specific Python classes/functions for instantiation. The parameters defined here are validated against the Pydantic schemas in `src/craft/config/schemas.py`.
 -   **`scripts/`**: Standalone Python scripts, potentially used for auxiliary tasks or development purposes (e.g., `check_model_params.py`). **Note:** Core training, generation, and data prep should primarily use the CLI (`python -m craft.cli.run ...`). This folder may contain legacy or utility scripts. See `scripts/README.md`.
 -   **`tests/`**: Contains unit and integration tests using `pytest`. Tests often leverage specific configuration files.
--   **`outputs/`**: Default directory where Hydra saves outputs of runs (logs, checkpoints, configs), organized by date/time or custom experiment names based on Hydra configuration.
+-   **`outputs/`**: Default directory where Hydra saves outputs of runs, organized by experiment and run ID (e.g., `outputs/<experiment_name>/YYYY-MM-DD/HH-MM-SS/`). See "Development Standards & Guidelines" for details on artifact colocation (checkpoints, logs).
 -   **`data/`**: (Top-level, optional) Can be used for storing raw or processed datasets. Not tracked by default.
 
 ## Key Development & Usage Workflows
@@ -114,105 +125,28 @@ Interacting with the framework typically involves one or more of these workflows
         # Example options: --max-new-tokens 100 --temperature 0.7
         ```
 
-## Getting Started
-
-1.  **Setup Environment:** Create and activate a Python environment (e.g., using `conda` or `venv`). Python 3.10+ is recommended (check `pyproject.toml` for specific constraints).
-2.  **Installation:**
-    *   **For users/running:**
-        ```bash
-        # Install exact dependencies from the lock file
-        pip install -r requirements.lock.txt
-        # Install the craft package itself
-        pip install .
-        # Or in editable mode if you might modify the source:
-        # pip install -e .
-        ```
-    *   **For development (includes testing, linting tools):**
-        ```bash
-        # Install exact dependencies (including dev tools) from the dev lock file
-        pip install -r requirements-dev.lock.txt
-        # Install the craft package in editable mode
-        pip install -e .
-        ```
-3.  **Prepare Data:** (Example using sample data provided in `data/raw/sample.txt`)
-    ```bash
-    # Create processed data directories if they don't exist
-    mkdir -p data/processed/sample_char data/processed/sample_subword
-
-    # Prepare character-level dataset
-    python -m craft.cli.run dataset prepare --input data/raw/sample.txt --output-dir data/processed/sample_char --tokenizer-type char
-
-    # (Optional) Prepare subword dataset (requires training SentencePiece first)
-    # 1. Train SentencePiece model (using spm directly or a script if available)
-    #    Example command if using spm directly:
-    #    pip install sentencepiece # If not already installed
-    #    spm_train --input=data/raw/sample.txt --model_prefix=data/processed/sample_sp --vocab_size=100 --model_type=bpe
-    # 2. Use a data config (e.g., conf/data/subword_sample.yaml) pointing to the trained model
-    #    Ensure conf/data/subword_sample.yaml exists and contains:
-    #    tokenizer:
-    #      _target_: craft.data.tokenizers.SentencePieceTokenizer
-    #      model_path: data/processed/sample_sp # Path prefix to the trained model
-    #    # ... other dataset config ...
-    # python -m craft.cli.run dataset prepare --input data/raw/sample.txt --output-dir data/processed/sample_subword --config conf/data/subword_sample.yaml
-    ```
-4.  **Configure Experiment:** Review configurations in `conf/`. The provided `conf/experiment/char_small.yaml` should work with the character data prepared above. Ensure data paths match if you used different locations.
-5.  **Run Training:**
-    ```bash
-    # This uses the configuration defined in conf/experiment/char_small.yaml
-    python -m craft.cli.run train experiment=char_small
-    ```
-6.  **Generate Text:** After training completes, find the checkpoint in the `outputs/` directory (Hydra creates a dated subdirectory).
-    ```bash
-    # Replace <run_dir> with the actual directory created by Hydra (e.g., outputs/YYYY-MM-DD/HH-MM-SS/)
-    python -m craft.cli.run generate text --checkpoint outputs/<run_dir>/checkpoints/latest.pt --prompt "The meaning of life is"
-    ```
-
-## Testing
-
-Run tests using `pytest`:
-```bash
-pytest
-```
-
 ## TODO
 
-## Active Tasks
+### Active
 
-- Finish implementing mypy.
-- Get testing in the green.
+-   **Define and Implement Core Functionality & Testing Roadmap (Priority: Critical):** Ensure the project robustly supports the following key workflows, with comprehensive tests for each. Align all code and documentation with these priorities.
+    -   *Recent Progress:* Completed refactoring of core components (`Trainer`, `TrainingLoop`) for `TrainingConfig` integration and dependency simplification. Addressed related unit test failures, including checkpoint resuming (`Trainer._resume_from_checkpoint`).
+    -   **Data Preparation:** Implement and test the `dataset prepare` CLI command for various tokenizer types (char, subword) and data formats. Ensure corresponding `Dataset` classes (e.g., `PickledDataset`) work correctly. Test integration between data config (`conf/data/`) and preparation CLI.
+    -   **Model Configuration & Development:** Solidify the process using Pydantic schemas (`src/craft/config/schemas.py`) and Hydra configs (`conf/model/`) (confirmed alignment via discriminator pattern). Create clear guidelines, potentially helper methods/tests, for building model configurations and adding new model architectures (`src/craft/models/`), ensuring they are correctly instantiated via `_target_` or Structured Configs.
+    -   **Training Workflow:** Refine and test the `train` CLI command, the `Trainer` class (`src/craft/training/trainer.py`), and methods for setting up training runs.
+        -   *Logging:* Ensure essential metrics (throughput T/s, VRAM/CUDA utilization, loss) are logged correctly. Evaluate integration with tools like TensorBoard (See `## Review Dependency Rationale`). Ensure logs are directed appropriately (e.g., `outputs/<experiment_name>/`).
+        -   *Checkpointing:* Thoroughly test saving (`checkpointing.py`) and resuming (`Trainer._resume_from_checkpoint`) training state (model weights, optimizer state, scheduler state, training progress). Test edge cases and recovery. Ensure checkpoints are saved to logical locations (e.g., `outputs/<experiment_name>/checkpoints/`). An initial integration test (`tests/integration/test_checkpoint_resume.py`) covering basic save/resume has been added.
+        -   *Sample Generation during Training:* Implement and test periodic sample generation callback (`callbacks/`) if desired.
+    -   **Evaluation & Analysis:** Develop and test methods (`evaluation.py`) for evaluating models post-training. Implement loss visualization tools/scripts.
+    -   **End-to-End Integration Tests:** Expand tests like `tests/integration/test_transformer_pipeline.py`. Add CLI-based integration tests (e.g., in `tests/cli/integration/`) to cover full workflows (data prep -> train -> evaluate/generate). Added `test_checkpoint_resume.py`.
+-   Address any remaining integration test failures identified during full test suite runs.
+-   **(Meta-Rule):** Keep this section updated so that we could start a new chat without context and be able to resume what we were working on.
 
-## Misc
-
-**Experiment Artifact Colocation**: Do we want Hydra to output to outputs/<experiment_name>/YYYY-MM-DD/HH-MM-SS/? Likewise, other logs would go to outputs/<experiment_name>/ and checkpoints would be saved in outputs/<experiment_name>/checkpoints/. This would make finding the most recent checkpoint for an experiment trivial.
-
-**Standards/Guidelines**: Set PEP8 as a standard here? Ensure that it's not in the other README's by the SSOT principle. Establish SSOT as a standard here, too? Anything else along these lines? Merge with existing section?
-
-**Source Code Standards/Guidlines**: Differentiate the standards for the source code from other aspects of the project? PEP8 would go here. Also, are maintainability and debuggability code-level goals? What does that even mean?
-
-### Test Features
-
-1. Data Preparation: Is this working? Do we have sufficient tests for this feature?
-2. Model Development: We need a method for building model configurations.
-3. Training: We need a method for setting up training runs.
-    - Logging
-        - Throughput: T/s
-        - VRAM/CUDA Utilization
-    - Checkpointing
-        - Saving
-        - Resuming
-    - Sample Generation
-4. Evaluation & Analysis
-    - Visualize Loss
+### Misc
 
 ### Review Configuration System
 
 - Explore deeper integration with Hydra's Structured Configs (using dataclasses).
-
-### Review Goals
-
-- We should define the precise goals that we wish to attain with this project, and work backwards from there to ensure that the project's implementations are ideal for fulfilling those goals.
-- Add: Develop AI models that work on low-spec devices (performance critical)
-- Add: Experiment with cutting edge AI architectures
 
 ### Review Dependency Rationale
 
@@ -231,7 +165,7 @@ pytest
 
 ### Meta
 
-- Refactor this README.md -- it contains some redundant information. Review how this document is structured including names and order of headings. Note that this document is to help an AI Agent understand the project at a glance (in addition to the other README.md files, local to subfolders), for the time being, at least.
+- **Refactor this README.md (High Priority)** -- it contains some redundant information. Review how this document is structured including names and order of headings. Note that this document is to help an AI Agent understand the project at a glance (in addition to the other README.md files, local to subfolders), for the time being, at least.
 - Is there a better location for documentation like this?
 - Would it be helpful to link to larger sets of tasks, projects, plans, or roadmaps from this document for the AI Agent to use as a sort of long-term memory?
 

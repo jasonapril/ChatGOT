@@ -151,28 +151,41 @@ class TensorBoardLogger(Callback):
             return
 
         if metrics:
-            loss = metrics.get('loss', None)
-            lr = metrics.get('lr', None)
             logger.debug(f"on_step_end received metrics: {metrics}")
 
-            if loss is not None:
-                self.writer.add_scalar("Loss/train_step", loss, global_step=global_step)
-                logger.debug(f"Logged Loss/train_step: {loss} at step {global_step}")
+            # Log all numeric metrics found in the dictionary
+            for key, value in metrics.items():
+                if isinstance(value, (int, float)):
+                    # Create a sensible tag name (e.g., 'loss' -> 'Loss/train_step', 'lr' -> 'LearningRate/step')
+                    if key == 'loss':
+                        tag = "Loss/train_step"
+                    elif key == 'lr':
+                        tag = "LearningRate/step"
+                    elif key == 'tokens_per_sec':
+                        tag = "Throughput/tokens_per_sec"
+                    elif key == 'vram_allocated_gb':
+                         tag = "Memory/VRAM_Allocated_GB"
+                    elif key == 'vram_max_allocated_gb':
+                         tag = "Memory/VRAM_Max_Allocated_GB"
+                    else:
+                        # Fallback for other numeric metrics
+                        tag = f"Train/{key.replace('_', ' ').title().replace(' ', '')}_step"
 
-            if lr is not None:
-                logger.debug(f"Found lr in metrics dict: {lr}")
-                self.writer.add_scalar("LearningRate/step", lr, global_step=global_step)
-                logger.debug(f"Logged LearningRate/step: {lr} from metrics at step {global_step}")
-            elif self.trainer and self.trainer.optimizer:
+                    try:
+                         self.writer.add_scalar(tag, value, global_step=global_step)
+                         logger.debug(f"Logged {tag}: {value} at step {global_step}")
+                    except Exception as e:
+                         logger.warning(f"Failed to log scalar '{tag}' to TensorBoard: {e}")
+
+            # Fallback for LR if not in metrics dict (keep this logic)
+            if 'lr' not in metrics and self.trainer and self.trainer.optimizer:
                 logger.debug("lr not found in metrics, attempting fallback to trainer.optimizer.")
                 try:
                     current_lr = self.trainer.optimizer.param_groups[0]['lr']
                     self.writer.add_scalar("LearningRate/step", current_lr, global_step=global_step)
-                    logger.debug(f"Logged LearningRate/step: {current_lr} from optimizer at step {global_step}")
+                    logger.debug(f"Logged LearningRate/step: {current_lr} from optimizer fallback at step {global_step}")
                 except (AttributeError, IndexError, KeyError) as e:
-                    logger.warning(f"Could not retrieve learning rate from optimizer: {e}", exc_info=True)
-            else:
-                 logger.debug("lr not found in metrics and no trainer/optimizer for fallback.")
+                    logger.warning(f"Could not retrieve learning rate from optimizer fallback: {e}", exc_info=True)
 
         else:
             logger.debug("No metrics provided for step {step}, global_step {global_step}. Nothing to log.")

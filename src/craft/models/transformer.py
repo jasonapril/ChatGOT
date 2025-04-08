@@ -63,8 +63,7 @@ class PositionalEncoding(nn.Module):
         # Cast return value to Tensor
         return cast(torch.Tensor, self.dropout(x)) # type: ignore
 
-@register_model(name="craft.models.transformer.TransformerModel", config_cls=LanguageModelConfig) # type: ignore[index]
-class TransformerModel(LanguageModel): # type: ignore[no-any-return]
+class TransformerModel(LanguageModel):
     """
     Transformer model for character-level language modeling.
     Uses the standard nn.TransformerDecoderLayer and nn.TransformerDecoder.

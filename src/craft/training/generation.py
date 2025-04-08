@@ -285,38 +285,41 @@ class TextGenerator:
 
             # --- Decoding --- #
             generated_texts = []
-            if not hasattr(self.dataset, 'decode'):
-                 self.logger.error("Dataset does not have a required 'decode' method.")
-                 return ["Error: Decoding not possible."] * num_return_sequences
-                 
+
             for ids in generated_ids_list:
                 # Decode, handling potential errors
                 generated_text = "[Decoding Error]" # Default value
+                decoded_successfully = False
                 try:
-                    # --- Decoding Logic --- #
+                    # --- Updated Decoding Logic --- #
                     # Priority: self.tokenizer -> self.dataset.decode -> Error
-                    # Try explicit tokenizer first
                     if self.tokenizer and hasattr(self.tokenizer, 'decode') and callable(getattr(self.tokenizer, 'decode')):
                         # Use explicitly provided tokenizer
                         self.logger.debug("Using self.tokenizer.decode")
                         decoded_text = self.tokenizer.decode(ids)
-                    # Fallback to dataset decode method
+                        decoded_successfully = True
                     elif self.dataset and hasattr(self.dataset, 'decode') and callable(getattr(self.dataset, 'decode')):
                         # Fallback to dataset decode method
                         self.logger.debug("Using self.dataset.decode")
                         decoded_text = self.dataset.decode(ids)
+                        decoded_successfully = True
+                    
+                    if decoded_successfully:
+                        generated_text = decoded_text.strip()
                     else:
-                        # Fallback if neither decode method exists
+                        # Log error only if neither method worked
                         self.logger.error("Cannot decode: No usable tokenizer or dataset.decode method found.")
-                        decoded_text = f"[Decoding Error: No decode method found]"
+                        generated_text = "[Decoding Error: No decode method found]"
 
-                    generated_text = decoded_text.strip() # Strip leading/trailing whitespace
                 except Exception as e:
                     self.logger.error(f"Error decoding generated sequence: {e}", exc_info=True)
-                    generated_text = f"Decoding error: {e}"
+                    # Provide more context in the error message if possible
+                    generated_text = f"[Decoding error: {e} Raw IDs: {ids}]"
 
                 generated_texts.append(generated_text)
-
+            
+            # Check if any decoding failed overall - perhaps return a mix of results and errors?
+            # Current logic returns a list, potentially containing error strings.
             return generated_texts
 
         except Exception as e:

@@ -77,7 +77,7 @@ def test_processor_success_defaults(sample_input_file, temp_data_dir):
     assert len(test_data) > 0
 
     # Check tokenizer loading and basic properties
-    loaded_tokenizer = CharTokenizer.load(str(tokenizer_dir))
+    loaded_tokenizer = CharTokenizer.load_from_dir(str(tokenizer_dir))
     assert isinstance(loaded_tokenizer, CharTokenizer)
     assert loaded_tokenizer.vocab_size > 0
 
@@ -90,8 +90,8 @@ def test_processor_tokenizer_metadata_content(sample_input_file, temp_data_dir):
     process_char_data(str(input_path), str(output_dir))
 
     assert tokenizer_dir.exists()
-    # Load the tokenizer
-    tokenizer = CharTokenizer.load(str(tokenizer_dir))
+    # Load the tokenizer using the class method
+    tokenizer = CharTokenizer.load_from_dir(str(tokenizer_dir))
 
     # Check expected characters (case-sensitive)
     expected_chars = set("abc123\n ABCxyz")
@@ -107,6 +107,12 @@ def test_processor_tokenizer_metadata_content(sample_input_file, temp_data_dir):
     assert tokenizer.unk_token is None
     assert tokenizer.unk_token_id is None
     assert "<unk>" not in tokenizer.char_to_idx
+
+    # Verify some tokens map correctly using the loaded tokenizer
+    # Load using the class method
+    tokenizer = CharTokenizer.load_from_dir(str(tokenizer_dir))
+    assert train_tokens[0] == tokenizer.char_to_idx['a']
+    assert val_tokens[0] == tokenizer.char_to_idx[input_content[expected_train_len]]
 
 def test_processor_data_split_and_content(sample_input_file, temp_data_dir):
     """Test token counts and split ratio based on the splits tuple."""
@@ -150,7 +156,7 @@ def test_processor_data_split_and_content(sample_input_file, temp_data_dir):
     assert abs(len(test_tokens) - expected_test_len) <= 2
 
     # Verify some tokens map correctly using the loaded tokenizer
-    tokenizer = CharTokenizer.load(str(tokenizer_dir))
+    tokenizer = CharTokenizer.load_from_dir(str(tokenizer_dir))
     assert train_tokens[0] == tokenizer.char_to_idx['a']
     assert val_tokens[0] == tokenizer.char_to_idx[input_content[expected_train_len]]
 

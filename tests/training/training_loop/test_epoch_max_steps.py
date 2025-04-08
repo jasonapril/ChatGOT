@@ -2,11 +2,13 @@ import pytest
 import torch
 from unittest.mock import MagicMock, patch
 from torch.utils.data import DataLoader, TensorDataset # Need these
+from torch.optim import Optimizer
 
 # Import the class to test
 from craft.training.training_loop import TrainingLoop
 from craft.training.progress import ProgressTracker # Import ProgressTracker
 from craft.training.trainer import Trainer # Import Trainer
+from craft.config.schemas import TrainingConfig # Import TrainingConfig
 
 # Mock ProgressTracker if not available or for isolation
 try:
@@ -45,30 +47,42 @@ class TestEpochMaxSteps:
         mock_cross_entropy.return_value = mock_loss
         mock_tqdm.return_value = enumerate(multi_batch_dataloader)
 
+        # --- Setup Config ---
+        config = TrainingConfig(
+            batch_size=2,
+            log_interval=10,
+            num_epochs=1,
+            learning_rate=1e-4,
+            use_amp=False,
+            gradient_accumulation_steps=1,
+            max_steps=max_steps_to_run # Set max_steps
+        )
+
         # --- Setup Loop ---
+        mock_optimizer.reset_mock() # Reset mock before use in this test
         loop = TrainingLoop(
             model=mock_model,
             optimizer=mock_optimizer,
             train_dataloader=multi_batch_dataloader,
             device=mock_device,
-            config={}, # Initialize with empty config
-            use_amp=False,
-            gradient_accumulation_steps=1,
-            max_steps=max_steps_to_run # PASS max_steps here
+            config=config # Pass config object
         )
-        loop.scaler = mock_scaler
-        loop.scaler.is_enabled = MagicMock(return_value=False)
+        loop.scaler = mock_scaler # Inject mock scaler
+        mock_scaler.update = MagicMock() # Prevent unexpected side-effects
+        mock_scaler.is_enabled = MagicMock(return_value=False)
         mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
 
         # --- Run Epoch ---
         start_global_step = 0
-        epoch_metrics = loop.train_epoch(current_epoch=0, global_step=start_global_step, progress=mock_progress_tracker_instance, trainer=mock_trainer) # Pass trainer
+        loop.train_epoch(trainer=mock_trainer, current_epoch=0, global_step=start_global_step, progress=mock_progress_tracker_instance)
 
         # --- Assertions ---
-        # Verify the loop ran exactly for max_steps
+        # Expect only max_steps iterations + optimizer calls
         assert mock_model.call_count == max_steps_to_run
-        assert mock_optimizer.step.call_count == max_steps_to_run
-        assert mock_scaler.step.call_count == 0 # Scaler shouldn't be called if use_amp=False
-
-        # Check metrics returned
-        assert "loss" in epoch_metrics 
+        assert mock_cross_entropy.call_count == max_steps_to_run
+        expected_steps = max_steps_to_run
+        assert mock_optimizer.step.call_count == expected_steps
+        # Called at start + after each step up to max_steps
+        assert mock_optimizer.zero_grad.call_count == 1 + expected_steps
+        assert mock_progress_tracker_instance.update.call_count == max_steps_to_run
+        assert "loss" in loop.metrics # Check metrics returned 

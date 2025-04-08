@@ -252,11 +252,10 @@ class TrainingConfig(BaseModel):
     max_grad_norm: Optional[float] = Field(None, gt=0, description="Maximum gradient norm for clipping")
     log_interval: int = Field(50, gt=0, description="Log training metrics every N steps")
     eval_interval: int = Field(1000, ge=0, description="Evaluate on validation set every N steps (0 to disable)")
-    save_interval: int = Field(5000, ge=0, description="Save checkpoint every N steps (0 to disable)")
+    save_interval: Optional[int] = Field(5000, ge=0, description="Save checkpoint every N steps (0 to disable)")
     time_save_interval_seconds: int = Field(0, description="Save checkpoint every N seconds (0 to disable). Prioritized over step/epoch intervals if non-zero.")
     time_eval_interval_seconds: Optional[int] = Field(None, ge=0, description="Evaluate every N seconds")
     warmup_steps: Optional[int] = 100
-    save_steps_interval: Optional[int] = 0 # Keep every N steps
     compile_model: Optional[bool] = False
     activation_checkpointing: Optional[bool] = False
     torch_compile: Optional[bool] = False

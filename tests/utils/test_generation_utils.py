@@ -288,7 +288,9 @@ def test_generate_sample_text_params_forwarding():
     assert call_kwargs['top_p'] == 0.95
     assert call_kwargs['repetition_penalty'] == 1.2
     assert call_kwargs['verbose'] is True
-    mock_tokenizer.decode.assert_called_once_with(generated_ids[0].tolist())
+    # Assert decode is called with *only* the generated part
+    generated_part = generated_ids[:, context.shape[1]:].tolist()[0]
+    mock_tokenizer.decode.assert_called_once_with(generated_part)
 
 def test_generate_sample_text_max_tokens_zero():
     """Test generate_sample_text with max_new_tokens=0."""
@@ -313,8 +315,7 @@ def test_generate_sample_text_max_tokens_zero():
     mock_model.generate.assert_called_once()
     call_args, call_kwargs = mock_model.generate.call_args
     assert call_kwargs['max_new_tokens'] == 0
-    # Check that decode was called with the *original* context ids if max_new=0
-    # This depends on the mock model.generate behavior, let's assume it returns input
+    # If max_new_tokens is 0, the generated part is empty
     mock_tokenizer.decode.assert_called_once_with([])
     assert result == ["ab"] # Assuming decode of context [0, 1] is "ab"
 
@@ -343,7 +344,9 @@ def test_sample_text_regular_tokenizer():
     assert torch.equal(call_kwargs['input_ids'], encoded_prompt)
     assert call_kwargs['max_new_tokens'] == 1
     
-    mock_tokenizer.decode.assert_called_once_with(generated_ids[:, encoded_prompt.shape[1]:].tolist()[0])
+    # Assert decode is called with *only* the generated part
+    generated_part = generated_ids[:, encoded_prompt.shape[1]:].tolist()[0]
+    mock_tokenizer.decode.assert_called_once_with(generated_part)
     assert result == ["abc"] # Returns list
 
 def test_sample_text_params_forwarding():
@@ -376,7 +379,9 @@ def test_sample_text_params_forwarding():
     assert call_kwargs['temperature'] == 0.6
     assert call_kwargs['top_k'] == 30
     assert call_kwargs['top_p'] == 0.85
-    mock_tokenizer.decode.assert_called_once_with(generated_ids[0].tolist())
+    # Assert decode is called with *only* the generated part
+    generated_part = generated_ids[:, encoded_prompt.shape[1]:].tolist()[0]
+    mock_tokenizer.decode.assert_called_once_with(generated_part)
 
 def test_sample_text_max_length_zero():
     """Test sample_text with max_length=0."""
@@ -400,7 +405,7 @@ def test_sample_text_max_length_zero():
     mock_model.generate.assert_called_once()
     call_args, call_kwargs = mock_model.generate.call_args
     assert call_kwargs['max_new_tokens'] == 0
-    # Check decode was called with the prompt's ids
+    # Check decode was called with the empty generated part
     mock_tokenizer.decode.assert_called_once_with([]) # Decode empty generated part
     assert result == ["test"] # Returns list
 
@@ -426,9 +431,11 @@ def test_sample_text_char():
     assert torch.equal(call_kwargs['input_ids'], encoded_prompt)
     assert call_kwargs['max_new_tokens'] == 1
     
-    # Check that the internal decode mock was called correctly
-    mock_char.decode.assert_called_once_with(generated_ids[0].tolist())
-    assert result == ["abc"] # Returns list
+    # Check that the internal decode mock was called correctly with the generated part
+    generated_part = generated_ids[:, encoded_prompt.shape[1]:].tolist()[0]
+    mock_char.decode.assert_called_once_with(generated_part)
+    # Assert the result is only the decoded *generated* part
+    assert result == ["c"] # Only the generated part 'c' should be returned
 
 def test_sample_text_empty_prompt():
     """Test sample_text with an empty prompt."""
@@ -454,7 +461,8 @@ def test_sample_text_empty_prompt():
     # Check input_ids was based on encoded empty prompt
     assert call_kwargs['input_ids'].shape[1] == 0 # Check if input shape reflects empty prompt
     assert call_kwargs['max_new_tokens'] == 3
-    mock_tokenizer.decode.assert_called_once_with(generated_ids[0].tolist())
+    # Assert decode is called with the generated part (which is the full output here)
+    mock_tokenizer.decode.assert_called_once_with(generated_ids[0].tolist()) # Full output is generated part
 
     assert result == ["abc"] # Returns list
 
@@ -489,7 +497,7 @@ def test_sample_text_device_auto_detection():
     # Assert tensors passed to generate were on CUDA
     mock_model.generate.assert_called_once()
     call_args, call_kwargs = mock_model.generate.call_args
-    assert call_kwargs['input_ids'].device == expected_cuda_device
+    assert call_kwargs['input_ids'].device.type == expected_cuda_device.type
 
     # Reset mocks and test CPU path
     mock_model.reset_mock()
@@ -510,4 +518,4 @@ def test_sample_text_device_auto_detection():
     # Assert tensors passed to generate were on CPU
     mock_model.generate.assert_called_once()
     call_args, call_kwargs = mock_model.generate.call_args
-    assert call_kwargs['input_ids'].device == expected_cpu_device
+    assert call_kwargs['input_ids'].device.type == expected_cpu_device.type

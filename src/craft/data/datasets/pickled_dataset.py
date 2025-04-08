@@ -52,8 +52,15 @@ class PickledDataset(BaseDataset):
                 self.token_ids = torch.from_numpy(loaded_data.astype(np.int64))
             elif isinstance(loaded_data, list):
                 self.token_ids = torch.tensor(loaded_data, dtype=torch.long)
+            elif isinstance(loaded_data, torch.Tensor): # Added check for torch.Tensor
+                # Ensure it's the correct dtype
+                if loaded_data.dtype != torch.long:
+                     self.logger.warning(f"Loaded tensor has dtype {loaded_data.dtype}, converting to long.")
+                     self.token_ids = loaded_data.long()
+                else:
+                     self.token_ids = loaded_data
             else:
-                raise TypeError(f"Pickled file content must be a list or numpy array of token IDs, found {type(loaded_data)}")
+                raise TypeError(f"Pickled file content must be a list, numpy array, or torch.Tensor of token IDs, found {type(loaded_data)}")
 
             # Basic validation
             if len(self.token_ids) == 0:

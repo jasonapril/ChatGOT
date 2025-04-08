@@ -4,7 +4,6 @@ from typing import List, Optional, Dict, Any
 import sys
 
 from .base import Callback, TYPE_CHECKING
-from ..trainer import Trainer
 # Assume TextGenerator lives elsewhere, e.g., in craft.training.generation
 # Adjust the import path as necessary
 from ..generation import TextGenerator
@@ -12,6 +11,7 @@ from ..generation import TextGenerator
 # Added TYPE_CHECKING block
 if TYPE_CHECKING:
     from ..data.base import BaseDataset # type: ignore[import-not-found]
+    from ..trainer import Trainer
 
 logger = logging.getLogger(__name__)
 
