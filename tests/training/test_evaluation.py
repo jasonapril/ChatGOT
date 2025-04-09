@@ -1,9 +1,16 @@
+#!/usr/bin/env python
+"""
+Tests for the Evaluator class in src/craft/training/evaluation.py
+"""
+
 import pytest
 import torch
 import logging
 from unittest.mock import MagicMock, patch, ANY
+from torch.utils.data import DataLoader, TensorDataset
 
 from craft.training.evaluation import Evaluator
+from craft.training.callbacks import CallbackList, Callback
 
 @pytest.fixture
 def mock_model_eval():
@@ -322,3 +329,84 @@ class TestEvaluator:
         )
 
     # ... more tests ... 
+
+class MockModel(torch.nn.Module):
+    """A simple mock model that returns a predefined loss."""
+    def __init__(self, output_loss=1.5):
+        super().__init__()
+        # Use Parameter to ensure it's recognized by .to(device)
+        self.param = torch.nn.Parameter(torch.tensor(1.0))
+        self.output_loss = torch.tensor(float(output_loss))
+
+    def forward(self, *args, **kwargs):
+        # Simulate model output dictionary including loss
+        # Ensure loss requires grad if needed, but detach for evaluator
+        # Make loss device-aware
+        loss_val = self.output_loss.to(self.param.device).detach().requires_grad_(False)
+        return {'loss': loss_val}
+
+@pytest.fixture
+def mock_model():
+    """Provides a MockModel instance."""
+    return MockModel(output_loss=2.0)
+
+@pytest.fixture
+def mock_dataloader():
+    """Provides a simple mock DataLoader."""
+    # Create dummy data: 10 batches of size 4, with 2 features (can be anything)
+    data = torch.randn(10 * 4, 2)
+    targets = torch.randn(10 * 4, 1)
+    dataset = TensorDataset(data, targets)
+    # Use batch_size=4 for testing batch iteration
+    dataloader = DataLoader(dataset, batch_size=4)
+    return dataloader
+
+@pytest.fixture
+def mock_callbacks():
+    """Provides a MagicMock instance for CallbackList."""
+    # Mock the specific methods called by Evaluator
+    mock_cb_list = MagicMock(spec=CallbackList)
+    mock_cb_list.on_validation_begin = MagicMock()
+    mock_cb_list.on_validation_batch_end = MagicMock() # Though not currently used by Evaluator
+    mock_cb_list.on_validation_end = MagicMock()
+    return mock_cb_list
+
+@pytest.fixture
+def mock_logger():
+    """Provides a MagicMock for the logger."""
+    # Patch the logger used within the Evaluator module
+    with patch('craft.training.evaluation.logger', new_callable=MagicMock) as mock_log:
+        yield mock_log
+
+@pytest.fixture(params=[torch.device("cpu"), torch.device("cuda" if torch.cuda.is_available() else "cpu")])
+def device(request):
+    """Provides CPU and CUDA devices if available."""
+    if request.param.type == 'cuda' and not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    return request.param
+
+def test_evaluator_initialization(
+    mock_model,
+    mock_dataloader,
+    device,
+    mock_callbacks
+):
+    """Test that the Evaluator initializes correctly."""
+    config = {'eval_batch_log_interval': 5}
+    evaluator = Evaluator(
+        model=mock_model,
+        val_dataloader=mock_dataloader,
+        device=device,
+        config=config,
+        use_amp=False,
+        callbacks=mock_callbacks
+    )
+    assert evaluator.model == mock_model
+    assert evaluator.val_dataloader == mock_dataloader
+    assert evaluator.device == device
+    assert evaluator.config == config
+    assert not evaluator.use_amp
+    assert evaluator.callbacks == mock_callbacks
+    assert evaluator.log_interval == 5
+
+# More tests to come... 

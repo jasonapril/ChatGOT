@@ -52,8 +52,11 @@ class TestEpochScheduler:
         mock_target = torch.randint(0, 10, (2,)) # Example target
         mock_dataloader.__iter__.return_value = iter([(mock_input, mock_target)])
         mock_dataloader.__len__.return_value = 1 # Ensure length is correct
+        mock_progress_tracker_instance.start_time = None # Add start_time
 
         mock_scaler.is_enabled = MagicMock(return_value=False)
+        # Mock optimizer.step to simulate it being called
+        mock_optimizer.step = MagicMock()
 
         # --- Setup Config ---
         config = TrainingConfig(
@@ -80,8 +83,8 @@ class TestEpochScheduler:
         # --- Run Epoch ---
         start_global_step = 0
         # Patch isnan/isinf as the mock loss isn't a real tensor
-        with patch('torch.isnan', return_value=MagicMock(any=MagicMock(return_value=False))) as mock_isnan, \
-             patch('torch.isinf', return_value=MagicMock(any=MagicMock(return_value=False))) as mock_isinf:
+        with patch('torch.isnan', return_value=False) as mock_isnan, \
+             patch('torch.isinf', return_value=False) as mock_isinf:
             epoch_metrics = loop.train_epoch(
                 current_epoch=0,
                 global_step=start_global_step,
@@ -89,9 +92,15 @@ class TestEpochScheduler:
                 trainer=mock_trainer # Pass mock trainer
             )
         # --- Assertions ---
+        # With AMP off, optimizer.step should be called directly
         mock_optimizer.step.assert_called_once()
+        # Scaler methods should not be called
+        mock_scaler.scale.assert_not_called()
+        mock_scaler.step.assert_not_called()
+        mock_scaler.update.assert_not_called()
+        # Scheduler should step after optimizer
         mock_scheduler.step.assert_called_once()
-        assert mock_progress_tracker_instance.update.call_count == len(mock_dataloader)
+        assert mock_progress_tracker_instance.update.call_count == 1 # len(mock_dataloader)
         # mock_progress_tracker_instance.update.assert_called_with(
         #     step=start_global_step + 1,
         #     loss=mock_loss.item(),

@@ -46,6 +46,7 @@ class TestEpochNanInf:
         mock_target = torch.randint(0, 10, (2,)) # Example target
         mock_dataloader.__iter__.return_value = iter([(mock_input, mock_target)])
         mock_dataloader.__len__.return_value = 1 # Ensure length is correct
+        mock_progress_tracker_instance.start_time = None # Add start_time
 
         # mock_tqdm.return_value = enumerate(mock_dataloader) # Removed - train_epoch no longer uses tqdm
         mock_scaler.is_enabled = MagicMock(return_value=False)

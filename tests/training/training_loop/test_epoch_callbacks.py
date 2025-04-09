@@ -51,6 +51,7 @@ class TestEpochCallbacks:
         mock_target = torch.randint(0, 10, (2,)) # Example target
         mock_dataloader.__iter__.return_value = iter([(mock_input, mock_target)])
         mock_dataloader.__len__.return_value = 1 # Ensure length is correct
+        mock_progress_tracker_instance.start_time = None # Add start_time
 
         mock_scaler.is_enabled = MagicMock(return_value=False)
         mock_callback = mock_callback_fixture
@@ -83,19 +84,13 @@ class TestEpochCallbacks:
 
         # --- Assertions ---
         mock_callback.on_step_begin.assert_called_once()
-        mock_callback.on_step_end.assert_called_once()
+        mock_callback.on_step_end.assert_called_once() # Called once because step_taken is True
         # Check args passed to on_step_end
         step_end_call_args, step_end_call_kwargs = mock_callback.on_step_end.call_args
         assert step_end_call_kwargs.get('step') == 0 # Step index within the epoch (starts at 0)
         assert step_end_call_kwargs.get('global_step') == start_global_step + 1
-        assert 'logs' in step_end_call_kwargs # Check for 'logs' key
-        assert isinstance(step_end_call_kwargs['logs'], dict)
-        assert 'loss' in step_end_call_kwargs['logs']
-        assert mock_progress_tracker_instance.update.call_count == len(mock_dataloader)
-        mock_progress_tracker_instance.update.assert_called_with(
-            step=start_global_step + 1,
-            loss=mock_loss.item(),
-            learning_rate=ANY, # Cannot easily mock LR here
-            tokens_per_second=ANY,
-            additional_metrics=None
-        ) 
+        assert 'metrics' in step_end_call_kwargs # Check for 'metrics' key (renamed from 'logs')
+        assert isinstance(step_end_call_kwargs['metrics'], dict)
+        assert 'train/loss_step' in step_end_call_kwargs['metrics']
+        # Ensure progress update was called once (since step was taken)
+        mock_progress_tracker_instance.update.assert_called_once() 

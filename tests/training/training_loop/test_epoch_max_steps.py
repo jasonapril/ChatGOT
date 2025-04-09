@@ -40,6 +40,7 @@ class TestEpochMaxSteps:
         multi_batch_dataloader = MagicMock(spec=DataLoader)
         multi_batch_dataloader.__iter__.return_value = iter(batches)
         multi_batch_dataloader.__len__.return_value = num_batches
+        mock_progress_tracker_instance.start_time = None # Add start_time
 
         mock_autocast.return_value.__enter__.return_value = None
         mock_autocast.return_value.__exit__.return_value = None
@@ -74,15 +75,19 @@ class TestEpochMaxSteps:
 
         # --- Run Epoch ---
         start_global_step = 0
-        loop.train_epoch(trainer=mock_trainer, current_epoch=0, global_step=start_global_step, progress=mock_progress_tracker_instance)
+        epoch_metrics = loop.train_epoch(trainer=mock_trainer, current_epoch=0, global_step=start_global_step, progress=mock_progress_tracker_instance)
 
         # --- Assertions ---
-        # Expect only max_steps iterations + optimizer calls
-        assert mock_model.call_count == max_steps_to_run
-        assert mock_cross_entropy.call_count == max_steps_to_run
-        expected_steps = max_steps_to_run
-        assert mock_optimizer.step.call_count == expected_steps
-        # Called at start + after each step up to max_steps
-        assert mock_optimizer.zero_grad.call_count == 1 + expected_steps
-        assert mock_progress_tracker_instance.update.call_count == max_steps_to_run
-        assert "loss" in loop.metrics # Check metrics returned 
+        assert mock_model.call_count == config.max_steps # Model called max_steps times
+        assert mock_optimizer.step.call_count == config.max_steps # Optimizer stepped max_steps times
+        # Scaler step/update are not called when AMP is False
+        mock_scaler.step.assert_not_called()
+        mock_scaler.update.assert_not_called()
+        assert 'average_epoch_loss' in epoch_metrics # Check key in the returned dict
+        assert 'steps_completed_in_epoch' in epoch_metrics # Check key in the returned dict
+        assert epoch_metrics['steps_completed_in_epoch'] == config.max_steps # Check steps completed
+        mock_progress_tracker_instance.update.assert_called()
+        assert mock_progress_tracker_instance.update.call_count == config.max_steps
+        assert mock_cross_entropy.call_count == config.max_steps
+        assert mock_optimizer.zero_grad.call_count == 1 + config.max_steps
+        assert "average_epoch_loss" in epoch_metrics # Check average loss key exists 

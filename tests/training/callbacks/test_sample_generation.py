@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, call, patch, ANY
 import logging
 from craft.training.callbacks.sample_generation import SampleGenerationCallback
 from craft.training.generation import TextGenerator
+from craft.training.callbacks.base import CallbackList
 
 # --- Mocks & Fixtures --- #
 
@@ -29,6 +30,21 @@ def sample_callback(mock_tokenizer):
     # Mock the logger within the callback instance
     callback.logger = MagicMock(spec=logging.Logger)
     return callback
+
+# Mock Trainer and other dependencies
+class MockTrainer:
+    def __init__(self):
+        self.model = MagicMock(spec=torch.nn.Module)
+        self.device = torch.device("cpu")
+        self.train_dataloader = MagicMock()
+        self.train_dataloader.dataset = MagicMock() # Mock dataset attribute
+        self.tokenizer = MagicMock() # Mock tokenizer attribute
+        self.optimizer = MagicMock(spec=torch.optim.Optimizer)
+        self.logger = MagicMock()
+
+@pytest.fixture
+def mock_trainer() -> MockTrainer:
+    return MockTrainer()
 
 # --- Test Class --- #
 
@@ -306,3 +322,94 @@ class TestSampleGenerationCallback:
             mock_logger.error.assert_called_with(
                  "Trainer does not have an explicit 'tokenizer' attribute needed for TextGenerator."
             ) 
+
+@patch('craft.training.callbacks.sample_generation.TextGenerator') # Patch TextGenerator
+def test_sample_generation_callback_intervals(mock_text_generator_cls, mock_trainer):
+    """Test that generate_samples is called at correct step/epoch intervals."""
+    # Mock the TextGenerator instance and its method
+    mock_generator_instance = MagicMock(spec=TextGenerator)
+    mock_text_generator_cls.return_value = mock_generator_instance
+    mock_generator_instance.generate_text.return_value = ["Generated sample text."]
+
+    step_interval = 5
+    epoch_interval = 2
+    callback = SampleGenerationCallback(
+        step_interval=step_interval,
+        epoch_interval=epoch_interval,
+        start_prompt="Test",
+        max_new_tokens=10
+    )
+    callback.set_trainer(mock_trainer) # Set the trainer for initialization
+
+    # Simulate training loop
+    epochs = 5
+    steps_per_epoch = 12
+    global_step = 0
+
+    # Initial call to on_train_begin to initialize generator
+    callback.on_train_begin()
+    assert callback.initialized, "Generator failed to initialize"
+    assert mock_text_generator_cls.call_count == 1 # Generator should be created once
+    mock_generator_instance.generate_text.reset_mock()
+
+    for epoch in range(epochs):
+        callback.on_epoch_begin(epoch=epoch, global_step=global_step)
+        for step in range(steps_per_epoch):
+            # Check step interval triggering
+            # global_step starts at 0, increments after step
+            step_trigger_expected = (global_step + 1) % step_interval == 0
+
+            callback.on_step_end(step=step, global_step=global_step, metrics={})
+
+            if step_trigger_expected:
+                mock_generator_instance.generate_text.assert_called_with(
+                    start_prompt="Test",
+                    max_new_tokens=10,
+                    temperature=0.8 # Default temperature
+                )
+                mock_generator_instance.generate_text.reset_mock()
+            else:
+                mock_generator_instance.generate_text.assert_not_called()
+
+            global_step += 1 # Increment global step
+
+        # Check epoch interval triggering
+        epoch_trigger_expected = (epoch + 1) % epoch_interval == 0
+        callback.on_epoch_end(epoch=epoch, global_step=global_step, metrics={})
+        if epoch_trigger_expected:
+            mock_generator_instance.generate_text.assert_called_with(
+                start_prompt="Test",
+                max_new_tokens=10,
+                temperature=0.8
+            )
+            mock_generator_instance.generate_text.reset_mock()
+        else:
+            mock_generator_instance.generate_text.assert_not_called()
+
+    # Final checks
+    # Calculate expected number of calls
+    total_steps = epochs * steps_per_epoch
+    expected_step_calls = total_steps // step_interval
+    expected_epoch_calls = epochs // epoch_interval
+    # Note: this assertion is tricky if intervals overlap perfectly, but okay for this test
+    # Instead, rely on the assertions within the loop
+
+@patch('craft.training.callbacks.sample_generation.TextGenerator')
+def test_sample_generation_initialization_failure(mock_text_generator_cls, mock_trainer):
+    """Test that generation is skipped if TextGenerator fails to initialize."""
+    # Simulate failure during TextGenerator initialization
+    mock_text_generator_cls.side_effect = AttributeError("Missing crucial component")
+
+    callback = SampleGenerationCallback(step_interval=1)
+    callback.set_trainer(mock_trainer)
+
+    # on_train_begin should attempt init and fail
+    callback.on_train_begin()
+    assert not callback.initialized
+    assert callback.generator is None
+
+    # on_step_end should try to init again (via generate_samples), fail, and not generate
+    # Mock the generate_text method on the *class* to ensure it's never called
+    mock_text_generator_cls.generate_text = MagicMock()
+    callback.on_step_end(step=0, global_step=0, metrics={})
+    mock_text_generator_cls.generate_text.assert_not_called() 

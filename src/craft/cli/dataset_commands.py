@@ -7,6 +7,7 @@ import glob
 import traceback
 import pickle
 import numpy as np
+import json
 from typing import Optional, List, Tuple, cast # Added cast
 from pathlib import Path
 
@@ -186,7 +187,9 @@ def prepare_dataset(
                 # Ensure tokenizer_path is not None before passing to str()
                 if tokenizer_path is None:
                      raise ValueError("tokenizer_path cannot be None for subword type.")
-                tokenizer = SentencePieceTokenizer.load_from_prefix(str(tokenizer_path))
+                # Resolve to absolute path before loading and storing
+                tokenizer_abs_path = tokenizer_path.resolve()
+                tokenizer = SentencePieceTokenizer.load_from_prefix(str(tokenizer_abs_path))
                 logger.info(f"Tokenizer loaded. Vocab size: {tokenizer.get_vocab_size()}")
             except Exception as e:
                 logger.error(f"Failed to load tokenizer from {tokenizer_path}: {e}", exc_info=True)
@@ -218,7 +221,11 @@ def prepare_dataset(
 
             # 5. Save splits to .pkl files
             output_paths = {}
-            for split_name, split_data in [('train', train_ids), ('val', val_ids), ('test', test_ids)]:
+            split_data_map = {'train': train_ids, 'val': val_ids, 'test': test_ids}
+            for split_name, split_data in split_data_map.items(): # Use consistent name split_data_map
+                if len(split_data) == 0:
+                     logger.warning(f"Split '{split_name}' has size 0. Skipping save.")
+                     continue
                 output_filepath = output_dir / f"{split_name}.pkl"
                 logger.info(f"Saving {split_name} split to {output_filepath}...")
                 try:
@@ -228,6 +235,33 @@ def prepare_dataset(
                 except IOError as e:
                      logger.error(f"Failed to save {split_name} split to {output_filepath}: {e}")
                      raise typer.Exit(code=1)
+
+            # 6. Prepare and Save Metadata
+            logger.info("Preparing and saving metadata.json for subword dataset...")
+            metadata = {
+                'input_file': str(input_path.resolve()),
+                'data_format': 'subword',
+                'vocab_size': tokenizer.get_vocab_size(),
+                'tokenizer_type': 'SentencePiece',
+                'tokenizer_model_path': str(tokenizer_abs_path), # Store absolute path
+                'total_tokens': n,
+                'split_ratios': list(splits_tuple),
+                'split_sizes': {
+                    'train': len(train_ids),
+                    'val': len(val_ids),
+                    'test': len(test_ids)
+                 },
+            }
+            metadata_path = output_dir / "metadata.json"
+            try:
+                with open(metadata_path, 'w', encoding='utf-8') as f:
+                    json.dump(metadata, f, indent=4)
+                logger.info(f"Saved metadata to {metadata_path}")
+            except Exception as e:
+                logger.error(f"Failed to save metadata.json: {e}", exc_info=True)
+                # Optionally raise error or just warn
+                raise typer.Exit(code=1) # Exit if metadata fails, as it's needed
+
             # --- End Subword Logic --- #
 
         logger.info(f"Dataset preparation complete. Output in {output_dir}")

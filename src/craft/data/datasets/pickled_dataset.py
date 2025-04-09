@@ -11,34 +11,43 @@ from torch.utils.data import Dataset
 
 # Import the new BaseDataset directly
 from ..base import BaseDataset
+# Import SentencePieceTokenizer for dynamic loading during decode
+from ..tokenizers.sentencepiece import SentencePieceTokenizer
 
 logger = logging.getLogger(__name__)
 
 class PickledDataset(BaseDataset):
     """PyTorch Dataset for loading data pre-tokenized and saved in a .pkl file."""
 
-    def __init__(self, file_path: str, block_size: int, vocab_path: Optional[str] = None, **kwargs: Any):
+    # Cache for loaded tokenizer instances (keyed by model path)
+    _tokenizer_cache: Dict[str, Any] = {}
+
+    def __init__(self, file_path: str, block_size: int, **kwargs: Any):
         """
         Initializes the Dataset from a .pkl file containing a list or numpy array of token IDs.
-        Metadata (like vocab size, mappings) must be provided via the external `vocab_path` JSON file.
+        Metadata (vocab size, tokenizer info) is expected in a 'metadata.json'
+        file located in the same directory as the .pkl file.
 
         Args:
-            file_path (str): Path to the .pkl file (containing list/array of token IDs).
+            file_path (str): Path to the .pkl file (e.g., 'data/processed/my_data/train.pkl').
             block_size (int): Maximum sequence length for blocks.
-            vocab_path (Optional[str]): Path to the external vocabulary JSON file.
-            **kwargs: Additional keyword arguments.
+            **kwargs: Additional keyword arguments (ignored).
         """
         super().__init__() # Initialize BaseDataset
         self.file_path = Path(file_path)
         self.block_size = block_size
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info(f"Initializing PickledDataset with file: {self.file_path}")
-        # Ignore any extra kwargs passed (e.g., by Hydra instantiation)
+
+        # Metadata file path is inferred from the data file path
+        self.metadata_path = self.file_path.parent / "metadata.json"
+
+        # Ignore any extra kwargs passed
         if kwargs:
             self.logger.debug(f"Ignoring unexpected arguments: {list(kwargs.keys())}")
-        
-        self._vocab_path = vocab_path # Store path to potential external vocab
+
         self._metadata: Optional[Dict[str, Any]] = None # Cache for metadata
+        self._idx_map_cache: Optional[Dict[int, str]] = None # Cache for char idx map
 
         if not self.file_path.exists():
             raise FileNotFoundError(f"Pickled dataset file not found: {self.file_path}")
@@ -52,8 +61,7 @@ class PickledDataset(BaseDataset):
                 self.token_ids = torch.from_numpy(loaded_data.astype(np.int64))
             elif isinstance(loaded_data, list):
                 self.token_ids = torch.tensor(loaded_data, dtype=torch.long)
-            elif isinstance(loaded_data, torch.Tensor): # Added check for torch.Tensor
-                # Ensure it's the correct dtype
+            elif isinstance(loaded_data, torch.Tensor):
                 if loaded_data.dtype != torch.long:
                      self.logger.warning(f"Loaded tensor has dtype {loaded_data.dtype}, converting to long.")
                      self.token_ids = loaded_data.long()
@@ -115,42 +123,38 @@ class PickledDataset(BaseDataset):
 
     def get_metadata(self) -> Dict[str, Any]:
         """
-        Loads and returns vocabulary metadata from the specified vocab_path.
+        Loads and returns metadata from 'metadata.json' located in the same
+        directory as the data file.
         Caches the metadata after the first load.
 
         Returns:
-            Dict[str, Any]: Dictionary containing vocabulary metadata (e.g., vocab_size). 
-                          Returns an empty dict if no vocab_path was provided or loading fails.
+            Dict[str, Any]: Dictionary containing metadata.
+                          Returns an empty dict if loading fails.
         """
         if self._metadata is not None:
             return self._metadata
 
-        if not self._vocab_path:
-            self.logger.warning("No external vocab_path provided. Cannot load metadata.")
-            self._metadata = {}
-            return self._metadata
-
-        self.logger.info(f"Loading vocabulary metadata from: {self._vocab_path}")
-        if not os.path.exists(self._vocab_path):
-            self.logger.error(f"Vocabulary metadata file not found: {self._vocab_path}")
+        self.logger.info(f"Loading metadata from: {self.metadata_path}")
+        if not self.metadata_path.exists():
+            self.logger.error(f"Metadata file not found: {self.metadata_path}")
             self._metadata = {}
             return self._metadata
 
         try:
-            with open(self._vocab_path, 'r', encoding='utf-8') as f:
+            with open(self.metadata_path, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
             if not isinstance(metadata, dict):
-                 self.logger.error(f"Vocabulary file {self._vocab_path} does not contain a valid JSON dictionary.")
+                 self.logger.error(f"Metadata file {self.metadata_path} does not contain a valid JSON dictionary.")
                  metadata = {}
             self._metadata = metadata
-            self.logger.info(f"Successfully loaded vocabulary metadata. Keys: {list(self._metadata.keys())}")
+            self.logger.info(f"Successfully loaded metadata. Keys: {list(self._metadata.keys())}")
             return self._metadata
         except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to decode JSON from vocabulary file {self._vocab_path}: {e}")
+            self.logger.error(f"Failed to decode JSON from metadata file {self.metadata_path}: {e}")
             self._metadata = {}
             return self._metadata
         except Exception as e:
-            self.logger.error(f"Failed to load vocabulary file {self._vocab_path}: {e}", exc_info=True)
+            self.logger.error(f"Failed to load metadata file {self.metadata_path}: {e}", exc_info=True)
             self._metadata = {}
             return self._metadata
 
@@ -163,50 +167,102 @@ class PickledDataset(BaseDataset):
              self.logger.warning("vocab_size not found in metadata.")
         return vs
 
+    def _get_tokenizer(self) -> Optional[Any]:
+        """Helper to load and cache tokenizer based on metadata."""
+        metadata = self.get_metadata()
+        tokenizer_type = metadata.get('tokenizer_type')
+        tokenizer_model_path = metadata.get('tokenizer_model_path')
+
+        if tokenizer_type == 'SentencePiece':
+            if not tokenizer_model_path:
+                self.logger.error("Cannot load SentencePiece tokenizer: 'tokenizer_model_path' missing from metadata.")
+                return None
+            # Use cache
+            if tokenizer_model_path not in PickledDataset._tokenizer_cache:
+                try:
+                    self.logger.info(f"Loading SentencePiece tokenizer from {tokenizer_model_path}...")
+                    tokenizer_instance = SentencePieceTokenizer.load_from_prefix(tokenizer_model_path)
+                    PickledDataset._tokenizer_cache[tokenizer_model_path] = tokenizer_instance
+                except Exception as e:
+                    self.logger.error(f"Failed to load SentencePiece tokenizer from {tokenizer_model_path}: {e}", exc_info=True)
+                    # Cache failure marker to avoid retrying repeatedly
+                    PickledDataset._tokenizer_cache[tokenizer_model_path] = None
+                    return None
+            return PickledDataset._tokenizer_cache[tokenizer_model_path]
+        elif tokenizer_type == 'CharTokenizer': # Or based on metadata key presence
+            # CharTokenizer is simpler, decode uses idx_to_char directly
+            return None # No separate tokenizer object needed for decode
+        else:
+            # self.logger.warning(f"Unsupported tokenizer type '{tokenizer_type}' for dynamic loading in decode.")
+            return None
+
     def decode(self, ids: Union[torch.Tensor, List[int]], skip_special_tokens: bool = True) -> str:
         """
-        Decodes a sequence of token IDs back into text using idx_to_char from metadata.
-        Returns a placeholder if metadata or idx_to_char is unavailable.
-        
+        Decodes a sequence of token IDs back into text using information from metadata.json.
+        Handles 'char' type via idx_to_char map and 'SentencePiece' type by loading the tokenizer.
+
         Args:
             ids: The token IDs to decode (Tensor or list).
-            skip_special_tokens: Whether to skip PAD and EOS tokens during decoding.
+            skip_special_tokens: Whether to skip PAD and EOS tokens during decoding (Currently only supports char).
 
         Returns:
             The decoded string.
         """
         metadata = self.get_metadata()
-        idx_to_char = metadata.get('idx_to_char')
-        pad_token_id = metadata.get('pad_token_id') # Get pad_token_id from metadata
-        eos_token_id = metadata.get('eos_token_id') # Get eos_token_id from metadata
-
-        if not idx_to_char:
-            self.logger.warning("Cannot decode: idx_to_char mapping not found in metadata.")
-            return "[Decode unavailable: Missing metadata]"
-        
+        tokenizer_type = metadata.get('tokenizer_type')
         # Convert tensor to list if necessary
         if isinstance(ids, torch.Tensor):
             ids = ids.tolist()
-            
-        try:
-            # Handle potential string keys from JSON
-            if not hasattr(self, '_idx_map_cache'): # Cache the integer map
-                if all(isinstance(k, str) for k in idx_to_char.keys()):
-                     self._idx_map_cache = {int(k): v for k, v in idx_to_char.items()} 
-                else:
-                     self._idx_map_cache = idx_to_char # Assume keys are already integers
-            idx_map = self._idx_map_cache
 
-            decoded_chars = []
-            for i in ids:
-                if skip_special_tokens:
-                    if pad_token_id is not None and i == pad_token_id:
-                        continue
-                    if eos_token_id is not None and i == eos_token_id:
-                        continue
-                decoded_chars.append(idx_map.get(i, '?')) # Use '?' for unknown IDs
+        if tokenizer_type == 'CharTokenizer' or metadata.get('idx_to_char'):
+            # --- Character Decoding Logic --- #
+            idx_to_char = metadata.get('idx_to_char')
+            if not idx_to_char:
+                self.logger.warning("Cannot decode: idx_to_char mapping not found in metadata for char type.")
+                return "[Decode unavailable: Missing idx_to_char]"
+            # Handle special tokens if needed (example)
+            pad_token_id = metadata.get('pad_token_id')
+            eos_token_id = metadata.get('eos_token_id')
 
-            return ''.join(decoded_chars)
-        except Exception as e:
-            self.logger.error(f"Error during decoding: {e}", exc_info=True)
-            return f"[Decode error: {e}]" 
+            try:
+                # Cache integer map if keys are strings
+                if self._idx_map_cache is None:
+                    if idx_to_char and all(isinstance(k, str) for k in idx_to_char.keys()):
+                         self._idx_map_cache = {int(k): v for k, v in idx_to_char.items()}
+                    else:
+                         self._idx_map_cache = idx_to_char # Assume keys are already integers or map is missing
+
+                idx_map = self._idx_map_cache or {}
+
+                decoded_chars = []
+                for i in ids:
+                    if skip_special_tokens:
+                        if pad_token_id is not None and i == pad_token_id:
+                            continue
+                        if eos_token_id is not None and i == eos_token_id:
+                            continue
+                    decoded_chars.append(idx_map.get(i, '?')) # Use '?' for unknown IDs
+                return ''.join(decoded_chars)
+            except Exception as e:
+                self.logger.error(f"Error during character decoding: {e}", exc_info=True)
+                return f"[Char Decode error: {e}]"
+            # --- End Character Decoding --- #
+
+        elif tokenizer_type == 'SentencePiece':
+            # --- SentencePiece Decoding Logic --- #
+            tokenizer = self._get_tokenizer()
+            if tokenizer:
+                try:
+                    # Note: SentencePiece decode handles skip_special_tokens internally based on its model
+                    # We might need to pass flags if the tokenizer interface supports it
+                    return tokenizer.decode(ids)
+                except Exception as e:
+                    self.logger.error(f"Error during SentencePiece decoding: {e}", exc_info=True)
+                    return f"[SP Decode error: {e}]"
+            else:
+                return "[Decode unavailable: Failed to load SP tokenizer]"
+            # --- End SentencePiece Decoding --- #
+
+        else:
+            self.logger.warning(f"Decode not implemented for tokenizer type: {tokenizer_type}")
+            return "[Decode unavailable: Unknown tokenizer type]" 

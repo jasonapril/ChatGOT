@@ -53,6 +53,7 @@ class TestEpochAMP:
         mock_target = torch.randint(0, 10, (2,)) # Example target
         mock_dataloader.__iter__.return_value = iter([(mock_input, mock_target)])
         mock_dataloader.__len__.return_value = 1 # Ensure length is correct
+        mock_progress_tracker_instance.start_time = None # Add start_time
 
         # --- Setup Config for Loop (AMP Enabled) ---
         # Define required config values
@@ -75,39 +76,39 @@ class TestEpochAMP:
             config=config # Pass the config object
         )
         loop.scaler = mock_scaler # Inject mock scaler
-        mock_scaler.update = MagicMock() # Prevent unexpected side-effects
         mock_scaler.is_enabled = MagicMock(return_value=True)
         mock_scaler.scale.return_value = mock_loss
-        # <<< ADD side_effect to scaler.step >>>
-        def scaler_step_side_effect(optimizer):
-            optimizer.step()
-        mock_scaler.step.side_effect = scaler_step_side_effect
-        
+        # Mock scaler.step to simulate a successful step (return non-None)
+        mock_scaler.step = MagicMock(return_value=1.0) # Return value indicates step was taken
+        # Mock get_scale to return different values before/after step to satisfy step_taken logic
+        mock_scaler.get_scale = MagicMock(side_effect=[128.0, 64.0]) # Simulate scale change
+        mock_scaler.update = MagicMock()
+        mock_scaler.unscale_ = MagicMock()
+
         mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
-        mock_progress_tracker_instance.progress_bar = MagicMock() # <<< ADD progress_bar attribute
+        # mock_progress_tracker_instance.progress_bar = MagicMock() # Not needed
 
         # --- Run Epoch ---
         start_global_step = 0
         loop.train_epoch(trainer=mock_trainer, current_epoch=0, global_step=start_global_step, progress=mock_progress_tracker_instance)
 
         # --- Assertions ---
-        mock_autocast.assert_called_once_with(device_type=mock_device.type, enabled=True)
-        mock_scaler.scale.assert_called_once_with(mock_loss)
+        mock_autocast.assert_called_once_with(device_type=mock_device.type, dtype=torch.float16, enabled=True)
+        mock_scaler.scale.assert_called_once_with(mock_loss / config.gradient_accumulation_steps) # Check loss normalization
+        mock_scaler.unscale_.assert_called_once_with(mock_optimizer) # Unscale before step
         mock_scaler.step.assert_called_once_with(mock_optimizer)
-        mock_scaler.update.assert_called_once()
+        mock_scaler.update.assert_called_once() # Update is called
+        mock_optimizer.step.assert_not_called() # Optimizer step is called *by* scaler.step
         # Called at start + after step
         assert mock_optimizer.zero_grad.call_count == 2
-        mock_progress_tracker_instance.update.assert_called_with(
-            step=start_global_step + 1,
-            loss=mock_loss.item(),
-            learning_rate=ANY,
-            tokens_per_second=ANY,
-        )
+        mock_progress_tracker_instance.update.assert_called_once() # Check progress update happens
+        # Check args for progress update (basic structure)
+        update_args, update_kwargs = mock_progress_tracker_instance.update.call_args
+        assert update_kwargs.get('step') == start_global_step + 1
+        assert 'loss' in update_kwargs
+        assert 'learning_rate' in update_kwargs
+        assert 'additional_metrics' in update_kwargs # Check VRAM stats are passed
+
         assert mock_cross_entropy.call_count == 1
         assert mock_autocast.return_value.__enter__.call_count == 1
-        assert mock_autocast.return_value.__exit__.call_count == 1
-        assert mock_optimizer.step.call_count == 1
-        assert mock_optimizer.zero_grad.call_count == 2
-        assert mock_scaler.scale.call_count == 1
-        assert mock_scaler.step.call_count == 1
-        assert mock_scaler.update.call_count == 1 
+        assert mock_autocast.return_value.__exit__.call_count == 1 

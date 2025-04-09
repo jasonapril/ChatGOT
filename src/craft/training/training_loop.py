@@ -30,8 +30,8 @@ except ImportError:
 # Use relative import for utils within the same package
 from ..utils.logging import force_flush_logs, format_time
 # from ..utils.memory import MemoryMonitor # Removed unused import
-from .callbacks import CallbackList, SampleGenerationCallback
-from .callbacks.sample_generation import SampleGenerationCallback # <-- Import specific callback
+from .callbacks import CallbackList, SampleGenerationCallback # Corrected import
+from .callbacks.sample_generation import SampleGenerationCallback # Import specific callback
 from .callbacks.tensorboard import TensorBoardLogger # Corrected import
 from .callbacks.base import Callback # Added import
 from ..models.base import GenerativeModel # Import base model for type hinting
@@ -39,10 +39,33 @@ from .progress import ProgressTracker  # Import ProgressTracker
 from .checkpointing import CheckpointManager, TrainingState # Import CheckpointManager and TrainingState
 from craft.config.schemas import TrainingConfig
 
+# Helper to safely get learning rate
+def get_current_lr(optimizer: Optional[torch.optim.Optimizer]) -> Optional[float]:
+    """Safely retrieves the current learning rate from the optimizer."""
+    if optimizer and optimizer.param_groups:
+        lr = optimizer.param_groups[0].get('lr')
+        return float(lr) if isinstance(lr, (int, float)) else None
+    return None
+
+# Helper to get CUDA memory stats (in GB)
+def get_cuda_memory_stats(device: torch.device) -> Dict[str, float]:
+    """Gets current and peak allocated CUDA memory in GB if available."""
+    stats = {}
+    if torch.cuda.is_available() and device.type == 'cuda':
+        try:
+            allocated = torch.cuda.memory_allocated(device) / (1024**3) # Convert bytes to GB
+            max_allocated = torch.cuda.max_memory_allocated(device) / (1024**3)
+            stats['vram_allocated_gb'] = allocated
+            stats['vram_max_allocated_gb'] = max_allocated
+        except Exception as e:
+             # Log error if memory stats fail, but don't crash training
+             logging.getLogger(__name__).warning(f"Could not get CUDA memory stats: {e}", exc_info=True)
+    return stats
+
 class TrainingLoop:
     """Handles the core training loop logic."""
-    callbacks: CallbackList # <-- Add class-level type hint
-    
+    callbacks: CallbackList
+
     def __init__(
         self,
         model: torch.nn.Module,
@@ -60,16 +83,15 @@ class TrainingLoop:
         self.device = device
         self.config = config # Store Pydantic TrainingConfig
         self.scheduler = scheduler
-        
+
         # Access parameters from config
         self.use_amp = config.use_amp
         self.gradient_accumulation_steps = max(1, config.gradient_accumulation_steps)
         self.max_grad_norm = config.max_grad_norm
         self.log_interval = config.log_interval
         self.save_interval = config.save_interval if config.save_interval is not None else 0
-        self.time_save_interval_seconds = config.time_save_interval_seconds if config.time_save_interval_seconds is not None else 0
         self.max_steps = config.max_steps
-        
+
         # Handle callbacks: Use provided CallbackList or create one
         if isinstance(callbacks, CallbackList):
             self.callbacks = callbacks
@@ -77,14 +99,12 @@ class TrainingLoop:
             self.callbacks = CallbackList(callbacks if callbacks is not None else [])
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        # Initialize scaler for AMP
-        self.scaler = torch.amp.GradScaler(self.device.type, enabled=self.use_amp)
+        # Initialize scaler for AMP using config value and device type
+        self.scaler = torch.amp.GradScaler(enabled=self.use_amp)
         self.checkpoint_manager = checkpoint_manager # Store manager
 
         # Time tracking for interval-based actions
         self.last_time_based_save = time.time()
-        self.last_time_based_sample = time.time()
-        self._last_sample_time = time.time() # Initialize _last_sample_time
 
     def _prepare_training_state(self, epoch: int, global_step: int) -> TrainingState:
         """Gathers component states and creates a TrainingState object."""
@@ -92,13 +112,10 @@ class TrainingLoop:
         optimizer_state = self.optimizer.state_dict() if self.optimizer else None
         scheduler_state = self.scheduler.state_dict() if self.scheduler else None
         scaler_state = self.scaler.state_dict() if self.scaler and self.use_amp else None
-        
+
         callbacks_state = None
         if self.callbacks and hasattr(self.callbacks, 'state_dict') and callable(getattr(self.callbacks, 'state_dict')):
             callbacks_state = self.callbacks.state_dict()
-
-        # TODO: Gather metrics more reliably if needed for the state object itself
-        # metrics = ...
 
         # Get TB log dir (handle potential absence of callback)
         tb_log_dir = None
@@ -106,12 +123,10 @@ class TrainingLoop:
             tb_logger = self.callbacks.get_callback(TensorBoardLogger)
             if tb_logger and hasattr(tb_logger, 'resolved_log_dir'):
                  tb_log_dir = tb_logger.resolved_log_dir
-        
+
         serializable_config = None
-        if self.config: 
+        if self.config:
             serializable_config = self.config.model_dump()
-        else:
-            pass # config is None, serializable_config remains None
 
         state = TrainingState(
             epoch=epoch,
@@ -120,84 +135,54 @@ class TrainingLoop:
             optimizer_state_dict=optimizer_state,
             scheduler_state_dict=scheduler_state,
             scaler_state_dict=scaler_state,
-            # best_val_metric= # This should come from Trainer/Evaluator state passed in
-            # metrics=metrics,
             config=serializable_config,
             tensorboard_log_dir=tb_log_dir,
             callbacks_state=callbacks_state,
+            # TODO: Consider how best_val_metric is managed and potentially saved
         )
-        assert self.checkpoint_manager is not None
+        # Removed assert self.checkpoint_manager is not None, as it might be optional
         return state
 
     def _should_save_checkpoint(self, global_step: int, current_time: float) -> bool:
         """Checks if a checkpoint should be saved based on step or time intervals."""
-        # Step-based trigger using self.save_interval from config
+        # Step-based trigger
         step_trigger = (
             self.checkpoint_manager
             and self.save_interval > 0
             and global_step > 0 # Avoid saving at step 0
             and global_step % self.save_interval == 0
         )
-        # Time-based trigger using self.time_save_interval_seconds from config
+        # Time-based trigger
         time_trigger = False
-        if self.checkpoint_manager and self.time_save_interval_seconds > 0:
+        time_save_interval = getattr(self.config, 'time_save_interval_seconds', 0)
+        if self.checkpoint_manager and time_save_interval > 0:
             elapsed_since_last_save = current_time - self.last_time_based_save
-            if elapsed_since_last_save >= self.time_save_interval_seconds:
+            if elapsed_since_last_save >= time_save_interval:
                 time_trigger = True
-                self.last_time_based_save = current_time # Reset timer *only* if triggered
+                self.last_time_based_save = current_time
 
         return step_trigger or time_trigger
 
-    def _should_generate_sample(self, global_step: int, current_time: float) -> bool:
-        """Check if sample generation should occur based on interval."""
-        if not self.callbacks:
-            return False
-
-        # Find the SampleGenerationCallback instance by iterating
-        sample_cb: Optional[SampleGenerationCallback] = None
-        for cb in self.callbacks:
-            if isinstance(cb, SampleGenerationCallback):
-                sample_cb = cb
-                break
-        
-        if sample_cb is None:
-            # self.logger.debug("SampleGenerationCallback not found in CallbackList.")
-            return False # No sampling callback found
-        
-        # Check if generation interval is met
-        if sample_cb.generation_interval_seconds <= 0:
-            return False # Interval disabled
-            
-        now = current_time # Use the provided current time
-        if (now - self._last_sample_time) >= sample_cb.generation_interval_seconds:
-            self._last_sample_time = now
-            # self.logger.debug(f"Sample generation triggered at step {global_step}.")
-            return True
-            
-        return False
-
+    # --- Main Epoch Training Method --- #
     def train_epoch(
         self,
-        trainer: Any,
+        trainer: Any, # Pass the Trainer instance for callbacks needing broader context
         current_epoch: int,
-        global_step: int, # This is the step count *at the start* of the epoch
-        progress: ProgressTracker,
-        loaded_global_step: Optional[int] = None
+        global_step: int, # Step count at the *start* of the epoch
+        progress: ProgressTracker, # Progress tracker instance from Trainer
+        loaded_global_step: Optional[int] = None # To handle resuming mid-epoch
     ) -> Dict[str, float]:
         """Runs a single training epoch."""
-        print(f"DEBUG: TrainingLoop.train_epoch(current_epoch={current_epoch}, global_step={global_step}) - START", flush=True)
         self.model.train() # Set model to training mode
-        epoch_loss = 0.0
-        num_valid_steps_in_epoch = 0
+        epoch_loss_total = 0.0
+        num_optimizer_steps_in_epoch = 0 # Tracks optimizer steps within this epoch
         epoch_start_time = time.time()
-        total_tokens = 0
         steps_per_epoch = len(self.train_dataloader)
         self.optimizer.zero_grad(set_to_none=True) # Reset gradients at epoch start
 
-        # Get max_steps from config safely
-        max_steps = getattr(self.config, 'max_steps', None)
-        # Get log_interval from config safely
-        self.log_interval = getattr(self.config, 'log_interval', 10)
+        # Get max_steps and log_interval from config safely
+        max_steps = self.config.max_steps
+        self.log_interval = self.config.log_interval # Can update dynamically if config changes
 
         # Batch skipping logic for resuming
         resume_batch_offset = -1
@@ -207,285 +192,301 @@ class TrainingLoop:
             self.logger.info(f"Resuming epoch {current_epoch+1} from batch offset {resume_batch_offset + 1}/{steps_per_epoch} (global step {loaded_global_step + 1})")
             is_resuming_this_epoch = True
 
-        step_token_accumulator = 0
-        step_time_accumulator = 0.0
-        last_log_time = time.time()
+        last_step_time = time.time() # Timer for step duration calculation
+        accumulation_window_losses = [] # Track losses for current accumulation window
 
-        # Get total batches for progress tracking
-        total_batches = len(self.train_dataloader)
-
-        # <<< ADD DEBUG PRINT HERE >>>
-        print(f"[DEBUG TrainingLoop] Dataloader length: {total_batches}", flush=True)
-
-        # Start the progress tracker provided by Trainer
-        progress.start() 
-
-        # Use simple enumeration, progress tracker handles the visual bar
+        # Start the progress tracker if it wasn't already started
+        if progress.start_time is None:
+            progress.start()
         iterator = enumerate(self.train_dataloader)
 
-        for i, batch in iterator:
-            # Skip batches if resuming mid-epoch
-            if is_resuming_this_epoch and i <= resume_batch_offset:
-                continue
-
-            # CHECK MAX STEPS *BEFORE* FORWARD PASS (using self.max_steps)
-            if self.max_steps is not None and global_step >= self.max_steps:
-                self.logger.info(f"Reached max_steps ({self.max_steps}) before processing batch {i+1}. Stopping epoch.")
-                break
-
-            step_logs: Dict[str, Any] = {}
-            # Note: on_step_begin is called with the global_step *before* it's potentially incremented in this loop iteration
-            self._callback_on_step_begin(global_step, logs=step_logs)
-
-            if isinstance(batch, (list, tuple)) and len(batch) >= 2:
-                inputs, targets = batch[0].to(self.device), batch[1].to(self.device)
-            else:
-                self.logger.error(f"Unexpected batch format: {type(batch)}. Expected list/tuple of tensors.")
-                continue # Skip batch
-
-            is_last_batch_step = (i + 1) == total_batches
-            should_step = ((i + 1) % self.gradient_accumulation_steps == 0) or is_last_batch_step
-
+        batch_idx = -1 # Initialize batch_idx before the loop
+        # --- Batch Loop ---
+        for batch_idx, batch in iterator:
             try:
-                ddp_sync_context = contextlib.nullcontext() # Assuming no DDP for now
+                # Check max_steps *before* processing the batch or try-except block
+                current_effective_step = global_step + num_optimizer_steps_in_epoch
+                if max_steps is not None and current_effective_step >= max_steps:
+                     self.logger.info(f"Max steps ({max_steps}) reached at step {current_effective_step}. Stopping epoch before batch {batch_idx}.")
+                     break # Exit batch loop
 
-                with ddp_sync_context:
-                    with torch.amp.autocast(device_type=self.device.type, enabled=self.use_amp):
-                        self.logger.debug(f"Step {global_step}, Batch {i+1}: Before model forward pass. Input shape: {inputs.shape}")
-                        outputs = self.model(inputs)
-                        self.logger.debug(f"Step {global_step}, Batch {i+1}: After model forward pass. Output shape: {outputs.shape}")
-                        self.logger.debug(f"Step {global_step}, Batch {i+1}: Before loss calculation. Target shape: {targets.shape}")
-                        loss_unscaled = F.cross_entropy(outputs.view(-1, outputs.size(-1)), targets.view(-1))
-                        self.logger.debug(f"Step {global_step}, Batch {i+1}: After loss calculation. Loss tensor: {loss_unscaled}")
+                # Handle resuming mid-epoch by skipping processed batches
+                if is_resuming_this_epoch and batch_idx <= resume_batch_offset:
+                    if batch_idx == resume_batch_offset:
+                        self.logger.info(f"Fast-forwarded to batch {batch_idx + 1}. Resuming training.")
+                    continue # Skip this batch
 
-                    loss_val = loss_unscaled.item()
-                    is_loss_invalid = torch.isnan(loss_unscaled).any() or torch.isinf(loss_unscaled).any()
+                # Adjust global step only AFTER skipping checks for resuming
+                # current_global_step reflects the step *before* this batch's potential optimizer update
+                current_global_step = global_step + num_optimizer_steps_in_epoch
 
-                    if is_loss_invalid:
-                        self.logger.warning(f"Step {global_step}, Batch {i+1}/{total_batches}: NaN/Inf loss detected: {loss_val}. Skipping backward/step.")
-                        if should_step: 
-                            self.optimizer.zero_grad(set_to_none=True) # Still zero grad if skipping step
+                # --- Callback: On Step Begin (triggered before forward/backward) ---
+                step_logs: Dict[str, Any] = {"batch_size": len(batch[0]) if isinstance(batch, (list, tuple)) and len(batch) > 0 else 1} # Example batch size
+                self._callback_on_step_begin(batch_idx, current_global_step, step_logs)
+
+                batch_start_time = time.time()
+
+                # --- Data Transfer (moved inside try block) ---
+                inputs = batch[0].to(self.device, non_blocking=True)
+                targets = batch[1].to(self.device, non_blocking=True)
+
+                # --- Forward Pass ---
+                # Use appropriate context manager for AMP
+                amp_context = torch.amp.autocast(device_type=self.device.type, dtype=torch.bfloat16 if self.device.type == 'cuda' and torch.cuda.is_bf16_supported() else torch.float16, enabled=self.use_amp)
+                with amp_context:
+                    # Assume model returns logits or (logits, loss)
+                    output = self.model(inputs)
+                    if isinstance(output, tuple):
+                        logits, loss = output[0], output.get('loss', None) # Look for 'loss' key
+                        if loss is None: # Fallback if 'loss' key missing but tuple returned
+                             # Ensure logits are float for F.cross_entropy if needed
+                             flat_logits = logits.view(-1, logits.size(-1)).float() # Use .float() for CE
+                             flat_targets = targets.view(-1)
+                             loss = F.cross_entropy(flat_logits, flat_targets, ignore_index=-1) # Example loss calc
+                    else:
+                        logits = output
+                         # Ensure logits are float for F.cross_entropy if needed
+                        flat_logits = logits.view(-1, logits.size(-1)).float() # Use .float() for CE
+                        flat_targets = targets.view(-1)
+                        loss = F.cross_entropy(flat_logits, flat_targets, ignore_index=-1) # Example loss calc
+
+                    if loss is None:
+                        self.logger.error("Loss calculation failed or was not returned by the model.")
+                        raise ValueError("Loss computation failed.")
+
+                    # Check for NaN/Inf loss before scaling/backward
+                    loss_val = loss.item()
+                    if torch.isnan(loss) or torch.isinf(loss):
+                        self.logger.warning(
+                            f"NaN/Inf loss detected at Global Step {global_step + num_optimizer_steps_in_epoch}, Batch {batch_idx}. Loss: {loss_val}. Skipping batch."
+                        )
+                        # Skip the rest of the batch processing including backward and optimizer step
                         continue
 
-                    loss = loss_unscaled / self.gradient_accumulation_steps
+                    # Normalize loss for gradient accumulation
+                    # Average loss over accumulation steps
+                    loss = loss / self.gradient_accumulation_steps
 
-                self.scaler.scale(loss).backward()
+                # --- Backward Pass ---
+                # Scale loss before backward pass for AMP
+                if self.use_amp:
+                    self.scaler.scale(loss).backward()
+                else:
+                    loss.backward()
 
-                # Accumulate metrics for valid steps
-                epoch_loss += loss_val
-                num_valid_steps_in_epoch += 1 # Increment steps actually processed in *this epoch*
-                batch_tokens = inputs.numel()
-                total_tokens += batch_tokens
-                step_token_accumulator += batch_tokens
+                # Accumulate loss for epoch average calculation
+                # Use .item() to get Python number and avoid graph retention
+                current_batch_loss_unscaled = loss.item() * self.gradient_accumulation_steps
+                epoch_loss_total += current_batch_loss_unscaled # Accumulate original loss scale
+                accumulation_window_losses.append(current_batch_loss_unscaled)
 
-                if should_step:
-                    self.scaler.unscale_(self.optimizer)
+                # --- Gradient Accumulation & Optimizer Step ---
+                is_update_step = (batch_idx + 1) % self.gradient_accumulation_steps == 0
+                is_last_batch = (batch_idx + 1) == steps_per_epoch
+
+                if is_update_step or is_last_batch:
+                    # --- Pre-Optimizer Step ---
+                    step_taken = False # Flag to track if optimizer step was successful
+
+                    # Unscale gradients before clipping (required for AMP)
+                    if self.use_amp:
+                        self.scaler.unscale_(self.optimizer)
+
+                    # Gradient Clipping (optional, after potential unscaling)
                     if self.max_grad_norm is not None:
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
 
-                    # Optimizer Step
+                    # --- Optimizer Step ---
                     if self.use_amp:
-                        self.scaler.step(self.optimizer)
+                        # scaler.step() returns the scale factor if successful, None otherwise
+                        scale_before = self.scaler.get_scale()
+                        maybe_step_output = self.scaler.step(self.optimizer)
+                        scale_after = self.scaler.get_scale()
+                        # Step was taken if scale was updated or step output is not None
+                        # (Checking scale is a robust way if scaler.step doesn't return useful info)
+                        # A simpler check if scaler.step returns None on skip: if maybe_step_output is not None:
+                        if scale_before > scale_after or maybe_step_output is not None: # Heuristic: step happened if scale was adjusted or step didn't return None
+                            step_taken = True
                     else:
                         self.optimizer.step()
-                    self.scaler.update()
+                        step_taken = True # Assume step was taken if no exception
 
-                    # Scheduler Step
-                    if self.scheduler is not None:
-                        self.scheduler.step()
+                    # --- Scaler Update ---
+                    # Only needed if AMP is enabled.
+                    if self.use_amp:
+                        self.scaler.update() # Update scale regardless of step success? Usually yes.
 
-                    # Zero Grad
+                    # --- Zero Gradients ---
+                    # Crucial: Zero gradients *after* optimizer step and scaler update
                     self.optimizer.zero_grad(set_to_none=True)
 
-                    # Increment global step *after* a successful optimizer step
-                    global_step += 1
+                    # --- Scheduler Step (if applicable) ---
+                    # Step the scheduler after the optimizer step
+                    if self.scheduler:
+                         # Consider stepping only if step_taken is True? Depends on scheduler type.
+                         # Common practice is to step regardless, let scheduler handle internal logic.
+                        self.scheduler.step()
 
-                    # Call step end callback *after* step increment and actions
-                    self._callback_on_step_end(i, global_step, step_logs)
+                    # --- Post-Optimizer Step Actions (Only if Step Taken) ---
+                    if step_taken:
+                        # --- Increment Counters ---
+                        num_optimizer_steps_in_epoch += 1
+                        effective_global_step = global_step + num_optimizer_steps_in_epoch # Use this for logging/callbacks
 
-                    # <<< REPLACE DEBUG PRINT WITH LOGGER.ERROR >>>
-                    self.logger.error(f"[DEBUG TrainingLoop] Checkpoint Eval: Step={global_step}, Interval={self.save_interval}, Manager Exists={self.checkpoint_manager is not None}")
+                        # --- Progress Tracking Update ---
+                        current_step_avg_loss = np.mean(accumulation_window_losses) if accumulation_window_losses else float('nan')
+                        accumulation_window_losses.clear() # Reset for next window
+                        current_lr = get_current_lr(self.optimizer)
+                        tokens_per_sec_val = progress.get_throughput() if hasattr(progress, 'get_throughput') else None
+                        vram_stats = get_cuda_memory_stats(self.device)
 
-                    # --- Periodic Checkpoint Save --- #
-                    current_time = time.time()
-                    # Use the helper method to check trigger conditions
-                    if self._should_save_checkpoint(global_step, current_time):
-                        self.logger.info(f"[TrainingLoop] Triggering checkpoint save at step {global_step}.")
-                        # Use helper to prepare state
-                        training_state = self._prepare_training_state(current_epoch, global_step)
-                        # Pass the state object to the manager
-                        filename = f"checkpoint_step_{global_step:06d}.pt"
-                        try:
-                            # TODO: Determine metrics and is_best for saving
-                            # This likely requires state passed from Trainer or Evaluator
-                            metrics_for_ckpt = step_logs # Or epoch metrics? Needs clarity.
-                            is_best_for_ckpt = False # Need logic based on validation
-                            # Add check for None before calling
-                            if self.checkpoint_manager:
-                                self.checkpoint_manager.save_checkpoint(
-                                    state=training_state,
-                                    filename=filename,
-                                    metrics=metrics_for_ckpt, # Pass current metrics
-                                    is_best=is_best_for_ckpt # Pass best status
-                                )
-                            else:
-                                self.logger.warning("Checkpoint save triggered, but CheckpointManager is None.")
-                        except Exception as e:
-                            self.logger.error(f"Checkpoint saving failed at step {global_step}: {e}", exc_info=True)
-                    
-                    # --- Periodic Sample Generation --- #
-                    # Use the helper method to check trigger conditions
-                    if self._should_generate_sample(global_step, current_time):
-                        self.logger.info(f"[TrainingLoop] Triggering sample generation at step {global_step}.")
-                        # Trigger via a generic callback hook if possible,
-                        # or call the specific callback if necessary.
-                        sample_cb = self.callbacks.get_callback(SampleGenerationCallback)
-                        if sample_cb:
-                            try:
-                                # Pass context
-                                sample_cb.generate_samples(trigger_event=f"step {global_step}") 
-                            except Exception as e:
-                                self.logger.error(f"Sample generation failed at step {global_step}: {e}", exc_info=True)
-                        else:
-                            self.logger.warning("Sample generation triggered, but SampleGenerationCallback not found.")
-
-                    # --- Metric Logging & Progress Update --- #
-                    current_lr = self.optimizer.param_groups[0]["lr"]
-                    step_time = time.time() - last_log_time
-                    step_time_accumulator += step_time
-                    tokens_per_sec = step_token_accumulator / step_time_accumulator if step_time_accumulator > 0 else 0.0
-
-                    # Log metrics periodically or if it's the last step
-                    is_last_step_overall = (self.max_steps is not None and global_step >= self.max_steps)
-                    if global_step % self.log_interval == 0 or is_last_batch_step or is_last_step_overall:
-                        avg_step_loss = loss_val # Current step loss (avg over accumulation)
-                        # Prepare metrics dict for logging and callbacks
-                        log_metrics = {
-                            "loss": avg_step_loss,
-                            "lr": current_lr,
-                            "tokens_per_sec": tokens_per_sec
-                        }
-                        # Add GPU memory usage if available
-                        if torch.cuda.is_available():
-                             log_metrics["vram_allocated_gb"] = torch.cuda.memory_allocated(self.device) / (1024**3)
-                             log_metrics["vram_max_allocated_gb"] = torch.cuda.max_memory_allocated(self.device) / (1024**3)
-                             # Reset peak memory stats periodically if desired
-                             # torch.cuda.reset_peak_memory_stats(self.device)
-                        
-                        # Update progress tracker (ensure it can handle these new metrics)
                         progress.update(
-                             step=global_step,
-                             loss=log_metrics["loss"],
-                             learning_rate=log_metrics.get("lr"), # Pass LR if available
-                             tokens_per_second=log_metrics.get("tokens_per_sec") # Pass T/s if available
-                             # Pass other specific metrics if ProgressTracker supports them
-                             # **log_metrics # Reverted: Pass only expected args
+                            step=effective_global_step,
+                            loss=current_step_avg_loss,
+                            learning_rate=current_lr,
+                            tokens_per_second=tokens_per_sec_val,
+                            additional_metrics=vram_stats
                         )
-                        # Add metrics to step_logs for on_step_end callback
-                        step_logs.update(log_metrics)
-                        
-                        # Reset step accumulators after logging
-                        step_token_accumulator = 0
-                        step_time_accumulator = 0.0
+                        last_step_time = time.time()
 
-                    # Update progress bar description (Now just updates count)
-                    if progress.progress_bar:
-                        progress.progress_bar.update(1) # This call only increments the counter
+                        # --- Logging & Callbacks (Conditional on Log Interval) ---
+                        if effective_global_step % self.log_interval == 0:
+                            items_per_sec = progress.get_items_per_sec() if hasattr(progress, 'get_items_per_sec') else None
+                            eta_seconds = progress.get_eta(max_steps if max_steps else steps_per_epoch * self.config.num_epochs) if hasattr(progress, 'get_eta') else None
+                            eta_formatted = format_time(eta_seconds) if eta_seconds is not None else "N/A"
+
+                            log_msg = (
+                                f"Epoch {current_epoch+1}/{self.config.num_epochs}, "
+                                f"Step {effective_global_step}/{max_steps if max_steps else 'inf'}, "
+                                f"Batch {batch_idx+1}/{steps_per_epoch}, "
+                                f"Loss: {current_step_avg_loss:.4f}, LR: {current_lr:.2e}, "
+                            )
+                            if items_per_sec is not None: log_msg += f"Items/sec: {items_per_sec:.2f}, "
+                            if tokens_per_sec_val is not None: log_msg += f"Tok/sec: {tokens_per_sec_val:.2f}, "
+                            if vram_stats: log_msg += f"VRAM: {vram_stats.get('vram_allocated_gb', 0.0):.2f}GB (Max: {vram_stats.get('vram_max_allocated_gb', 0.0):.2f}GB), "
+                            log_msg += f"ETA: {eta_formatted}"
+                            self.logger.info(log_msg)
+
+                            metrics_to_log = {
+                                'train/loss_step': current_step_avg_loss,
+                                'train/learning_rate': current_lr,
+                                'perf/items_per_second': items_per_sec,
+                                **{f"perf/{k}": v for k, v in vram_stats.items()},
+                            }
+                            if tokens_per_sec_val is not None: metrics_to_log['perf/tokens_per_second'] = tokens_per_sec_val
+                            # Moved callback inside logging interval check - IS THIS INTENDED?
+                            # Original thought was to move it *outside* log interval. Let's move it outside.
+                            # self._callback_on_step_end(batch_idx, effective_global_step, metrics_to_log)
+
+                        # --- Step End Callback (Called Every Successful Step) ---
+                        # Prepare metrics for the callback regardless of logging interval
+                        callback_metrics = {
+                            'train/loss_step': current_step_avg_loss,
+                            'train/learning_rate': current_lr,
+                            'perf/items_per_second': progress.get_items_per_sec() if hasattr(progress, 'get_items_per_sec') else None,
+                             **{f"perf/{k}": v for k, v in get_cuda_memory_stats(self.device).items()}, # Recalculate VRAM? Or use vram_stats? Use vram_stats.
+                             **{f"perf/{k}": v for k, v in vram_stats.items()},
+                        }
+                        if tokens_per_sec_val is not None: callback_metrics['perf/tokens_per_second'] = tokens_per_sec_val
+                        self._callback_on_step_end(batch_idx, effective_global_step, callback_metrics)
+
+
+                        # --- Checkpointing ---
+                        # Checkpoint based on effective_global_step after a successful step
+                        if self._should_save_checkpoint(effective_global_step, time.time()):
+                             if self.checkpoint_manager:
+                                 self.logger.info(f"Saving checkpoint at global step {effective_global_step}...")
+                                 state_to_save = self._prepare_training_state(current_epoch, effective_global_step)
+                                 self.checkpoint_manager.save_checkpoint(state_to_save, is_best=False)
+                                 self.logger.info(f"Checkpoint saved successfully.")
+                                 force_flush_logs()
+                             else:
+                                self.logger.warning("Checkpoint saving triggered but CheckpointManager is not configured.")
+                    # --- End of `if step_taken:` block ---
+                # --- End of `if is_update_step or is_last_batch:` block ---
+
+                # Clean up batch tensors to potentially free memory
+                del inputs, targets, logits, loss, output
+                if self.device.type == 'cuda':
+                    torch.cuda.empty_cache()
+                gc.collect() # Force garbage collection
 
             except Exception as e:
-                self.logger.error(f"Error during training step {global_step}, batch {i+1}: {e}", exc_info=True)
-                # Decide how to handle: skip batch, stop epoch, stop training?
-                # For now, just log and continue (might lead to issues if persistent)
-                if should_step: # Ensure grads are zeroed if an error occurred before step
-                     self.optimizer.zero_grad(set_to_none=True)
-                continue # Move to next batch
-            finally:
-                # Ensure logs are flushed periodically? Or rely on higher level flushing?
-                # force_flush_logs() # Maybe too frequent here
-                # Potential CUDA memory cleanup (use cautiously)
-                # if torch.cuda.is_available():
-                #     torch.cuda.empty_cache()
-                # gc.collect()
-                pass
+                # Determine current effective step even if error occurred before update block
+                current_effective_step_on_error = global_step + num_optimizer_steps_in_epoch
+                self.logger.exception(f"Error during training batch {batch_idx} (Approx Global Step {current_effective_step_on_error}): {e}")
 
-            # Callbacks: on_step_end - called AFTER potential step and increment
-            # Pass metrics accumulated during the step (or micro-batches)
-            # Ensure standard loss is always included
-            if "loss" not in step_logs:
-                 step_logs["loss"] = loss_val 
-            # Add tokens/sec if calculated (might not be if not a logging step)
-            # If step_logs already contains tokens_per_sec from the periodic log, this won't overwrite.
-            # If it wasn't a logging step, we might want the *instantaneous* T/s?
-            # For now, only log T/s periodically via log_metrics update above.
-            # if "tokens_per_sec" not in step_logs and step_time_accumulator > 0:
-            #      step_logs["tokens_per_sec"] = step_token_accumulator / step_time_accumulator
-            
-            self._callback_on_step_end(i, global_step, step_logs)
+                if "CUDA out of memory" in str(e):
+                    self.logger.error("CUDA OOM detected. Stopping training epoch.")
+                    raise # Re-raise OOM to stop training
 
-            # CHECK MAX STEPS *AFTER* THE STEP IS COMPLETED
-            if self.max_steps is not None and global_step >= self.max_steps:
-                self.logger.info(f"Reached max_steps ({self.max_steps}) after completing step {global_step}. Stopping epoch.")
-                break # Exit the batch loop
+                # Clean up potentially partial batch state
+                gc.collect()
+                if self.device.type == 'cuda':
+                    torch.cuda.empty_cache()
+                continue # Move to the next batch
 
-        # --- Epoch End --- #
-        progress.close() # Close the progress bar for the epoch
+
+        # --- End of Epoch ---
+        final_global_step = global_step + num_optimizer_steps_in_epoch
         epoch_duration = time.time() - epoch_start_time
-        avg_epoch_loss = epoch_loss / num_valid_steps_in_epoch if num_valid_steps_in_epoch > 0 else float('nan')
-        avg_tokens_per_sec = total_tokens / epoch_duration if epoch_duration > 0 else 0.0
+        # Calculate average loss based on batches processed *before* max_steps might have stopped the loop
+        # epoch_loss_total includes losses from all processed batches. Need number of batches that contributed.
+        # How many batches were fully processed? This is tricky if loop broke mid-accumulation.
+        # A simpler approach: Average loss over the optimizer steps taken.
+        # We need the sum of losses for the steps taken. `epoch_loss_total` is sum over batches.
+        # Let's stick to averaging over batches for now, acknowledging potential inaccuracy if loop breaks early.
+        num_batches_processed = batch_idx + 1 # Assuming batch_idx is the index of the last processed batch (or last attempted)
+        if max_steps is not None and (global_step + num_optimizer_steps_in_epoch) >= max_steps:
+             # If max_steps caused early exit, adjust num_batches_processed?
+             # num_batches_processed might be 1 more than actually contributed to steps if break happened before step
+             # Let's use num_optimizer_steps * accumulation_steps as a proxy for processed batches leading to steps? No, too complex.
+             # Stick with average over completed optimizer steps? Need to store losses per step.
+             # Easiest: Average over batches run so far.
+             avg_epoch_loss = epoch_loss_total / num_batches_processed if num_batches_processed > 0 else 0.0
+        else:
+            avg_epoch_loss = epoch_loss_total / steps_per_epoch if steps_per_epoch > 0 else 0.0
 
-        self.logger.info(
-            f"Epoch {current_epoch+1} finished. Avg Loss: {avg_epoch_loss:.4f}, "
-            f"Duration: {format_time(epoch_duration)}, Avg Tokens/Sec: {avg_tokens_per_sec:.2f}"
-        )
 
-        # Return metrics collected during the epoch
-        # The global_step returned is the value *after* the last step completed in this epoch
-        epoch_metrics: Dict[str, Any] = {
-            "loss": avg_epoch_loss,
-            "epoch_duration_sec": epoch_duration,
-            "avg_tokens_per_sec": avg_tokens_per_sec,
-            "final_global_step": global_step # Return the final step count
+        epoch_metrics = {
+            'train/loss_epoch': avg_epoch_loss,
+            'epoch': current_epoch + 1,
+            'duration_seconds': epoch_duration,
         }
-        # self.callbacks.on_epoch_end(epoch=current_epoch, global_step=global_step, metrics=epoch_metrics)
-        # ^^^ on_epoch_end should be called by Trainer after potential validation
+        self.logger.info(f"Epoch {current_epoch+1} finished. Average Loss: {avg_epoch_loss:.4f}, Duration: {format_time(epoch_duration)}")
 
-        return epoch_metrics
+        # Trigger epoch end callbacks
+        self._callback_on_epoch_end(current_epoch, final_global_step, epoch_metrics)
 
-    # Helper methods for callbacks to keep train_epoch cleaner
-    def _callback_on_step_begin(self, step: int, logs: Optional[Dict[str, Any]] = None) -> None:
-        if self.callbacks:
-            self.callbacks.on_step_begin(step=step, logs=logs)
-
-    def _callback_on_step_end(self, step: int, global_step: int, logs: Optional[Dict[str, Any]] = None) -> None:
-        if self.callbacks:
-            # Ensure metrics dict exists
-            if logs is None: logs = {}
-            self.callbacks.on_step_end(step=step, global_step=global_step, logs=logs)
-
-    def run(self) -> Dict[str, Any]:
-        """Runs the full training loop over all epochs."""
-        # This run method might be simplified or moved entirely to Trainer?
-        # Keeping a basic structure here for now.
-        self.logger.info("Starting TrainingLoop run...")
-        start_time = time.time()
-        final_metrics: Dict[str, Any] = {}
-        # Assume initial epoch/step are handled by the caller (Trainer)
-        # Need to get initial state correctly (passed via __init__ or args?)
-        # For now, assume Trainer manages the outer epoch loop and calls train_epoch
-
-        # Placeholder logic: This loop structure belongs in the Trainer
-        # for epoch in range(self.num_epochs): # num_epochs is not attr here
-        #     epoch_metrics = self.train_epoch(epoch, self.global_step, ...)
-        #     self.global_step = epoch_metrics['final_global_step']
-        #     final_metrics.update(epoch_metrics)
-        #     # Call validation etc.
-
-        total_time = time.time() - start_time
-        self.logger.info(f"TrainingLoop run finished in {format_time(total_time)}.")
-        # Return metrics and final state needed by Trainer
+        # Return metrics including steps completed and average loss
         return {
-            "metrics": final_metrics,
-            "total_train_time": total_time,
-            # "global_step": self.global_step, # Return updated state if managed here
-            # "epoch": self.epoch
+            "steps_completed_in_epoch": num_optimizer_steps_in_epoch,
+            "average_epoch_loss": avg_epoch_loss,
         }
+
+    # --- Callback Triggers --- #
+    def _callback_on_step_begin(self, step: int, global_step: int, logs: Optional[Dict[str, Any]] = None) -> None:
+        """Triggers the on_step_begin method of registered callbacks."""
+        if self.callbacks and hasattr(self.callbacks, 'on_step_begin'):
+            try:
+                # Pass global_step for consistent tracking
+                self.callbacks.on_step_begin(step=step, global_step=global_step, logs=logs)
+            except Exception as e:
+                self.logger.error(f"Error in Callback on_step_begin: {e}", exc_info=True)
+
+    def _callback_on_step_end(self, step: int, global_step: int, metrics: Optional[Dict[str, Any]] = None) -> None:
+        """Triggers the on_step_end method of registered callbacks."""
+        if self.callbacks and hasattr(self.callbacks, 'on_step_end'):
+            try:
+                # Pass the calculated metrics dict as 'metrics' argument
+                self.callbacks.on_step_end(step=step, global_step=global_step, metrics=metrics)
+            except Exception as e:
+                self.logger.error(f"Error in Callback on_step_end: {e}", exc_info=True)
+
+    def _callback_on_epoch_end(self, epoch: int, global_step: int, metrics: Optional[Dict[str, Any]] = None) -> None:
+        """Triggers the on_epoch_end method of registered callbacks."""
+        if self.callbacks and hasattr(self.callbacks, 'on_epoch_end'):
+            try:
+                self.callbacks.on_epoch_end(epoch=epoch, global_step=global_step, metrics=metrics)
+            except Exception as e:
+                self.logger.error(f"Error in Callback on_epoch_end: {e}", exc_info=True)

@@ -48,6 +48,7 @@ class TestEpochBasic:
         mock_target = torch.randint(0, 10, (2,)) # Example target
         mock_dataloader.__iter__.return_value = iter([(mock_input, mock_target)])
         mock_dataloader.__len__.return_value = 1 # Ensure length is correct
+        mock_progress_tracker_instance.start_time = None # Add start_time
 
         mock_scaler.is_enabled = MagicMock(return_value=False) # AMP is OFF
 
@@ -84,18 +85,23 @@ class TestEpochBasic:
         # --- Assertions ---
         mock_model.assert_called_once_with(mock_input)
         mock_cross_entropy.assert_called_once()
+        # With AMP off and grad_accum=1, optimizer.step should be called directly
         mock_optimizer.step.assert_called_once()
         # Called at start + after step
         assert mock_optimizer.zero_grad.call_count == 2
+        # Scaler methods should NOT be called when AMP is off
         mock_scaler.scale.assert_not_called()
         mock_scaler.step.assert_not_called()
         mock_scaler.update.assert_not_called()
+        # update should be called once per optimizer step
         assert mock_progress_tracker_instance.update.call_count == 1
         assert isinstance(epoch_metrics, dict)
-        assert 'epoch_loss' in epoch_metrics
-        assert 'tokens_per_second' in epoch_metrics
+        # Check epoch metrics calculation
+        assert 'average_epoch_loss' in epoch_metrics
+        assert 'steps_completed_in_epoch' in epoch_metrics
         expected_loss = mock_loss.item()
-        assert abs(epoch_metrics['epoch_loss'] - expected_loss) < 1e-6
+        assert abs(epoch_metrics['average_epoch_loss'] - expected_loss) < 1e-6
+        assert epoch_metrics['steps_completed_in_epoch'] == 1
 
     @patch('torch.amp.autocast')
     @patch('torch.nn.functional.cross_entropy')
@@ -120,6 +126,7 @@ class TestEpochBasic:
         multi_batch_dataloader = MagicMock(spec=DataLoader)
         multi_batch_dataloader.__iter__.return_value = iter(batches)
         multi_batch_dataloader.__len__.return_value = num_batches
+        mock_progress_tracker_instance.start_time = None # Add start_time
 
         mock_autocast.return_value.__enter__.return_value = None
         mock_autocast.return_value.__exit__.return_value = None
@@ -155,10 +162,16 @@ class TestEpochBasic:
         assert mock_model.call_count == num_batches
         assert mock_cross_entropy.call_count == num_batches
         expected_steps = num_batches // accumulation_steps
+        # With AMP off, optimizer.step should be called directly
         assert mock_optimizer.step.call_count == expected_steps
         # Called at start + after each step
         assert mock_optimizer.zero_grad.call_count == 1 + expected_steps
-        assert mock_progress_tracker_instance.update.call_count == num_batches
+        # Scaler methods should NOT be called when AMP is off
+        mock_scaler.scale.assert_not_called()
+        mock_scaler.step.assert_not_called()
+        mock_scaler.update.assert_not_called()
+        # update should be called once per optimizer step
+        assert mock_progress_tracker_instance.update.call_count == expected_steps
 
     @patch('torch.amp.autocast')
     @patch('torch.nn.functional.cross_entropy')
@@ -183,6 +196,7 @@ class TestEpochBasic:
         multi_batch_dataloader = MagicMock(spec=DataLoader)
         multi_batch_dataloader.__iter__.return_value = iter(batches)
         multi_batch_dataloader.__len__.return_value = num_batches
+        mock_progress_tracker_instance.start_time = None # Add start_time
 
         mock_autocast.return_value.__enter__.return_value = None
         mock_autocast.return_value.__exit__.return_value = None
@@ -219,10 +233,16 @@ class TestEpochBasic:
         assert mock_cross_entropy.call_count == num_batches
         # Step count includes the final uneven batch
         expected_steps = (num_batches + accumulation_steps - 1) // accumulation_steps
+        # With AMP off, optimizer.step should be called directly
         assert mock_optimizer.step.call_count == expected_steps
         # Called at start + after each step
         assert mock_optimizer.zero_grad.call_count == 1 + expected_steps
-        assert mock_progress_tracker_instance.update.call_count == num_batches
+        # Scaler methods should NOT be called when AMP is off
+        mock_scaler.scale.assert_not_called()
+        mock_scaler.step.assert_not_called()
+        mock_scaler.update.assert_not_called()
+        # update should be called once per optimizer step
+        assert mock_progress_tracker_instance.update.call_count == expected_steps
 
         # Check the *last* call to update (this assertion seems less relevant now)
         # last_call_args, last_call_kwargs = mock_progress_tracker_instance.update.call_args

@@ -123,38 +123,128 @@ def test_training_loop_train_epoch_runs(base_training_config, mock_dataloader):
         pytest.fail(f"TrainingLoop.train_epoch raised an exception: {e}")
 
 def test_training_loop_gradient_accumulation(base_training_config, mock_dataloader):
-    """Test that optimizer.step() is called correctly with gradient accumulation."""
+    """Test optimizer step, scaler calls, and callback frequency with gradient accumulation."""
     model = MockTrainModel()
     optimizer = MagicMock(spec=AdamW)
-    # Configure param_groups for the mock optimizer to avoid AttributeError
-    optimizer.param_groups = [{'lr': 1e-3}]
+    optimizer.param_groups = [{'lr': 1e-3}] # Mock param_groups
     optimizer.zero_grad = MagicMock()
     optimizer.step = MagicMock()
-    accumulation_steps = 2
-    # Update the config object directly if needed for the test
-    config_for_test = base_training_config.model_copy(update={"gradient_accumulation_steps": accumulation_steps})
-    total_steps = len(mock_dataloader)
-    
-    # Remove direct keyword arguments now covered by config
+    accumulation_steps = 3 # Use 3 for clearer division
+    config_for_test = base_training_config.model_copy(update={
+        "gradient_accumulation_steps": accumulation_steps,
+        "use_amp": False # Test without AMP first
+    })
+    total_batches = len(mock_dataloader)
+    # Correct calculation for expected steps including the final partial step
+    expected_optimizer_steps = (total_batches + accumulation_steps - 1) // accumulation_steps
+
+    # Mock scaler
+    mock_scaler = MagicMock()
+    mock_scaler.scale = MagicMock(side_effect=lambda x: x) # Just return loss
+    mock_scaler.step = MagicMock(side_effect=lambda opt: opt.step())
+    mock_scaler.update = MagicMock()
+    mock_scaler.unscale_ = MagicMock() # Needed even if AMP=False for structure
+
+    # Mock Callback
+    mock_callback = MagicMock(spec=Callback)
+    mock_callback.on_step_begin = MagicMock()
+    mock_callback.on_step_end = MagicMock()
+    callbacks = CallbackList([mock_callback])
+
     training_loop = TrainingLoop(
         model=model,
         optimizer=optimizer,
-        train_dataloader=mock_dataloader, # Expects list of batches
+        train_dataloader=mock_dataloader,
         device=torch.device("cpu"),
-        config=config_for_test, # Pass the modified config
-        callbacks=CallbackList([]),
+        config=config_for_test,
+        callbacks=callbacks,
     )
-    mock_progress_tracker = ProgressTracker(total_steps=total_steps)
-    mock_progress_tracker.start() # Start the tracker
-    mock_trainer = MagicMock(spec=Trainer) # Add mock trainer
-    # Pass global_step=0
-    training_loop.train_epoch(current_epoch=0, global_step=0, progress=mock_progress_tracker, trainer=mock_trainer) # Pass trainer
-    
+    # Manually replace the scaler created in __init__ with our mock
+    training_loop.scaler = mock_scaler
+
+    mock_progress_tracker = ProgressTracker(total_steps=total_batches)
+    mock_progress_tracker.start()
+    mock_trainer = MagicMock(spec=Trainer)
+    training_loop.train_epoch(current_epoch=0, global_step=0, progress=mock_progress_tracker, trainer=mock_trainer)
+
+    # --- Assertions --- #
+    # Optimizer calls
+    assert optimizer.step.call_count == expected_optimizer_steps, f"Expected {expected_optimizer_steps} optimizer steps, got {optimizer.step.call_count}"
+    assert optimizer.zero_grad.call_count == expected_optimizer_steps + 1, f"Expected {expected_optimizer_steps + 1} zero_grad calls, got {optimizer.zero_grad.call_count}" # +1 for call before loop
+
+    # Scaler calls (even with AMP=False, step/update might be called conditionally)
+    # Since AMP is False, loop calls optimizer.step directly, not scaler.step
+    mock_scaler.step.assert_not_called()
+    mock_scaler.update.assert_not_called()
+    # unscale_ should not be called if use_amp is False
+    mock_scaler.unscale_.assert_not_called()
+
+    # Callback calls
+    # on_step_begin might still be called every batch depending on implementation choice
+    assert mock_callback.on_step_begin.call_count == total_batches # Check step_begin is called every batch
+    # on_step_end should only be called when the optimizer steps
+    assert mock_callback.on_step_end.call_count == expected_optimizer_steps, f"Expected {expected_optimizer_steps} on_step_end calls, got {mock_callback.on_step_end.call_count}"
+
+def test_training_loop_gradient_accumulation_with_amp(base_training_config, mock_dataloader):
+    """Test scaler calls with gradient accumulation and AMP enabled."""
+    model = MockTrainModel()
+    optimizer = MagicMock(spec=AdamW)
+    optimizer.param_groups = [{'lr': 1e-3}]
+    optimizer.zero_grad = MagicMock()
+    optimizer.step = MagicMock() # Mock the optimizer step itself
+    accumulation_steps = 2
+    config_for_test = base_training_config.model_copy(update={
+        "gradient_accumulation_steps": accumulation_steps,
+        "use_amp": True # Enable AMP
+    })
     total_batches = len(mock_dataloader)
-    expected_optimizer_steps = total_batches // accumulation_steps 
-    assert optimizer.step.call_count == expected_optimizer_steps
-    # zero_grad is called once before the loop and once per effective step
-    assert optimizer.zero_grad.call_count == expected_optimizer_steps + 1 
+    # Correct calculation for expected steps including the final partial step
+    expected_optimizer_steps = (total_batches + accumulation_steps - 1) // accumulation_steps
+
+    # Mock scaler with enabled=True behavior
+    mock_scaler = MagicMock()
+    mock_scaler.is_enabled = MagicMock(return_value=True)
+    mock_scaler.scale = MagicMock(side_effect=lambda x: x * 2.0) # Simulate scaling
+    # Mock scaler.step to return non-None to indicate step was taken
+    mock_scaler.step = MagicMock(return_value=1.0)
+    # Mock get_scale to return changing numbers
+    # Provide enough unique descending values for the side_effect list (2 per step)
+    scale_values = [1000.0 - i*10 for i in range(expected_optimizer_steps * 2 + 2)]
+    mock_scaler.get_scale = MagicMock(side_effect=scale_values)
+    mock_scaler.update = MagicMock()
+    mock_scaler.unscale_ = MagicMock()
+    # Mock Callback for this test
+    mock_callback = MagicMock(spec=Callback)
+    mock_callback.on_step_begin = MagicMock()
+    mock_callback.on_step_end = MagicMock()
+    callbacks = CallbackList([mock_callback])
+
+    training_loop = TrainingLoop(
+        model=model,
+        optimizer=optimizer,
+        train_dataloader=mock_dataloader,
+        device=torch.device("cpu"), # Test on CPU, scaler handles device type internally
+        config=config_for_test,
+        callbacks=callbacks, # Pass callbacks
+    )
+    training_loop.scaler = mock_scaler # Replace scaler
+
+    mock_progress_tracker = ProgressTracker(total_steps=total_batches)
+    mock_progress_tracker.start()
+    mock_trainer = MagicMock(spec=Trainer)
+    training_loop.train_epoch(current_epoch=0, global_step=0, progress=mock_progress_tracker, trainer=mock_trainer)
+
+    # Assertions focused on AMP interactions
+    optimizer.step.assert_not_called() # Scaler calls step internally
+    assert mock_scaler.step.call_count == expected_optimizer_steps
+    assert mock_scaler.update.call_count == expected_optimizer_steps # Update called after successful step
+    # unscale_ should be called before step when AMP is enabled
+    assert mock_scaler.unscale_.call_count == expected_optimizer_steps, f"Expected {expected_optimizer_steps} unscale_ calls with AMP, got {mock_scaler.unscale_.call_count}"
+
+    # Callback calls
+    assert mock_callback.on_step_begin.call_count == total_batches
+    # on_step_end should be called once per successful optimizer step
+    assert mock_callback.on_step_end.call_count == expected_optimizer_steps
 
 def test_training_loop_callbacks_called(base_training_config, mock_dataloader):
     """Test that step_begin and step_end callbacks are called."""

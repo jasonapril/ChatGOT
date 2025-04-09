@@ -18,7 +18,7 @@ class TestTrainingLoopInit:
     def test_init_defaults(self, mock_model, mock_optimizer, mock_dataloader, mock_device):
         """Test TrainingLoop initialization with default arguments."""
         # Create minimal required TrainingConfig
-        minimal_config = TrainingConfig(batch_size=1, learning_rate=1e-4)
+        minimal_config = TrainingConfig(batch_size=1, learning_rate=1e-4, num_epochs=1)
         loop = TrainingLoop(
             model=mock_model,
             optimizer=mock_optimizer,

@@ -39,7 +39,7 @@ class LanguageModelConfig(GenerativeModelConfig):
     n_head: int = Field(12, description="Number of attention heads.")
     d_hid: Optional[int] = Field(None, description="Hidden dimension in feed-forward layers.")
     n_layers: int = Field(12, description="Number of transformer layers.")
-    dropout: float = Field(0.1, description="Dropout probability.")
+    dropout: float = Field(0.1, ge=0.0, le=1.0, description="Dropout probability.")
     bias: bool = Field(True, description="Whether to use bias in linear layers.")
     layer_norm_eps: float = Field(1e-5, description="Epsilon for layer normalization.")
     activation: str = Field('gelu', description="Activation function.")
@@ -49,9 +49,7 @@ class LanguageModelConfig(GenerativeModelConfig):
     @classmethod
     def set_d_hid_default(cls, v: Any, info: ValidationInfo) -> Optional[int]:
         """Set default d_hid = d_model * 4 if not provided."""
-        # Access validation context data via info.data
         d_model_val: Optional[int] = None
-
         if v is None and info.data and ('d_model' in info.data):
             d_model_val = info.data.get('d_model')
         elif v is None and 'd_model' in cls.model_fields and cls.model_fields['d_model'].default is not None:
@@ -60,15 +58,23 @@ class LanguageModelConfig(GenerativeModelConfig):
         if d_model_val is not None and isinstance(d_model_val, int):
              return d_model_val * 4
 
-        # If v was not None initially, or d_model couldn't be found/used, return original v
-        # We need to ensure v is Optional[int] or None if it was None initially
         if isinstance(v, int) or v is None:
              return v
         else:
-             # If v is something else (e.g., str from config), try converting or raise error
-             # For now, returning None if conversion isn't straightforward
              logger.warning(f"Could not determine integer value for d_hid based on input {v} or d_model. Defaulting to None.")
              return None
+
+    @model_validator(mode='after') # Run after individual fields are validated
+    def check_d_model_divisible_by_n_head(self) -> 'LanguageModelConfig':
+        """Check if d_model is divisible by n_head."""
+        if self.n_head > 0 and self.d_model % self.n_head != 0:
+            logger.warning(
+                f"Model dimension d_model ({self.d_model}) is not divisible by the number of heads n_head ({self.n_head}). "
+                f"This is often required for multi-head attention implementations."
+            )
+            # Optionally raise ValueError if it's a strict requirement
+            # raise ValueError(f"d_model ({self.d_model}) must be divisible by n_head ({self.n_head})")
+        return self
 
 class SimpleRNNConfig(GenerativeModelConfig):
     """Config for Simple RNN Models"""
@@ -80,6 +86,7 @@ class SimpleRNNConfig(GenerativeModelConfig):
     # RNN specific fields
     hidden_size: int = Field(512, description="Size of the RNN hidden state.")
     num_layers: int = Field(2, description="Number of RNN layers.")
+    top_k: Optional[int] = Field(None, ge=1)
 
     # Need to tell Pydantic which fields from parent NOT to use if overridden by name/purpose
     # For now, rely on factory logic to use hidden_size/num_layers correctly.
@@ -241,30 +248,40 @@ class GenerationConfig(BaseModel):
     top_k: Optional[int] = Field(None, ge=1)
 
 
-# --- Training Configuration (Existing) ---
+# --- Training Configuration (Refined) ---
 class TrainingConfig(BaseModel):
     model_config = _model_config_shared.copy()
-    batch_size: int = Field(..., gt=0, description="Batch size for training")
-    num_epochs: Optional[int] = Field(1, gt=0, description="Number of training epochs (alternative to max_steps)")
-    max_steps: Optional[int] = Field(None, gt=0, description="Maximum number of training steps (alternative to num_epochs)")
+    # batch_size removed - defined in DataConfig
+    # seed removed - defined in AppConfig
+    # torch_compile removed - defined in AppConfig
+    # resume_from_checkpoint removed - handled by AppConfig/CLI
+    # checkpoint_dir removed - handled by CheckpointingConfig
+
+    num_epochs: Optional[int] = Field(None, ge=1, description="Number of training epochs (set this or max_steps)")
+    max_steps: Optional[int] = Field(None, ge=1, description="Maximum training steps (set this or num_epochs)")
     use_amp: bool = Field(False, description="Whether to use Automatic Mixed Precision")
-    gradient_accumulation_steps: int = Field(1, ge=1, description="Number of steps to accumulate gradients over")
+    gradient_accumulation_steps: int = Field(1, ge=1, description="Number of steps to accumulate gradients before optimizer step")
     max_grad_norm: Optional[float] = Field(None, gt=0, description="Maximum gradient norm for clipping")
     log_interval: int = Field(50, gt=0, description="Log training metrics every N steps")
     eval_interval: int = Field(1000, ge=0, description="Evaluate on validation set every N steps (0 to disable)")
-    save_interval: Optional[int] = Field(5000, ge=0, description="Save checkpoint every N steps (0 to disable)")
-    time_save_interval_seconds: int = Field(0, description="Save checkpoint every N seconds (0 to disable). Prioritized over step/epoch intervals if non-zero.")
-    time_eval_interval_seconds: Optional[int] = Field(None, ge=0, description="Evaluate every N seconds")
-    warmup_steps: Optional[int] = 100
-    compile_model: Optional[bool] = False
-    activation_checkpointing: Optional[bool] = False
-    torch_compile: Optional[bool] = False
-    # Revert default_factory back to Type and add type ignore
-    generation: GenerationConfig = Field(default_factory=GenerationConfig) # type: ignore [arg-type]
-    keep_last: Optional[int] = Field(None, description="Number of recent checkpoints to keep")
-    resume_from_checkpoint: Optional[str] = Field(None, description="Path to resume from")
-    checkpoint_dir: Optional[str] = Field(None, description="Directory to save checkpoints")
+    save_interval: Optional[int] = Field(None, ge=0, description="Save checkpoint every N steps (0 to disable)") # Default None
+    # time_save_interval_seconds: int = Field(0, description="Save checkpoint every N seconds (0 to disable). Prioritized over step/epoch intervals if non-zero.") # Moved to CheckpointingConfig
+    # time_eval_interval_seconds: Optional[int] = Field(None, ge=0, description="Evaluate every N seconds") # Revisit if needed
+    warmup_steps: Optional[int] = Field(100, ge=0, description="Number of warmup steps for learning rate scheduler")
+    activation_checkpointing: Optional[bool] = Field(False, description="Enable activation checkpointing")
+    generation: GenerationConfig = Field(default_factory=GenerationConfig, description="Default generation parameters for sampling callbacks") # type: ignore [arg-type]
+    log_throughput_interval_batches: int = Field(
+        100, description="Log throughput every N batches."
+    )
 
+    @model_validator(mode='after')
+    def check_epochs_or_steps(self) -> 'TrainingConfig':
+        if self.num_epochs is None and self.max_steps is None:
+            raise ValueError("Either 'num_epochs' or 'max_steps' must be specified in training config.")
+        # Optional: Warn if both are set?
+        # if self.num_epochs is not None and self.max_steps is not None:
+        #     logger.warning("Both 'num_epochs' and 'max_steps' are set. Training will stop when the first limit is reached.")
+        return self
 
 # --- Experiment Schema (Refactored ModelConfig) ---
 
