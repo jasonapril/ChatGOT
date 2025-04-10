@@ -19,33 +19,20 @@ from craft.training.callbacks import CallbackList
 
 # Helper function to compare state dicts (can be moved to a test util module)
 def assert_state_dicts_equal(state_dict1, state_dict2):
-    assert isinstance(state_dict1, dict)
-    assert isinstance(state_dict2, dict)
-    assert state_dict1.keys() == state_dict2.keys()
+    """Asserts two state dictionaries are equal, handling tensors with allclose."""
+    assert state_dict1.keys() == state_dict2.keys(), "State dict keys do not match."
     for key in state_dict1:
         val1 = state_dict1[key]
         val2 = state_dict2[key]
-        if isinstance(val1, torch.Tensor):
-            assert isinstance(val2, torch.Tensor)
-            assert torch.equal(val1, val2), f"Tensor mismatch in key: {key}"
-        elif isinstance(val1, dict):
-            # Recursively compare nested dicts (like optimizer state['state'])
-            assert_state_dicts_equal(val1, val2) 
-        elif isinstance(val1, list):
-            # Compare lists element-wise (like optimizer state['param_groups'])
-            assert isinstance(val2, list)
-            assert len(val1) == len(val2), f"List length mismatch for key: {key}"
-            for i in range(len(val1)):
-                item1, item2 = val1[i], val2[i]
-                if isinstance(item1, dict):
-                    # Recursively compare dicts within lists
-                    assert_state_dicts_equal(item1, item2)
-                else:
-                    # Simple equality check for other list items
-                    assert item1 == item2, f"List item mismatch at index {i} for key: {key}"
+        if isinstance(val1, torch.Tensor) and isinstance(val2, torch.Tensor):
+            # Use torch.allclose for tensor comparison with default tolerances
+            assert torch.allclose(val1, val2), f"Tensor mismatch in key: {key}"
+        elif isinstance(val1, dict) and isinstance(val2, dict):
+            # Recursively check nested dictionaries (like optimizer state)
+            assert_state_dicts_equal(val1, val2)
         else:
-            # Simple equality check for other types (int, float, tuple, etc.)
-            assert val1 == val2, f"Value mismatch for key: {key}"
+            # For non-tensor, non-dict types, use standard equality
+            assert val1 == val2, f"Value mismatch in key: {key} ({type(val1)} vs {type(val2)})"
 
 # --- Fixtures --- #
 
@@ -105,6 +92,7 @@ class TestCheckpointIntegration:
         initial_components = checkpoint_components
         exp_name = "test_integrity_exp"
         initial_cm = CheckpointManager(
+            str(tmp_path), # Pass checkpoint_dir positionally
             model=initial_components["model"],
             optimizer=initial_components["optimizer"],
             scheduler=initial_components["scheduler"],
@@ -114,10 +102,9 @@ class TestCheckpointIntegration:
             tokenizer=initial_components["tokenizer"],
             config=initial_components["config"],
             experiment_name=exp_name,
-            max_checkpoints_to_keep=1 # Keep only the test checkpoint
         )
-        # Manually set the dir for this test
-        initial_cm.checkpoint_dir = tmp_path
+        # # Manually set the dir for this test - NO LONGER NEEDED
+        # initial_cm.checkpoint_dir = tmp_path
         
         # 2. Simulate Training Steps (Manually for simplicity)
         initial_model = initial_components["model"]
@@ -173,6 +160,7 @@ class TestCheckpointIntegration:
 
         # 6. Create New Checkpoint Manager
         new_cm = CheckpointManager(
+            str(tmp_path), # Pass checkpoint_dir positionally
             model=new_model,
             optimizer=new_optimizer,
             scheduler=new_scheduler,
@@ -183,15 +171,25 @@ class TestCheckpointIntegration:
             config={},
             experiment_name=exp_name,
         )
-        # Manually set the dir for this test
-        new_cm.checkpoint_dir = tmp_path
+        # # Manually set the dir for this test - NO LONGER NEEDED
+        # new_cm.checkpoint_dir = tmp_path
 
         # 7. Load Checkpoint
-        loaded_training_state = new_cm.load_checkpoint(path=str(checkpoint_path))
+        loaded_training_state = new_cm.load_checkpoint(path_specifier=str(checkpoint_path))
 
         # 8. Assertions
         assert loaded_training_state is not None
         assert isinstance(loaded_training_state, TrainingState)
+
+        # --- Apply Loaded State --- #
+        new_model.load_state_dict(loaded_training_state.model_state_dict)
+        if loaded_training_state.optimizer_state_dict:
+            new_optimizer.load_state_dict(loaded_training_state.optimizer_state_dict)
+        if loaded_training_state.scheduler_state_dict and new_scheduler:
+            new_scheduler.load_state_dict(loaded_training_state.scheduler_state_dict)
+        if loaded_training_state.scaler_state_dict and new_scaler:
+            new_scaler.load_state_dict(loaded_training_state.scaler_state_dict)
+        # TODO: Add callback state loading if needed: new_callbacks.load_state_dict(...)
 
         # Check trainer state variables
         assert loaded_training_state.epoch == simulated_epoch

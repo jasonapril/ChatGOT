@@ -198,7 +198,8 @@ def test_configure_activation_checkpointing_enabled_no_layers(mock_torch):
         configure_activation_checkpointing(args, mock_model)
 
     mock_warning.assert_called_once()
-    assert "Model doesn't have expected structure for activation checkpointing" in mock_warning.call_args[0][0]
+    # Match the actual logged message
+    assert "Model doesn't have expected structure (missing 'transformer_layers') for activation checkpointing" in mock_warning.call_args[0][0]
 
 @patch('craft.training.optimizations.checkpoint', create=True)
 @patch('craft.training.optimizations.logging.warning')

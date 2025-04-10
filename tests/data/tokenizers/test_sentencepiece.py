@@ -154,12 +154,12 @@ class TestSentencePieceTokenizer:
     def test_save_not_implemented(self, sp_tokenizer_fixture: SentencePieceTokenizer):
         """Test that save method is not implemented (use trainer)."""
         with pytest.raises(NotImplementedError):
-            sp_tokenizer_fixture.save("some_dir")
+            sp_tokenizer_fixture.save("some_dir") # TODO: Save to temp dir
 
     def test_train_not_implemented(self, sp_tokenizer_fixture: SentencePieceTokenizer):
         """Test that train method is not implemented (use trainer)."""
         with pytest.raises(NotImplementedError):
-            sp_tokenizer_fixture.train("some_file", "some_dir")
+            sp_tokenizer_fixture.train("some_file", "some_dir") # TODO: Save to temp dir
 
     # Test load_from_prefix class method
     def test_load_from_prefix_success(self, setup_dummy_tokenizer_files):

@@ -51,9 +51,9 @@ def test_minimal_training_run_e2e(experiment_config: str):
     Runs the main training script as a subprocess for a minimal configuration
     and checks for successful completion and expected output artifacts (like checkpoints).
     """
-    # Get paths relative to the determined project root
-    script_path = PROJECT_ROOT / "src/craft/main.py"
-    assert script_path.exists(), f"Training script not found at {script_path}"
+    # # Get paths relative to the determined project root - script_path no longer needed
+    # script_path = PROJECT_ROOT / "src/craft/main.py"
+    # assert script_path.exists(), f"Training script not found at {script_path}" # Removed assertion
     assert ABSOLUTE_CONF_DIR.exists(), f"Absolute config dir not found at {ABSOLUTE_CONF_DIR}"
 
     # Define the specific output directory for this test run
@@ -66,18 +66,26 @@ def test_minimal_training_run_e2e(experiment_config: str):
         shutil.rmtree(target_run_dir)
 
     try:
-        # Construct the command, explicitly setting hydra.run.dir
+        # Construct the command to run train_commands.py directly with Hydra args
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["HYDRA_FULL_ERROR"] = "1" # Ensure full Hydra errors are shown
 
+        # Path to the train_commands.py script
+        train_script_path = PROJECT_ROOT / "src/craft/cli/train_commands.py"
+        assert train_script_path.exists(), f"Train commands script not found at {train_script_path}"
+
+        # Command uses module execution of the hydra-decorated script
         command = [
             sys.executable,
-            str(script_path),
+            "-m",
+            "craft.cli.train_commands", # Module path to the hydra script
+            # --- Hydra Overrides --- #
             f"experiment={experiment_config}",
-            f"hydra.run.dir={str(target_run_dir).replace('\\\\', '/')}", # Use target dir, ensure forward slashes for Hydra
-            "hydra.job.chdir=false" # Prevent Hydra from changing CWD
+            f"hydra.run.dir={str(target_run_dir).replace('\\\\', '/')}",
         ]
+
+        # Note: hydra.job.chdir is managed by @hydra.main itself based on config/defaults
 
         logger.info(f"Running command: {' '.join(command)}")
         start_time = time.time()

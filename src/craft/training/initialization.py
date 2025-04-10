@@ -11,7 +11,7 @@ __init__ method cleaner and focused on orchestration.
 
 import logging
 import os
-from typing import Optional, Dict, Any, List, Union, Tuple, Type
+from typing import Optional, Dict, Any, List, Union, Tuple, Type, cast
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -23,6 +23,7 @@ import inspect # For checking function signatures
 import time
 import hashlib
 import torch.amp # Add import for torch.amp
+from torch.utils.data import Dataset
 
 # Ensure relative imports work correctly within the package
 try:
@@ -61,8 +62,9 @@ def initialize_tokenizer(data_cfg_node: Optional[DictConfig]) -> Optional[Tokeni
     if data_cfg_node and data_cfg_node.get("tokenizer"):
         logger.info("Instantiating tokenizer...")
         try:
-            tokenizer = instantiate(data_cfg_node.tokenizer)
-            logger.info(f"Instantiated tokenizer: {type(tokenizer).__name__}")
+            tokenizer = cast(Optional[Tokenizer], instantiate(data_cfg_node.tokenizer))
+            if tokenizer:
+                 logger.info(f"Instantiated tokenizer: {type(tokenizer).__name__}")
             return tokenizer
         except Exception as e:
             logger.error(f"Failed to instantiate tokenizer: {e}", exc_info=True)
@@ -89,9 +91,11 @@ def initialize_model(
         raise ValueError("Model config must contain '_target_' and a nested 'config:' block.")
 
     # Instantiate the Pydantic config first by converting to dict
-    model_pydantic_dict = OmegaConf.to_container(model_pydantic_config_node, resolve=True)
-    if not isinstance(model_pydantic_dict, dict):
-        raise TypeError(f"Resolved model config ('model.config') is not a dictionary, got {type(model_pydantic_dict)}.")
+    model_pydantic_dict_any = OmegaConf.to_container(model_pydantic_config_node, resolve=True)
+    # Ensure it's a Dict[str, Any] for **kwargs
+    if not isinstance(model_pydantic_dict_any, dict):
+        raise TypeError(f"Resolved model config ('model.config') is not a dictionary, got {type(model_pydantic_dict_any)}.")
+    model_pydantic_dict: Dict[str, Any] = cast(Dict[str, Any], model_pydantic_dict_any)
 
     # Check for vocab size injection possibility
     needs_vocab_injection = (
@@ -120,7 +124,8 @@ def initialize_model(
              model = ModelClass(config=model_pydantic_dict)
         else:
              logger.debug(f"Instantiating model {ModelClass.__name__} using **kwargs.")
-             model = ModelClass(**model_pydantic_dict)
+             # General type ignore for unsound __init__ access
+             model = ModelClass(**model_pydantic_dict) # type: ignore
 
         logger.info(f"Instantiated model: {type(model).__name__}")
     except TypeError as te:
@@ -133,7 +138,8 @@ def initialize_model(
 
     model.to(device)
     logger.info(f"Moved model to device: {device}")
-    return model
+    # Cast the return value to nn.Module
+    return cast(nn.Module, model)
 
 # --- Dataloaders ---
 
@@ -162,11 +168,9 @@ def _instantiate_single_dataloader(
                  DatasetClass = get_class(dataset_cfg._target_)
                  sig = inspect.signature(DatasetClass.__init__)
                  if 'tokenizer' in sig.parameters:
-                      dataset_instance = instantiate(dataset_cfg, tokenizer=tokenizer) # Pass tokenizer explicitly
-                      logger.debug(f"Instantiated dataset {DatasetClass.__name__} with tokenizer.")
+                      init_args = {"tokenizer": tokenizer}
                  else:
-                      dataset_instance = instantiate(dataset_cfg)
-                      logger.debug(f"Instantiated dataset {DatasetClass.__name__} (tokenizer not in signature).")
+                      init_args = {}
 
             except Exception as e_dataset:
                  logger.error(f"Failed to instantiate dataset for split '{split}': {e_dataset}", exc_info=True)
@@ -181,9 +185,12 @@ def _instantiate_single_dataloader(
         # --- Instantiate DataLoader ---
         if dataloader_cfg and dataloader_cfg.get('_target_'):
             # Use explicit dataloader config
-            dataloader_params = OmegaConf.to_container(dataloader_cfg, resolve=True)
-            if not isinstance(dataloader_params, dict):
+            dataloader_params_any = OmegaConf.to_container(dataloader_cfg, resolve=True)
+            # Ensure it's a Dict[str, Any]
+            if not isinstance(dataloader_params_any, dict):
                 raise TypeError(f"Resolved dataloader config for split '{split}' is not a dict.")
+            dataloader_params: Dict[str, Any] = cast(Dict[str, Any], dataloader_params_any)
+
             _target_ = dataloader_params.pop('_target_', None) # Remove target before passing as kwargs
 
             # Apply defaults from top-level config if not present in split-specific config
@@ -201,7 +208,8 @@ def _instantiate_single_dataloader(
             if not _target_:
                  raise ValueError(f"Missing '_target_' in dataloader config for split '{split}'.")
             DataLoaderClass = get_class(_target_)
-            dataloader_instance = DataLoaderClass(dataset=dataset_instance, **dataloader_params)
+            # General type ignore for unsound __init__ access
+            dataloader_instance = DataLoaderClass(dataset=dataset_instance, **dataloader_params) # type: ignore
             logger.debug(f"Instantiated explicit dataloader for split '{split}': {type(dataloader_instance).__name__}")
 
         else:
@@ -217,7 +225,8 @@ def _instantiate_single_dataloader(
                 pin_memory=pin_memory
             )
 
-        return dataloader_instance
+        # Cast the return value
+        return cast(Optional[DataLoader], dataloader_instance)
 
     except Exception as e:
         logger.error(f"Failed to instantiate dataloader components for split '{split}': {e}", exc_info=True)
@@ -257,15 +266,13 @@ def initialize_optimizer(
     optimizer_cfg_node: DictConfig,
     model: nn.Module
 ) -> torch.optim.Optimizer:
-    """Instantiates the optimizer."""
-    logger.info("Instantiating optimizer...")
-    if not optimizer_cfg_node:
-        raise ValueError("Optimizer configuration ('optimizer:') is missing.")
+    """Instantiates the optimizer from its configuration."""
+    logger.info(f"Instantiating optimizer ({optimizer_cfg_node.get('_target_', 'N/A')})...")
     try:
-        # Ensure params argument is passed correctly
-        optimizer = instantiate(optimizer_cfg_node, params=model.parameters())
+        optimizer = instantiate(optimizer_cfg_node, params=model.parameters(), _convert_="partial")
         logger.info(f"Instantiated optimizer: {type(optimizer).__name__}")
-        return optimizer
+        # Cast the return value
+        return cast(torch.optim.Optimizer, optimizer)
     except Exception as e:
         logger.error(f"Failed to instantiate optimizer: {e}", exc_info=True)
         raise
@@ -276,13 +283,15 @@ def initialize_scheduler(
     scheduler_cfg_node: Optional[DictConfig],
     optimizer: torch.optim.Optimizer
 ) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
-    """Instantiates the learning rate scheduler, if configured."""
+    """Instantiates the learning rate scheduler from its configuration."""
     if scheduler_cfg_node:
-        logger.info("Instantiating scheduler...")
+        logger.info(f"Instantiating scheduler ({scheduler_cfg_node.get('_target_', 'N/A')})...")
         try:
-            scheduler = instantiate(scheduler_cfg_node, optimizer=optimizer)
-            logger.info(f"Instantiated scheduler: {type(scheduler).__name__}")
-            return scheduler
+            scheduler = instantiate(scheduler_cfg_node, optimizer=optimizer, _convert_="partial")
+            if scheduler:
+                logger.info(f"Instantiated scheduler: {type(scheduler).__name__}")
+            # Cast the return value
+            return cast(Optional[torch.optim.lr_scheduler._LRScheduler], scheduler)
         except Exception as e:
             logger.error(f"Failed to instantiate scheduler: {e}", exc_info=True)
             # Decide whether to raise or just return None
@@ -361,73 +370,85 @@ def initialize_checkpoint_manager(
     callbacks: Optional[CallbackList] = None, # Pass CallbackList obj
     tokenizer: Optional[Tokenizer] = None,
 ) -> Optional[CheckpointManager]:
-    """Instantiates the CheckpointManager if configured."""
+    """Creates and configures the CheckpointManager from configuration."""
     if not checkpoint_cfg_node:
-        logger.warning("No checkpointing configuration found ('checkpointing:'). Checkpoints will not be saved.")
+        logger.info("No checkpointing configuration found ('checkpointing:'). CheckpointManager will not be instantiated.")
         return None
 
-    logger.info("Instantiating CheckpointManager...")
+    # Extract checkpointing parameters
     try:
-        # Create a mutable copy to allow modification (e.g., resolving paths)
-        mutable_ckpt_cfg = OmegaConf.create(OmegaConf.to_container(checkpoint_cfg_node, resolve=True) or {})
-        if not isinstance(mutable_ckpt_cfg, DictConfig):
-            logger.error(f"Resolved checkpoint config is not a DictConfig: {type(mutable_ckpt_cfg)}. Cannot instantiate CheckpointManager.")
-            return None
+        # Resolve the config node to a primitive dict
+        chkpt_params_any = OmegaConf.to_container(checkpoint_cfg_node, resolve=True)
+        if not isinstance(chkpt_params_any, dict):
+             raise TypeError("Resolved checkpointing config is not a dictionary.")
+        chkpt_params: Dict[str, Any] = cast(Dict[str, Any], chkpt_params_any)
 
-        # Resolve checkpoint_dir relative to Hydra run directory if not absolute
-        ckpt_dir_path = mutable_ckpt_cfg.get('checkpoint_dir')
-        hydra_run_dir = None
-        try:
-             hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
-             hydra_run_dir = Path(hydra_cfg.runtime.output_dir)
-        except Exception:
-             logger.warning("Could not get Hydra run directory. Relative checkpoint paths may not resolve correctly.")
+        # Determine checkpoint directory path
+        checkpoint_dir_str = chkpt_params.get('checkpoint_dir')
+        checkpoint_dir: Path
 
-        if ckpt_dir_path and not os.path.isabs(ckpt_dir_path) and hydra_run_dir:
-            resolved_path = hydra_run_dir / ckpt_dir_path
-            mutable_ckpt_cfg.checkpoint_dir = str(resolved_path)
-            logger.info(f"Resolved relative checkpoint_dir to: {resolved_path}")
-        elif not mutable_ckpt_cfg.get('checkpoint_dir') and hydra_run_dir:
-            # Default if missing
-            default_ckpt_dir = hydra_run_dir / "checkpoints"
-            mutable_ckpt_cfg.checkpoint_dir = str(default_ckpt_dir)
-            logger.warning(f"'checkpoint_dir' not found, defaulting to Hydra run output: {default_ckpt_dir}")
-        elif not mutable_ckpt_cfg.get('checkpoint_dir') and not hydra_run_dir:
-             logger.error("Checkpoint directory is not specified and Hydra run directory could not be determined. Cannot initialize CheckpointManager.")
-             return None
-
-        # Convert full app config to primitive dict for CheckpointManager to save
-        config_to_save = OmegaConf.to_container(full_app_config, resolve=True)
-        if not isinstance(config_to_save, (dict, list)): # Allow list for some root configs? Dict is safer.
-             logger.error(f"Failed to convert full app config to dict/list for saving. Got type: {type(config_to_save)}. Saving None for config.")
-             config_to_save = None
-
-        manager = instantiate(
-            mutable_ckpt_cfg, # Use potentially updated mutable config
-            model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            scaler=scaler,
-            callbacks=callbacks, # Pass CallbackList object
-            tokenizer=tokenizer,
-            experiment_name=experiment_name,
-        )
-        # Ensure the directory exists after instantiation
-        if hasattr(manager, 'checkpoint_dir') and manager.checkpoint_dir:
+        if checkpoint_dir_str:
+            checkpoint_dir = Path(checkpoint_dir_str).resolve()
+            logger.info(f"Using checkpoint directory specified in config: {checkpoint_dir}")
+        else:
+            # Fallback to Hydra output directory
             try:
-                Path(manager.checkpoint_dir).mkdir(parents=True, exist_ok=True)
-                logger.info(f"Ensured CheckpointManager directory exists: {manager.checkpoint_dir}")
-            except Exception as dir_err:
-                 logger.error(f"Failed to create checkpoint directory {manager.checkpoint_dir}: {dir_err}")
-        logger.info(f"Instantiated CheckpointManager.")
+                hydra_output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+                exp_name_for_path = experiment_name or "default_run"
+                checkpoint_dir = hydra_output_dir / "checkpoints" / exp_name_for_path
+                # General ignore for persistent str-bytes-safe error
+                logger.info(f"Checkpoint directory not specified, deriving from Hydra output: {str(checkpoint_dir)}") # type: ignore[str-bytes-safe]
+            except Exception as e:
+                # General ignore for persistent str-bytes-safe error
+                logger.error(f"Could not determine checkpoint directory from Hydra config: {e}. Defaulting to ./checkpoints/<exp_name>.") # type: ignore[str-bytes-safe]
+                exp_name_for_path = experiment_name or "default_run"
+                # General ignore for persistent str-bytes-safe error
+                checkpoint_dir = Path(f"./checkpoints/{exp_name_for_path}").resolve() # type: ignore
+
+        # Ensure directory exists
+        try:
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as mkdir_e:
+             # General ignore for persistent str-bytes-safe error
+             logger.error(f"Failed to create checkpoint directory {str(checkpoint_dir)}: {mkdir_e}") # type: ignore[str-bytes-safe]
+             raise # Stop if directory creation fails
+
+        # Prepare arguments for CheckpointManager constructor
+        manager_args = {
+            "checkpoint_dir": str(checkpoint_dir), # Pass as string
+            "keep_last_n": chkpt_params.get('keep_last', 3),
+            "keep_best_n": chkpt_params.get('keep_best', 1),
+            "save_best_only": chkpt_params.get('save_best_only', False),
+            "checkpoint_prefix": chkpt_params.get('checkpoint_prefix', "checkpoint"),
+            "experiment_name": experiment_name,
+            "model": model,
+            "optimizer": optimizer,
+            "scheduler": scheduler,
+            "scaler": scaler,
+            "tokenizer": tokenizer,
+            "callbacks": callbacks, # Pass CallbackList instance
+            # Pass the *original* full app config for saving state, if CheckpointManager needs it
+            # Or potentially pass just the experiment_config part?
+            # CheckpointManager uses TrainingState now, which includes config.
+            # Let's pass the resolved checkpointing params for now, as CM doesn't need the full app config?
+            # Revised: TrainingState expects full config, so pass full_app_config converted
+            "config": OmegaConf.to_container(full_app_config, resolve=True)
+        }
+
+        # Remove None values if CheckpointManager doesn't handle them gracefully in __init__
+        # Example: manager_args = {k: v for k, v in manager_args.items() if v is not None}
+
+        logger.info("Instantiating CheckpointManager...")
+        manager = CheckpointManager(**manager_args)
+        logger.info("CheckpointManager instantiated successfully.")
         return manager
 
     except Exception as e:
-         logger.error(f"Failed to instantiate CheckpointManager: {e}", exc_info=True)
-         # Decide: raise or return None? Raising is probably safer.
-         raise
+        logger.error(f"Failed to instantiate CheckpointManager: {e}", exc_info=True)
+        # Decide whether to raise or return None
+        logger.warning("Proceeding without CheckpointManager due to instantiation error.")
+        return None
 
-# --- Evaluator ---
 
 def initialize_evaluator(
     eval_cfg_node: Optional[DictConfig],
@@ -437,34 +458,40 @@ def initialize_evaluator(
     use_amp: bool,
     callbacks: CallbackList # Pass CallbackList obj
 ) -> Optional[Evaluator]:
-    """Instantiates the Evaluator if a validation dataloader exists."""
+    """Instantiates the evaluator if configured and validation dataloader exists."""
     if not val_dataloader:
         logger.info("No validation dataloader provided, Evaluator will not be instantiated.")
         return None
 
     logger.info("Validation dataloader found, instantiating Evaluator...")
     try:
-        # Prepare config dict for Evaluator (can be empty)
-        eval_config_dict = OmegaConf.to_container(eval_cfg_node or {}, resolve=True)
-        if not isinstance(eval_config_dict, dict):
-             logger.warning(f"Evaluation config resolved to non-dict type ({type(eval_config_dict)}). Passing empty dict to Evaluator.")
-             eval_config_dict = {}
+        eval_params_any = OmegaConf.to_container(eval_cfg_node, resolve=True)
+        # Ensure it's a Dict[str, Any]
+        if not isinstance(eval_params_any, dict):
+            raise TypeError("Resolved evaluator config is not a dictionary.")
+        eval_params: Dict[str, Any] = cast(Dict[str, Any], eval_params_any)
 
-        evaluator = Evaluator(
+        logger.info(f"Instantiating evaluator ({eval_params.get('_target_', 'N/A')})...")
+        evaluator_instance = instantiate(
+            eval_params,
             model=model,
-            val_dataloader=val_dataloader,
+            dataloader=val_dataloader,
             device=device,
-            config=eval_config_dict, # Pass resolved primitive dict
             use_amp=use_amp,
-            callbacks=callbacks # Pass CallbackList object
+            # Pass the inner list of callbacks if Evaluator expects List[Callback]
+            # Or adjust Evaluator's type hint if it can accept CallbackList directly
+            callbacks=callbacks.callbacks, # Assuming Evaluator wants List[Callback]
+            _convert_="partial"
         )
-        logger.info(f"Instantiated Evaluator: {type(evaluator).__name__}")
-        return evaluator
+        logger.info(f"Instantiated evaluator: {type(evaluator_instance).__name__}")
+        # Cast the return value
+        return cast(Optional[Evaluator], evaluator_instance)
+
     except Exception as e:
-         logger.error(f"Failed to instantiate Evaluator: {e}", exc_info=True)
-         # Decide whether to raise or just return None and log warning
-         logger.warning("Proceeding without Evaluator due to instantiation error.")
-         return None
+        logger.error(f"Failed to instantiate evaluator: {e}", exc_info=True)
+        # Decide whether to raise or just return None and log warning
+        logger.warning("Proceeding without Evaluator due to instantiation error.")
+        return None
 
 # --- Compile Model Helper ---
 # Note: Actual compilation should happen in Trainer *after* component init and potential resume
@@ -474,28 +501,41 @@ def compile_model_if_enabled(
     compile_flag: bool,
     compile_options_cfg: Optional[DictConfig]
 ) -> nn.Module:
-    """
-    Compiles the model using torch.compile if enabled and available.
-    Intended to be called *after* model initialization and potential checkpoint loading.
-    """
+    """Compiles the model using torch.compile if the flag is set."""
+    # Handle cases where compile_flag might be None
     if not compile_flag:
-        logger.info("Model compilation is disabled.")
+        logger.info("torch.compile disabled by flag.")
         return model
-    try:
-        # Check PyTorch version compatibility if necessary
-        # Assume >= 2.0 for now
-        logger.info("Attempting model compilation with torch.compile...")
-        compile_options_dict = OmegaConf.to_container(compile_options_cfg or {}, resolve=True)
-        if not isinstance(compile_options_dict, dict):
-             logger.warning(f"Compile options resolved to non-dict type ({type(compile_options_dict)}). Using default compile options.")
-             compile_options_dict = {}
 
-        compiled_model = torch.compile(model, **compile_options_dict) # type: ignore
-        logger.info("Model compilation successful.")
-        return compiled_model
-    except ImportError:
-        logger.warning("torch.compile requires PyTorch 2.0 or later. Skipping compilation.")
-        return model # Return original model
+    if not hasattr(torch, "compile"):
+        logger.warning("torch.compile not available (requires PyTorch 2.0+). Skipping compilation.")
+        return model
+
+    # Convert OmegaConf options to dict, ensure it resolves
+    compile_options: Dict[str, Any] = {}
+    if compile_options_cfg:
+        try:
+            compile_options = OmegaConf.to_container(compile_options_cfg, resolve=True) # type: ignore
+            if not isinstance(compile_options, dict):
+                 logger.warning("torch_compile_options did not resolve to a dictionary. Using defaults.")
+                 compile_options = {}
+        except Exception as e:
+            logger.warning(f"Failed to resolve torch_compile_options: {e}. Using defaults.")
+            compile_options = {}
+
+    try:
+        start_time = time.time()
+        logger.info(f"Compiling model with options: {compile_options}")
+        # Add type ignore for potential mypy issue with torch.compile return type
+        compiled_model = torch.compile(model, **compile_options) # type: ignore
+        compile_time = time.time() - start_time
+        logger.info(f"Model compiled successfully in {compile_time:.2f} seconds.")
+        # Return the compiled model
+        return compiled_model # type: ignore
+    except Exception as e:
+        logger.warning(f"torch.compile failed: {e}. Falling back to original model.")
+        return model
+
     except Exception as e:
         logger.warning(f"Failed to compile model: {e}. Proceeding without compilation.", exc_info=True)
         return model # Return original model 

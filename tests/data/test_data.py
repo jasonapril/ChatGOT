@@ -49,22 +49,24 @@ def pickled_dataset_setup(tmp_path):
     token_ids = list(range(20))
     block_size = 5
     file_path = tmp_path / "test_data.pkl"
-    vocab_path = tmp_path / "vocab.json"
+    # Create metadata.json in the same directory
+    metadata_path = tmp_path / "metadata.json" 
 
     # Save ONLY token list to pickle
     with open(file_path, "wb") as f:
         pickle.dump(token_ids, f)
 
-    # Save external vocab file
+    # Save metadata file
     idx_to_char = {i: chr(ord('a')+i) for i in range(26)}
-    vocab_data = {
+    metadata_data = {
         'vocab_size': 50, 
-        'idx_to_char': {str(k): v for k, v in idx_to_char.items()}
+        'idx_to_char': {str(k): v for k, v in idx_to_char.items()},
+        'tokenizer_type': 'CharTokenizer' # Assume char based on idx_to_char
     }
-    with open(vocab_path, 'w', encoding='utf-8') as f:
-        json.dump(vocab_data, f)
+    with open(metadata_path, 'w', encoding='utf-8') as f:
+        json.dump(metadata_data, f)
 
-    return file_path, vocab_path, block_size, token_ids, idx_to_char
+    return file_path, metadata_path, block_size, token_ids, idx_to_char
 
 # class TestPickledDataset(unittest.TestCase):
 class TestPickledDataset:
@@ -76,16 +78,20 @@ class TestPickledDataset:
 
     def test_initialization(self, pickled_dataset_setup):
         """Test basic initialization."""
-        file_path, vocab_path, block_size, expected_tokens, idx_to_char = pickled_dataset_setup
+        # Use metadata_path from updated fixture
+        file_path, metadata_path, block_size, expected_tokens, idx_to_char = pickled_dataset_setup
+        # Instantiate with only file_path and block_size
         dataset = PickledDataset(
             file_path=str(file_path), 
-            block_size=block_size, 
-            vocab_path=str(vocab_path)
+            block_size=block_size
         )
         assert dataset.block_size == block_size
         # Compare string representations
         assert str(dataset.file_path) == str(file_path)
-        assert dataset._vocab_path == str(vocab_path)
+        # Verify metadata is loaded correctly
+        metadata = dataset.get_metadata()
+        assert metadata.get('vocab_size') == 50
+        assert dataset.metadata_path == metadata_path # Check inferred path
         # Correct length assertion
         expected_len = (len(expected_tokens) - 1) // block_size
         assert len(dataset) == expected_len
@@ -94,11 +100,11 @@ class TestPickledDataset:
 
     def test_len(self, pickled_dataset_setup):
         """Test __len__ method."""
-        file_path, vocab_path, block_size, expected_tokens, _ = pickled_dataset_setup
+        file_path, _, block_size, expected_tokens, _ = pickled_dataset_setup
+        # Instantiate with only file_path and block_size
         dataset = PickledDataset(
             file_path=str(file_path), 
-            block_size=block_size, 
-            vocab_path=str(vocab_path)
+            block_size=block_size
         )
         # Correct expected length based on __len__ implementation
         expected_len = (len(expected_tokens) - 1) // block_size
@@ -106,11 +112,11 @@ class TestPickledDataset:
 
     def test_getitem(self, pickled_dataset_setup):
         """Test __getitem__ method."""
-        file_path, vocab_path, block_size, expected_tokens, idx_to_char = pickled_dataset_setup
+        file_path, _, block_size, expected_tokens, idx_to_char = pickled_dataset_setup
+        # Instantiate with only file_path and block_size
         dataset = PickledDataset(
             file_path=str(file_path), 
-            block_size=block_size, 
-            vocab_path=str(vocab_path)
+            block_size=block_size
         )
         idx = 0
         x, y = dataset[idx]
@@ -128,13 +134,14 @@ class TestPickledDataset:
 
     def test_decode(self, pickled_dataset_setup):
         """Test decode method."""
-        file_path, vocab_path, block_size, _, idx_to_char = pickled_dataset_setup
+        file_path, _, block_size, _, idx_to_char = pickled_dataset_setup
+        # Instantiate with only file_path and block_size
         dataset = PickledDataset(
             file_path=str(file_path), 
-            block_size=block_size, 
-            vocab_path=str(vocab_path)
+            block_size=block_size
         )
         ids = [0, 1, 2]
+        # Decode should now work by loading idx_to_char from metadata.json
         expected_str = "".join(idx_to_char.get(i, '?') for i in ids)
         assert dataset.decode(ids) == expected_str
         assert dataset.decode(torch.tensor(ids)) == expected_str
@@ -162,21 +169,27 @@ class TestPickledDataset:
             dataset[0]  # Should raise IndexError as no complete blocks exist
 
     def test_invalid_file_path(self, tmp_path):
-        """Test initialization with an invalid file path but valid vocab path."""
+        """Test initialization with an invalid file path."""
         with pytest.raises(FileNotFoundError):
+            # No need to pass vocab_path
             PickledDataset(
                 file_path=str(tmp_path / "non_existent.pkl"), 
-                block_size=5, 
-                vocab_path=str(tmp_path / "vocab.json")
+                block_size=5
             )
 
-    def test_invalid_vocab_path(self, pickled_dataset_setup):
-        """Test initialization with valid file path but invalid vocab path."""
-        file_path, _, block_size, _, _ = pickled_dataset_setup
-        dataset = PickledDataset(str(file_path), block_size, "non_existent.json")
+    # Rewrite test for missing metadata
+    def test_missing_metadata_file(self, pickled_dataset_setup):
+        """Test initialization when metadata.json is missing."""
+        file_path, metadata_path, block_size, _, _ = pickled_dataset_setup
+        # Delete the metadata file created by the fixture
+        metadata_path.unlink()
+        
+        dataset = PickledDataset(str(file_path), block_size)
         metadata = dataset.get_metadata()
-        assert metadata == {}
+        assert metadata == {} # Expect empty dict if metadata not found
         assert dataset.vocab_size is None
+        # Decode should gracefully handle missing metadata
+        assert "[Decode unavailable: Missing idx_to_char]" in dataset.decode([0,1,2])
 
 # Fixture for TestDatasetFactory
 @pytest.fixture(scope="class")
@@ -192,22 +205,23 @@ def dataset_factory_setup(tmp_path_factory):
     idx_to_char = {i: ch for i, ch in enumerate(chars)}
     token_ids = np.array([char_to_idx[ch] for ch in text], dtype=np.uint16)
     
-    # Create dummy data files and vocab
+    # Create dummy data file and metadata
     train_file_path = tmp_path / "train.pkl"
-    vocab_file_path = tmp_path / "vocab.json"
+    metadata_file_path = tmp_path / "metadata.json"
     
     # Save ONLY the token array to the pickle file
     with open(train_file_path, 'wb') as f:
         pickle.dump(token_ids, f)
         
-    # Save vocab data (external)
-    vocab_data = {
-        'char_to_idx': char_to_idx,
+    # Save metadata data
+    metadata_data = {
+        'char_to_idx': char_to_idx, # Keep for potential legacy use?
         'idx_to_char': {str(k): v for k, v in idx_to_char.items()}, # JSON needs string keys
-        'vocab_size': len(chars)
+        'vocab_size': len(chars),
+        'tokenizer_type': 'CharTokenizer'
     }
-    with open(vocab_file_path, 'w', encoding='utf-8') as f:
-        json.dump(vocab_data, f, indent=4)
+    with open(metadata_file_path, 'w', encoding='utf-8') as f:
+        json.dump(metadata_data, f, indent=4)
 
     base_data_config = { 
         "data": {
@@ -216,8 +230,8 @@ def dataset_factory_setup(tmp_path_factory):
         }
     }
     split_config = {
+        # Only need file_path and block_size for PickledDataset instantiation via Hydra
         "file_path": str(train_file_path),
-        "vocab_path": str(vocab_file_path), 
         "block_size": 5,
     }
 
@@ -244,6 +258,7 @@ class TestDatasetFactory:
     def test_factory_hydra_instantiation(self, dataset_factory_setup):
         """Test creating a dataset using Hydra's _target_."""
         setup_data = dataset_factory_setup
+        # split_conf no longer contains vocab_path
         split_conf = OmegaConf.create(setup_data["split_config"])
         target_conf = OmegaConf.create({
             '_target_': 'craft.data.datasets.pickled_dataset.PickledDataset'
@@ -256,7 +271,6 @@ class TestDatasetFactory:
         assert isinstance(dataset, PickledDataset)
         assert dataset.block_size == setup_data["split_config"]["block_size"]
         assert str(dataset.file_path) == setup_data["split_config"]["file_path"]
-        assert dataset._vocab_path == setup_data["split_config"]["vocab_path"]
         assert dataset.vocab_size == setup_data["vocab_size"]
 
     @pytest.mark.xfail(reason="InstantiationException not raised when _target_ is missing, cause unclear.")

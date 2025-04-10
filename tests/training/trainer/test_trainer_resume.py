@@ -16,7 +16,13 @@ def minimal_training_config():
 
 @pytest.fixture
 def minimal_model_config_dict():
-    return {'architecture': 'mock_arch', '_target_': 'tests.conftest.MockModel'}
+    return {
+        '_target_': 'tests.helpers.mock_components.MockModel',
+        'config': { # Add nested config block required by initialize_model
+            'architecture': 'mock_arch'
+            # Add other minimal required params if MockModel expects them
+        }
+    }
 
 @pytest.fixture
 def minimal_experiment_config_node(minimal_training_config, minimal_model_config_dict):
@@ -24,112 +30,136 @@ def minimal_experiment_config_node(minimal_training_config, minimal_model_config
         'name': 'minimal_resume_test',
         'training': OmegaConf.create(minimal_training_config.model_dump()),
         'model': OmegaConf.create(minimal_model_config_dict),
-        'data': OmegaConf.create({'datasets': {'train': None, 'val': None, 'test': None}}),
-        'callbacks': None
+        'data': OmegaConf.create({
+            'datasets': {
+                'train': { # Provide minimal valid config for train split
+                    'dataset': {
+                        '_target_': 'tests.helpers.mock_components.MockDataset',
+                        'length': 10 # Example length
+                    }
+                 },
+                'val': None,
+                'test': None
+            },
+            'batch_size': 2 # Example batch size for dataloader wrapper
+        }),
+        'optimizer': {
+            '_target_': 'torch.optim.AdamW',
+            'lr': 1e-4
+        },
+        'checkpointing': {
+            'dummy_key': True
+        },
+        'callbacks': None,
+        'output_dir': None,
+        'device': 'cpu'
     }
-    return OmegaConf.create(conf_dict)
+    return OmegaConf.create({'experiment': conf_dict})
 
 class TestTrainerResume:
     """Tests for Trainer checkpoint resuming logic."""
 
     @pytest.fixture
-    def trainer_instance(self, minimal_training_config, minimal_model_config_dict, minimal_experiment_config_node, tmp_path):
-        """Fixture to create a Trainer instance with minimal mocks for resume testing."""
-        # --- Resume Setup --- #
-        resume_path = "/path/to/checkpoint" # Define resume path
-        loaded_state_obj = TrainingState( # Define loaded state object
-            epoch=5,
-            global_step=1000,
-            best_val_metric=0.5,
-            metrics={'loss': 0.6},
-            model_state_dict={},
-            optimizer_state_dict={}
+    def trainer_instance_for_success(self, minimal_experiment_config_node, tmp_path):
+        """Fixture for successful resume test, passes resume path to Trainer init."""
+        resume_path = "/path/to/valid/checkpoint"
+        loaded_state_obj = TrainingState(
+            epoch=5, global_step=1000, best_val_metric=0.5,
+            metrics={'loss': 0.6}, model_state_dict={}, optimizer_state_dict={}
         )
-        # Modify config to include resume path *before* Trainer init
-        config_with_resume = minimal_training_config.model_copy(update={"resume_from_checkpoint": resume_path})
 
-        # --- Mocks --- #
-        mock_model = MagicMock(spec=nn.Module)
-        mock_optimizer = MagicMock(spec=torch.optim.Optimizer)
-        mock_dataloader = MagicMock(spec=torch.utils.data.DataLoader)
-
-        with patch('craft.training.trainer.logging.getLogger') as mock_log, \
-             patch('craft.training.trainer.CheckpointManager') as mock_cm, \
-             patch('craft.training.trainer.torch.amp.GradScaler'):
+        # Patch initialize_cm WITHIN trainer module
+        with patch('craft.training.trainer.initialize_checkpoint_manager') as mock_init_cm, \
+             patch('craft.training.trainer.logging.getLogger') as mock_log, \
+             patch('craft.training.initialization.initialize_device'), \
+             patch('craft.training.initialization.initialize_tokenizer'), \
+             patch('craft.training.initialization.initialize_model'), \
+             patch('craft.training.initialization.initialize_dataloaders'), \
+             patch('craft.training.initialization.initialize_optimizer'), \
+             patch('craft.training.initialization.initialize_scheduler'), \
+             patch('craft.training.initialization.initialize_callbacks'), \
+             patch('craft.training.initialization.initialize_evaluator'), \
+             patch('craft.training.initialization.initialize_amp_scaler'), \
+             patch('craft.training.initialization.compile_model_if_enabled'):
 
             mock_logger = mock_log.return_value
-            mock_cm_instance = mock_cm.return_value # Get the instance from the patch
-
-            # Configure mock CheckpointManager *before* Trainer init
+            mock_cm_instance = MagicMock(spec=CheckpointManager)
+            mock_init_cm.return_value = mock_cm_instance
             mock_cm_instance.load_checkpoint.return_value = loaded_state_obj
             mock_cm_instance.checkpoint_dir = tmp_path / "checkpoints"
 
-            # --- Mock component state loading methods BEFORE Trainer init --- #
-            mock_model.load_state_dict = MagicMock()
-            mock_optimizer.load_state_dict = MagicMock()
-            # Mock scheduler/scaler if they are created/passed and loaded
-
-            # --- Instantiate Trainer (should trigger resume) --- #
+            # Instantiate Trainer, explicitly passing resume path
             trainer = Trainer(
-                config=config_with_resume, # Pass config with resume path
-                model=mock_model, # Pass mock
-                optimizer=mock_optimizer, # Pass mock
-                train_dataloader=mock_dataloader, # Pass mock
-                experiment_name=minimal_experiment_config_node.name, # Keep experiment_name if needed
-                device="cpu",
-                checkpoint_manager=mock_cm_instance, # Pass pre-configured mock manager
+                cfg=minimal_experiment_config_node,
+                resume_from_checkpoint=resume_path # Pass directly to init
             )
 
-            # --- Post-Init Setup --- #
-            # Mock components that might be accessed *after* init/resume for assertions
-            trainer.logger = mock_logger # Assign logger for tests
-            # Mock components needed for potential state application validation (if done after init)
-            # Ensure these mocks exist on the trainer *after* initialization
-            trainer.model = mock_model # Re-assign if Trainer replaces it? Probably not needed if passed in init
-            trainer.optimizer = mock_optimizer
-            # trainer.scheduler = MagicMock(spec=torch.optim.lr_scheduler._LRScheduler) # Add if needed
-            # trainer.scaler = MagicMock(spec=torch.cuda.amp.GradScaler) # Add if needed
+            # Assign logger for test assertions
+            trainer.logger = mock_logger
 
-            # Return the trainer and the expected loaded state for assertions
-            return trainer, loaded_state_obj
+            # Check the mock was assigned (optional sanity check)
+            # assert trainer.checkpoint_manager is mock_cm_instance
 
-    def test_resume_successful(self, trainer_instance):
-        """Test successful resumption from a checkpoint (triggered during init)."""
-        # --- Setup (Now mostly done in fixture) --- #
-        trainer, loaded_state_obj = trainer_instance # Unpack trainer and expected state
-        resume_path = trainer.config.resume_from_checkpoint # Get resume path from trainer's config
+            return trainer, loaded_state_obj, resume_path # Return path for assertion
 
-        # --- Action (Resume happens during Trainer.__init__) --- #
-        # No action needed here
+    def test_resume_successful(self, trainer_instance_for_success):
+        """Test successful resumption triggered during Trainer init."""
+        trainer, loaded_state_obj, resume_path = trainer_instance_for_success
 
-        # --- Assertions --- #
-        # Check checkpoint manager was called correctly during init
-        trainer.checkpoint_manager.load_checkpoint.assert_called_once_with(path_specifier=resume_path)
-        # Check that trainer attributes were updated correctly during init/resume
+        # --- Assertions (Resume already happened in fixture's Trainer init) --- #
+        # Check checkpoint manager's load_checkpoint was called correctly with positional arg
+        trainer.checkpoint_manager.load_checkpoint.assert_called_once_with(resume_path)
+
+        # Check trainer state was updated
         assert trainer.epoch == loaded_state_obj.epoch
         assert trainer.global_step == loaded_state_obj.global_step
         assert trainer.best_val_metric == loaded_state_obj.best_val_metric
-        # Assert log message (ensure logger is correctly mocked/assigned in fixture)
-        trainer.logger.info.assert_any_call(
-            f"Successfully resumed trainer state to Step={loaded_state_obj.global_step}, Epoch={loaded_state_obj.epoch}, BestMetric={loaded_state_obj.best_val_metric}"
-        )
 
-    def test_resume_failure(self, trainer_instance):
-        """Test failure during checkpoint loading."""
-        # --- Setup --- #
+        # Check log message
+        # Note: The exact log message might change, adjust if needed
+        trainer.logger.info.assert_any_call(f"Resuming from Epoch: {loaded_state_obj.epoch}, Global Step: {loaded_state_obj.global_step}, Best Val Metric: {loaded_state_obj.best_val_metric}")
+        trainer.logger.info.assert_any_call(f"Training resumed successfully from step {loaded_state_obj.global_step}.")
+
+    # Separate test for failure, potentially without full fixture if needed
+    def test_resume_failure(self, minimal_experiment_config_node, tmp_path):
+        """Test failure during manual call to _resume_from_checkpoint."""
         resume_path = "/path/to/bad/checkpoint"
-        error_message = "File not found"
-        trainer_instance.checkpoint_manager.load_checkpoint.side_effect = FileNotFoundError(error_message)
+        error_message = "Simulated load failure"
 
-        trainer_instance.resume_from_checkpoint = resume_path
-        trainer_instance.logger = MagicMock()
+        # Patch initialize_cm within trainer module for this test scope
+        with patch('craft.training.trainer.initialize_checkpoint_manager') as mock_init_cm, \
+             patch('craft.training.trainer.logging.getLogger') as mock_log, \
+             patch('craft.training.initialization.initialize_device'), \
+             patch('craft.training.initialization.initialize_tokenizer'), \
+             patch('craft.training.initialization.initialize_model'), \
+             patch('craft.training.initialization.initialize_dataloaders'), \
+             patch('craft.training.initialization.initialize_optimizer'), \
+             patch('craft.training.initialization.initialize_scheduler'), \
+             patch('craft.training.initialization.initialize_callbacks'), \
+             patch('craft.training.initialization.initialize_evaluator'), \
+             patch('craft.training.initialization.initialize_amp_scaler'), \
+             patch('craft.training.initialization.compile_model_if_enabled'):
 
-        # --- Action & Assertions --- #
-        with pytest.raises(FileNotFoundError, match=error_message):
-            # Pass the checkpoint path argument
-            trainer_instance._resume_from_checkpoint(resume_path)
+            mock_logger = mock_log.return_value
+            mock_cm_instance = MagicMock(spec=CheckpointManager)
+            mock_init_cm.return_value = mock_cm_instance
+            mock_cm_instance.load_checkpoint.side_effect = CheckpointLoadError(error_message)
+            mock_cm_instance.checkpoint_dir = tmp_path / "checkpoints"
 
-        trainer_instance.checkpoint_manager.load_checkpoint.assert_called_once_with(resume_path)
-        trainer_instance.logger.error.assert_called_once()
-        # Check that the error message logged contains the exception string
-        assert error_message in trainer_instance.logger.error.call_args[0][0] 
+            # Instantiate Trainer WITHOUT passing resume path to init
+            trainer = Trainer(cfg=minimal_experiment_config_node)
+            trainer.logger = mock_logger # Assign mock logger
+            # Manually assign the mock CM instance for this test
+            # since init didn't trigger resume/CM usage here
+            trainer.checkpoint_manager = mock_cm_instance
+
+            # --- Action & Assertions --- #
+            # Assert that *manually calling* _resume_from_checkpoint returns None and logs error
+            # The method handles the exception internally and returns None
+            return_value = trainer._resume_from_checkpoint(resume_path)
+            assert return_value is None
+
+            # Assert CheckpointManager's load was called and logger error
+            trainer.checkpoint_manager.load_checkpoint.assert_called_once_with(resume_path)
+            trainer.logger.error.assert_called_once()
+            assert error_message in trainer.logger.error.call_args[0][0] 

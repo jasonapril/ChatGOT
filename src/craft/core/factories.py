@@ -15,7 +15,7 @@ from torch.cuda.amp import GradScaler
 
 # Assuming these imports are valid based on project structure
 from ..data.tokenizers.base import Tokenizer
-from ..config.schemas import TrainingConfig, ExperimentConfig # Added ExperimentConfig
+from ..config.schemas import TrainingConfig, ExperimentConfig, CheckpointingConfig # Added CheckpointingConfig
 from ..training.evaluation import Evaluator
 from ..training.checkpointing import CheckpointManager
 from ..training.callbacks.base import Callback, CallbackList
@@ -324,7 +324,6 @@ def create_evaluator(
         raise ValueError("Evaluator instantiation failed.") from e
 
 def create_checkpoint_manager(
-    config: TrainingConfig,
     experiment_config: ExperimentConfig,
     model: nn.Module,
     optimizer: Optimizer,
@@ -332,46 +331,63 @@ def create_checkpoint_manager(
     scheduler: Optional[_LRScheduler] = None,
     scaler: Optional[GradScaler] = None,
     tokenizer: Optional[Tokenizer] = None,
-    # device argument was removed as it's not used by CheckpointManager
 ) -> CheckpointManager:
     """Creates and configures the CheckpointManager."""
-    # Determine checkpoint directory
-    hydra_run_dir: Optional[str] = OmegaConf.select(experiment_config, 'hydra.run.dir') # type: ignore
-    if config.checkpoint_dir:
-        checkpoint_dir = Path(config.checkpoint_dir)
-    elif hydra_run_dir:
-        checkpoint_dir = Path(hydra_run_dir) / "checkpoints"
+    # Access the checkpointing config, may be None
+    chkpt_cfg: Optional[CheckpointingConfig] = experiment_config.checkpointing
+
+    # --- Determine Checkpoint Directory --- #
+    checkpoint_dir_str: Optional[str] = None
+    if chkpt_cfg and chkpt_cfg.checkpoint_dir:
+        checkpoint_dir_str = chkpt_cfg.checkpoint_dir
+
+    checkpoint_dir: Path
+    if checkpoint_dir_str:
+        checkpoint_dir = Path(checkpoint_dir_str).resolve()
+        logger.info(f"Using checkpoint directory specified in checkpointing config: {checkpoint_dir}")
     else:
-        # Defaulting if no dir specified and not in a hydra run (e.g., direct script exec)
-        checkpoint_dir = Path.cwd() / "checkpoints"
-        logger.warning(f"No checkpoint directory specified and not in Hydra run. Defaulting to {checkpoint_dir}")
+        # Fallback logic using Hydra output directory
+        try:
+            hydra_output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+            exp_name_for_path = experiment_config.experiment_name or "default_run"
+            checkpoint_dir = hydra_output_dir / "checkpoints" / exp_name_for_path
+            logger.info(f"Checkpoint directory not specified, deriving from Hydra output: {checkpoint_dir}")
+        except Exception as e:
+            logger.error(f"Could not determine checkpoint directory from Hydra config: {e}. Checkpointing might fail.")
+            # Assign a default path and let CheckpointManager potentially handle errors
+            checkpoint_dir = Path("./checkpoints_undetermined").resolve()
+            logger.warning(f"Defaulting undetermined checkpoint directory to: {checkpoint_dir}")
 
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Checkpoint directory set to: {checkpoint_dir}")
+    # --- Extract other parameters from config (use defaults if chkpt_cfg is None) --- #
+    keep_last_n = chkpt_cfg.keep_last if chkpt_cfg and chkpt_cfg.keep_last is not None else 3
+    keep_best_n = chkpt_cfg.keep_best if chkpt_cfg and chkpt_cfg.keep_best is not None else 1
+    save_best_only = chkpt_cfg.save_best_only if chkpt_cfg else False
+    checkpoint_prefix = chkpt_cfg.checkpoint_prefix if chkpt_cfg else "checkpoint"
+    experiment_name = experiment_config.experiment_name or "default_experiment" # Use from experiment config
 
-    # hparams removed from call, keep calculation if needed elsewhere
-    # hparams = OmegaConf.to_container(experiment_config, resolve=True) # type: ignore
-
-    # Extract experiment_name, provide a default if missing
-    experiment_name: str
-    if hasattr(experiment_config, 'experiment_name') and experiment_config.experiment_name:
-        experiment_name = str(experiment_config.experiment_name)
-    else:
-        experiment_name = "default_experiment"
-        logger.warning("'experiment_name' not found or is empty in experiment_config. Using default: 'default_experiment'")
-
-    logger.info("Creating CheckpointManager...")
     try:
+        # Ensure the directory exists before initializing CheckpointManager
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
         manager = CheckpointManager(
-            checkpoint_dir=str(checkpoint_dir),
-            keep_last_n=config.keep_last if config.keep_last is not None else 1,
+            checkpoint_dir=str(checkpoint_dir), # Pass resolved dir as string
+            # Pass other checkpointing parameters
+            keep_last_n=keep_last_n,
+            keep_best_n=keep_best_n,
+            save_best_only=save_best_only,
+            checkpoint_prefix=checkpoint_prefix,
+            # Pass required components
             experiment_name=experiment_name,
             model=model,
             optimizer=optimizer,
             scheduler=scheduler,
             scaler=scaler,
             tokenizer=tokenizer,
-            callbacks=callbacks
+            callbacks=callbacks,
+            # Pass the raw config dictionary from the original TrainingState config if needed
+            # This depends on whether CheckpointManager needs the *original* config dict
+            # or the validated Pydantic model. Passing the validated one for now.
+            config=experiment_config.model_dump() # Pass the validated experiment config
         )
         logger.info("CheckpointManager created successfully.")
         return manager

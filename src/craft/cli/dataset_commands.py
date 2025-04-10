@@ -103,7 +103,7 @@ def prepare_dataset(
     input_path: Path = typer.Option(..., "--input-path", "-i", help="Path to the raw input data file.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
     output_dir: Path = typer.Option(..., "--output-dir", "-o", help="Directory to save the processed data.", file_okay=False, resolve_path=True),
     type: str = typer.Option("char", "--type", "-t", help="Type of processing: 'char' or 'subword'.", case_sensitive=False),
-    split_ratios: Optional[List[float]] = typer.Option(None, "--split-ratios", help="Train/Val/Test ratios (e.g., '0.9,0.05,0.05'). Default for char: 0.9,0.05,0.05. Required for subword.", callback=lambda v: [float(x) for x in v.split(',')] if v else None),
+    split_ratios: Optional[str] = typer.Option(None, "--split-ratios", help="Train/Val/Test ratios (e.g., '0.9,0.05,0.05'). Default for char: 0.9,0.05,0.05. Required for subword.", callback=lambda v: [float(x) for x in v.split(',')] if v else None),
     tokenizer_path: Optional[Path] = typer.Option(None, "--tokenizer-path", help="Required for type='subword'. Path to the trained SentencePiece tokenizer model prefix (e.g., /path/to/spm)."), # Clarified help text
     force: bool = typer.Option(False, "--force", "-f", help="Force reprocessing by deleting existing files/dirs in the output directory"),
 ) -> None: # Added return type hint
@@ -126,14 +126,14 @@ def prepare_dataset(
         if split_ratios is None:
             splits_tuple = (0.9, 0.05, 0.05)
             logger.info(f"Using default char split ratios: {splits_tuple}")
-        elif len(split_ratios) == 3 and abs(sum(split_ratios) - 1.0) < 1e-6:
+        elif isinstance(split_ratios, list) and len(split_ratios) == 3 and abs(sum(split_ratios) - 1.0) < 1e-6:
             splits_tuple = cast(Tuple[float, float, float], tuple(split_ratios))
             logger.info(f"Using provided char split ratios: {splits_tuple}")
         else:
             logger.error(f"Invalid split ratios for char type: {split_ratios}. Must be 3 numbers summing to 1.0 or omitted.")
             raise typer.Exit(code=1)
     elif type == 'subword':
-        if split_ratios is None or len(split_ratios) != 3 or not abs(sum(split_ratios) - 1.0) < 1e-6:
+        if not isinstance(split_ratios, list) or len(split_ratios) != 3 or not abs(sum(split_ratios) - 1.0) < 1e-6:
              logger.error(f"Invalid split ratios for subword type: {split_ratios}. Must provide 3 numbers summing to 1.0 via --split-ratios.")
              raise typer.Exit(code=1)
         splits_tuple = cast(Tuple[float, float, float], tuple(split_ratios))

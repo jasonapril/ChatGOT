@@ -202,7 +202,7 @@ class SampleGenerationCallback(Callback):
                  return
                  
             generated_texts = self.generator.generate_text(
-                start_prompt=self.start_prompt, # Corrected argument name
+                prompt=self.start_prompt, # Changed from start_prompt
                 max_new_tokens=self.max_new_tokens,
                 temperature=self.temperature,
                 # Pass other params if added to __init__

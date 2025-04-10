@@ -92,7 +92,6 @@ class TestEarlyStopping:
         assert callback.wait == 0
         assert callback.stopped_epoch == 0
         assert callback.best == np.inf
-        assert callback.best_weights is None
 
         callback_max = EarlyStopping(monitor='val_acc', patience=3, mode='max')
         callback_max.wait = 2
@@ -107,27 +106,33 @@ class TestEarlyStopping:
 
     def test_on_epoch_end_monitor_missing(self, callback, mock_trainer, caplog):
         """Test warning when monitored metric is missing from logs."""
-        logs = {'other_metric': 0.5}
+        metrics_dict = {'other_metric': 0.5}
+        callback.set_trainer(mock_trainer) # Ensure trainer is set for potential internal use
         with caplog.at_level(logging.WARNING):
-            callback.on_epoch_end(trainer=mock_trainer, epoch=0, logs=logs)
+            # Call with epoch, global_step, metrics
+            callback.on_epoch_end(epoch=0, global_step=10, metrics=metrics_dict)
         assert f"Early stopping conditioned on metric '{callback.monitor}' which is not available" in caplog.text
         assert callback.wait == 0
 
     def test_on_epoch_end_improvement_min_mode(self, callback, mock_trainer):
         """Test behavior on improvement in min mode."""
-        logs = {'eval_loss': 0.5}
+        metrics_dict = {'eval_loss': 0.5}
         initial_best = callback.best
-        callback.on_epoch_end(trainer=mock_trainer, epoch=0, logs=logs)
+        callback.set_trainer(mock_trainer)
+        # Call with epoch, global_step, metrics
+        callback.on_epoch_end(epoch=0, global_step=10, metrics=metrics_dict)
         assert callback.best == 0.5
         assert callback.wait == 0
 
     def test_on_epoch_end_no_improvement_min_mode(self, callback, mock_trainer):
         """Test behavior on no improvement in min mode."""
-        callback.on_epoch_end(trainer=mock_trainer, epoch=0, logs={'eval_loss': 0.6})
+        callback.set_trainer(mock_trainer)
+        # Call with epoch, global_step, metrics
+        callback.on_epoch_end(epoch=0, global_step=10, metrics={'eval_loss': 0.6})
         assert callback.wait == 0
         assert callback.best == 0.6
 
-        callback.on_epoch_end(trainer=mock_trainer, epoch=1, logs={'eval_loss': 0.65})
+        callback.on_epoch_end(epoch=1, global_step=20, metrics={'eval_loss': 0.65})
         assert callback.wait == 1
         assert callback.best == 0.6
 
@@ -135,10 +140,12 @@ class TestEarlyStopping:
         """Test training stops after patience runs out in min mode."""
         callback.patience = 1 # Set patience to 1 for quicker test
         mock_trainer.stop_training = False # Initialize stop_training
-        callback.on_epoch_end(trainer=mock_trainer, epoch=0, logs={'eval_loss': 0.6}) # Best = 0.6
+        callback.set_trainer(mock_trainer)
+        # Call with epoch, global_step, metrics
+        callback.on_epoch_end(epoch=0, global_step=10, metrics={'eval_loss': 0.6}) # Best = 0.6
         assert not mock_trainer.stop_training # Check it's still False
 
-        callback.on_epoch_end(trainer=mock_trainer, epoch=1, logs={'eval_loss': 0.7}) # wait = 1
+        callback.on_epoch_end(epoch=1, global_step=20, metrics={'eval_loss': 0.7}) # wait = 1
         assert callback.wait == 1
         assert mock_trainer._stop_training # Should stop now
         assert callback.stopped_epoch == 1
@@ -148,8 +155,10 @@ class TestEarlyStopping:
         """Test behavior on improvement in max mode."""
         initial_best = callback.best # Should be -inf
         mock_trainer.stop_training = False # Initialize stop_training
-        logs = {'val_acc': 0.8}
-        callback.on_epoch_end(trainer=mock_trainer, epoch=0, logs=logs)
+        metrics_dict = {'val_acc': 0.8}
+        callback.set_trainer(mock_trainer)
+        # Call with epoch, global_step, metrics
+        callback.on_epoch_end(epoch=0, global_step=10, metrics=metrics_dict)
         assert callback.best == 0.8
         assert callback.wait == 0
 
@@ -157,10 +166,12 @@ class TestEarlyStopping:
     def test_on_epoch_end_stops_training_max_mode(self, callback, mock_trainer):
         """Test training stops after patience runs out in max mode."""
         mock_trainer.stop_training = False # Initialize stop_training
-        callback.on_epoch_end(trainer=mock_trainer, epoch=0, logs={'val_acc': 0.8}) # Best = 0.8
+        callback.set_trainer(mock_trainer)
+        # Call with epoch, global_step, metrics
+        callback.on_epoch_end(epoch=0, global_step=10, metrics={'val_acc': 0.8}) # Best = 0.8
         assert not mock_trainer.stop_training # Check it's still False
 
-        callback.on_epoch_end(trainer=mock_trainer, epoch=1, logs={'val_acc': 0.7}) # wait = 1
+        callback.on_epoch_end(epoch=1, global_step=20, metrics={'val_acc': 0.7}) # wait = 1
         assert callback.wait == 1
         assert mock_trainer._stop_training # Should stop now
         assert callback.stopped_epoch == 1
@@ -169,11 +180,13 @@ class TestEarlyStopping:
     def test_on_epoch_end_min_delta_improvement(self, callback, mock_trainer):
         """Test min_delta requires significant improvement."""
         mock_trainer.stop_training = False # Initialize stop_training
-        callback.on_epoch_end(trainer=mock_trainer, epoch=0, logs={'eval_loss': 0.6}) # Best = 0.6
+        callback.set_trainer(mock_trainer)
+        # Call with epoch, global_step, metrics
+        callback.on_epoch_end(epoch=0, global_step=10, metrics={'eval_loss': 0.6}) # Best = 0.6
         assert callback.wait == 0
 
         # Improvement less than min_delta (0.6 -> 0.55 is 0.05 improvement < 0.1 min_delta)
-        callback.on_epoch_end(trainer=mock_trainer, epoch=1, logs={'eval_loss': 0.55})
+        callback.on_epoch_end(epoch=1, global_step=20, metrics={'eval_loss': 0.55})
         assert callback.wait == 1 # Counts as no improvement
         assert callback.best == 0.6 # Best doesn't update
         assert mock_trainer._stop_training # Stops because wait >= patience
@@ -181,7 +194,7 @@ class TestEarlyStopping:
         # Reset wait and test significant improvement
         callback.wait = 0
         mock_trainer._stop_training = False # Reset the flag before the next check
-        callback.on_epoch_end(trainer=mock_trainer, epoch=2, logs={'eval_loss': 0.4}) # Improvement of 0.2 > 0.1 min_delta
+        callback.on_epoch_end(epoch=2, global_step=30, metrics={'eval_loss': 0.4}) # Improvement of 0.2 > 0.1 min_delta
         assert callback.wait == 0
         assert callback.best == 0.4
         assert not mock_trainer._stop_training
@@ -189,17 +202,19 @@ class TestEarlyStopping:
     @pytest.mark.parametrize("callback", [{'monitor': 'val_acc', 'mode': 'max', 'patience': 1, 'min_delta': 0.1}], indirect=True)
     def test_on_epoch_end_min_delta_not_improved(self, callback, mock_trainer):
         """Test min_delta with max mode."""
-        callback.on_epoch_end(trainer=mock_trainer, epoch=0, logs={'val_acc': 0.7})
+        callback.set_trainer(mock_trainer)
+        # Call with epoch, global_step, metrics
+        callback.on_epoch_end(epoch=0, global_step=10, metrics={'val_acc': 0.7})
         assert callback.wait == 0
 
-        callback.on_epoch_end(trainer=mock_trainer, epoch=1, logs={'val_acc': 0.75})
+        callback.on_epoch_end(epoch=1, global_step=20, metrics={'val_acc': 0.75})
         assert callback.wait == 1
         assert callback.best == 0.7
         assert mock_trainer._stop_training
 
         callback.wait = 0
         mock_trainer._stop_training = False
-        callback.on_epoch_end(trainer=mock_trainer, epoch=2, logs={'val_acc': 0.85})
+        callback.on_epoch_end(epoch=2, global_step=30, metrics={'val_acc': 0.85})
         assert callback.wait == 0
         assert callback.best == 0.85
         assert not mock_trainer._stop_training 

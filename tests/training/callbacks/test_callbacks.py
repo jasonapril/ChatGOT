@@ -64,22 +64,22 @@ class TestCallbackList:
         "method_name, call_args_to_list, expected_args_to_callback",
         [
             # on_train_begin: Called with **kwargs. Individual callback receives **kwargs.
-            ("on_train_begin", {"extra_arg": 123}, {"extra_arg": 123}),
+            ("on_train_begin", {}, {}),
 
             # on_train_end: Called with metrics=..., **kwargs. Individual callback receives metrics=..., **kwargs.
             ("on_train_end", {"metrics": {"final_metric": 1}, "extra_arg": 456}, {"metrics": {"final_metric": 1}, "extra_arg": 456}),
 
-            # on_epoch_begin: Called with trainer, current_epoch, global_step, **kwargs. Individual receives all.
-            ("on_epoch_begin", {"current_epoch": 1, "global_step": 10, "extra_arg": 789}, {"trainer": "mock_trainer_placeholder", "current_epoch": 1, "global_step": 10, "extra_arg": 789}),
+            # on_epoch_begin: Called with epoch, **kwargs. Individual receives all.
+            ("on_epoch_begin", {"epoch": 1, "extra_arg": 789}, {"epoch": 1, "extra_arg": 789}),
 
             # on_epoch_end: Called with epoch, global_step, metrics, **kwargs. Individual receives all.
             ("on_epoch_end", {"epoch": 1, "global_step": 20, "metrics": {"loss": 0.5}, "extra_arg": "abc"}, {"epoch": 1, "global_step": 20, "metrics": {"loss": 0.5}, "extra_arg": "abc"}),
 
-            # on_step_begin: Called with step, logs=... Individual receives step (positional), **logs.
-            ("on_step_begin", {"step": 100, "logs": {"lr": 0.01}}, {"step": 100, "lr": 0.01}),
+            # on_step_begin: Called with step, **kwargs. Individual receives all.
+            ("on_step_begin", {"step": 100, "extra_arg": "step_begin_extra"}, {"step": 100, "extra_arg": "step_begin_extra"}),
 
-            # on_step_end: Called with step, logs=... Individual receives step (positional), **logs.
-            ("on_step_end", {"step": 100, "logs": {"loss": 0.1}}, {"step": 100, "loss": 0.1}),
+            # on_step_end: Called with step, global_step, metrics, **kwargs. Individual receives all.
+            ("on_step_end", {"step": 100, "global_step": 150, "metrics": {"loss": 0.1}, "extra_arg": "step_end_extra"}, {"step": 100, "global_step": 150, "metrics": {"loss": 0.1}, "extra_arg": "step_end_extra"}),
         ]
     )
     def test_event_dispatch(self, method_name, call_args_to_list, expected_args_to_callback):
@@ -103,54 +103,18 @@ class TestCallbackList:
         # Get the method on CallbackList to call
         list_method = getattr(cb_list, method_name)
 
-        # Prepare args for calling the CallbackList method
-        actual_call_args = call_args_to_list.copy()
-
-        # Dynamically add trainer if the list method expects it explicitly as a keyword
-        sig = inspect.signature(list_method)
-        if "trainer" in sig.parameters:
-            # We call everything with kwargs, so only add if it's a kwarg
-            # (This check might be redundant if we always call with kwargs, but safe)
-             actual_call_args["trainer"] = mock_trainer
-
-
-        # Special handling for on_epoch_begin which has specific positional args in CallbackList
-        # We will call it using keyword arguments for consistency in the test setup.
-        # The signature requires trainer, current_epoch, global_step.
-        if method_name == "on_epoch_begin":
-             required_args = {"trainer": mock_trainer, "current_epoch": actual_call_args["current_epoch"], "global_step": actual_call_args["global_step"]}
-             # Add any extra args from the test parameters
-             extra_args = {k: v for k, v in actual_call_args.items() if k not in required_args}
-             required_args.update(extra_args)
-             actual_call_args = required_args # Use this complete set for the call
-
-
         # Call the CallbackList method using keyword arguments
-        list_method(**actual_call_args)
+        list_method(**call_args_to_list)
 
 
         # Get the method on the individual mock callbacks
         cb1_method = getattr(mock_cb1, method_name)
         cb2_method = getattr(mock_cb2, method_name)
 
-        # Prepare the expected arguments dictionary for the individual callback assertion
-        final_expected_args_dict = expected_args_to_callback.copy()
-        # Replace placeholder trainer with the actual mock trainer object
-        if "trainer" in final_expected_args_dict and final_expected_args_dict["trainer"] == "mock_trainer_placeholder":
-            final_expected_args_dict["trainer"] = mock_trainer
-
         # --- Assert based on how CallbackList calls individual callbacks ---
-        if method_name in ["on_step_begin", "on_step_end"]:
-            # CallbackList calls these with step as positional, logs unpacked as kwargs
-            # And trainer is passed via **kwargs
-            expected_pos_arg = final_expected_args_dict.pop("step")
-            cb1_method.assert_called_once_with(expected_pos_arg, **final_expected_args_dict)
-            cb2_method.assert_called_once_with(expected_pos_arg, **final_expected_args_dict)
-        else:
-            # All other methods are called with keywords / **kwargs by CallbackList
-            # including trainer, epoch, global_step, metrics where applicable
-            cb1_method.assert_called_once_with(**final_expected_args_dict)
-            cb2_method.assert_called_once_with(**final_expected_args_dict)
+        # CallbackList.__getattr__ proxies all args/kwargs directly now
+        cb1_method.assert_called_once_with(**expected_args_to_callback)
+        cb2_method.assert_called_once_with(**expected_args_to_callback)
 
 
 # --- Tests for ReduceLROnPlateauOrInstability --- #

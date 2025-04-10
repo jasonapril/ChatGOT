@@ -19,51 +19,67 @@ def top_k_top_p_filtering(
 ) -> torch.Tensor:
     """
     Filter logits using top-k and/or top-p (nucleus) filtering.
-    
+    Applies top-k first, then top-p to the remaining tokens.
+
     Args:
         logits: Logits to filter, shape [batch_size, vocab_size]
         top_k: Keep only the top-k tokens with highest probability (top-k filtering)
         top_p: Keep the top tokens with cumulative probability >= top_p (nucleus filtering)
         filter_value: Value to assign to filtered tokens
-        
+
     Returns:
         Filtered logits
     """
-    # Clone logits to avoid modifying the original
-    logits = logits.clone()
-    
-    # Apply top-k filtering
-    if top_k > 0:
-        vocab_size = logits.size(-1)
-        # Clamp top_k to vocab size to prevent errors
-        actual_top_k = min(top_k, vocab_size)
-        if actual_top_k < vocab_size: # Only filter if top_k is less than vocab size
-            # Remove all tokens with a probability less than the last token of the top-k
-            indices_to_remove = logits < torch.topk(logits, actual_top_k)[0][..., -1, None]
-            logits[indices_to_remove] = filter_value
-    
-    # Apply top-p (nucleus) filtering
-    if top_p < 1.0:
-        # Sort logits in descending order
-        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-        # Calculate cumulative probabilities
-        cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
-        
+    logits = logits.clone() # Work on a copy
+    batch_size, vocab_size = logits.shape
+
+    # Indices to remove, initialized to False
+    indices_to_remove = torch.zeros_like(logits, dtype=torch.bool)
+
+    # --- Top-K Filtering ---
+    if top_k is not None and top_k > 0:
+        # Cap k at vocab size
+        effective_k = min(top_k, vocab_size)
+        if effective_k < vocab_size: # Only filter if k makes sense
+            # Find the k-th largest logit value
+            kth_values = torch.topk(logits, k=effective_k, dim=-1)[0][:, -1, None]
+            # Mark logits strictly smaller than the k-th value for removal
+            indices_to_remove = logits < kth_values
+
+    # --- Top-P Filtering ---
+    # Handle p=0.0 explicitly: keep only the single most probable token
+    if top_p is not None and top_p == 0.0:
+        # Get the index of the max logit (works even if top-k removed some)
+        safe_logits_for_max = torch.where(indices_to_remove, torch.full_like(logits, -float('inf')), logits)
+        max_logit_indices = torch.argmax(safe_logits_for_max, dim=-1, keepdim=True)
+        # Create a mask to remove everything *except* the max logit index
+        p0_indices_to_remove = torch.ones_like(logits, dtype=torch.bool)
+        p0_indices_to_remove.scatter_(-1, max_logit_indices, False) # Set the max index to False (don't remove)
+        indices_to_remove = p0_indices_to_remove # Override any top-k mask
+
+    elif top_p is not None and 0.0 < top_p < 1.0:
+        # Apply top-p filtering on logits *not already removed* by top-k
+        safe_logits_for_p = torch.where(indices_to_remove, torch.full_like(logits, -float('inf')), logits)
+        sorted_logits, sorted_indices = torch.sort(safe_logits_for_p, descending=True)
+        cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
         # Remove tokens with cumulative probability above the threshold
-        sorted_indices_to_remove = cumulative_probs > top_p
-        # Shift the indices to the right to keep also the first token above the threshold
-        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-        sorted_indices_to_remove[..., 0] = 0
-        
-        # Scatter sorted tensors to original indexing
-        indices_to_remove = sorted_indices_to_remove.scatter(
-            dim=1,
-            index=sorted_indices,
-            src=sorted_indices_to_remove
+        sorted_indices_to_remove_p = cumulative_probs > top_p
+        # Shift indices to keep the first token above the threshold
+        sorted_indices_to_remove_p[..., 1:] = sorted_indices_to_remove_p[..., :-1].clone()
+        sorted_indices_to_remove_p[..., 0] = 0 # Always keep the most probable token (among those not removed by top-k)
+
+        # Scatter back to original indices
+        indices_to_remove_p = torch.scatter(
+            torch.zeros_like(logits, dtype=torch.bool), -1, sorted_indices, sorted_indices_to_remove_p
         )
-        logits[indices_to_remove] = filter_value
-    
-    return logits 
+
+        # Combine with top-k removals
+        indices_to_remove = indices_to_remove | indices_to_remove_p
+
+    # --- Apply Filter ---
+    logits[indices_to_remove] = filter_value
+    return logits
 
 # NOTE: This function assumes the model has a `forward` method that returns logits
 # and potentially relies on model attributes like `max_seq_length` if not passed explicitly.

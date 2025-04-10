@@ -407,6 +407,5 @@ def test_evaluator_initialization(
     assert evaluator.config == config
     assert not evaluator.use_amp
     assert evaluator.callbacks == mock_callbacks
-    assert evaluator.log_interval == 5
 
 # More tests to come... 

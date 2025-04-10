@@ -2,12 +2,15 @@
 Tests for the TensorBoardLogger callback.
 """
 import pytest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call, patch, ANY
 import logging # Required for caplog
 import os
 import torch # Keep torch import if needed elsewhere, or remove if not
 from craft.training.callbacks.tensorboard import TensorBoardLogger
 from hydra.core.hydra_config import HydraConfig # ADDED
+from pathlib import Path
+from omegaconf import OmegaConf, DictConfig
+import hydra
 
 from craft.training.callbacks import TensorBoardLogger
 
@@ -55,7 +58,7 @@ class TestTensorBoardLogger:
             resolved_path = str(tmp_path / "resolved_logs") # Use tmp_path
             tb_logger_callback.set_log_dir_absolute(resolved_path)
 
-            tb_logger_callback.on_train_begin(trainer=mock_trainer)
+            tb_logger_callback.on_train_begin()
             # After on_train_begin, log_dir_absolute should be set.
             # The exact path depends on mocks (Hydra CWD, os.path.abspath), so we check it was set and used.
             assert tb_logger_callback.resolved_log_dir is not None
@@ -81,7 +84,7 @@ class TestTensorBoardLogger:
                 resolved_path = str(tmp_path / "resolved_logs_exception") # Use tmp_path
                 tb_logger_callback.set_log_dir_absolute(resolved_path)
 
-                tb_logger_callback.on_train_begin(trainer=mock_trainer)
+                tb_logger_callback.on_train_begin()
             assert tb_logger_callback.writer is None
             assert "Failed to initialize SummaryWriter" in caplog.text
             assert "Initialization failed" in caplog.text
@@ -96,14 +99,14 @@ class TestTensorBoardLogger:
             tb_logger_callback.set_trainer(mock_trainer)
             resolved_path = str(tmp_path / "resolved_logs_step") # Use tmp_path
             tb_logger_callback.set_log_dir_absolute(resolved_path)
-            tb_logger_callback.on_train_begin(trainer=mock_trainer)
+            tb_logger_callback.on_train_begin() # No trainer arg needed
             mock_writer_instance = mock_writer_class.return_value
 
             step = 100
             global_step_val = 150 # Example global step
-            logs_dict = {'loss': 0.123, 'lr': 0.001, 'other_metric': 5}
-            # Pass logs as a dictionary
-            tb_logger_callback.on_step_end(step=step, global_step=global_step_val, logs=logs_dict)
+            # Pass metrics dictionary
+            metrics_dict = {'loss': 0.123, 'lr': 0.001, 'other_metric': 5}
+            tb_logger_callback.on_step_end(step=step, global_step=global_step_val, metrics=metrics_dict)
 
             calls = [
                 call.add_scalar('Loss/train_step', 0.123, global_step_val),
@@ -116,8 +119,8 @@ class TestTensorBoardLogger:
     def test_on_step_end_no_logs_or_writer(self, tb_logger_callback, mock_trainer, tmp_path):
         """Test that nothing happens if writer not initialized or logs are None."""
         # Scenario 1: Writer not initialized (no on_train_begin call)
-        # Pass global_step as it's now required
-        tb_logger_callback.on_step_end(step=1, global_step=10, logs={'loss': 0.1})
+        # Pass global_step as it's now required, use metrics instead of logs
+        tb_logger_callback.on_step_end(step=1, global_step=10, metrics={'loss': 0.1})
 
         # Scenario 2: Writer IS initialized, but logs are None
         patch_hydra, patch_exists = self._setup_hydra_mock_patch()
@@ -128,9 +131,10 @@ class TestTensorBoardLogger:
             tb_logger_callback.set_trainer(mock_trainer)
             resolved_path = str(tmp_path / "resolved_logs_step_missing") # Use tmp_path
             tb_logger_callback.set_log_dir_absolute(resolved_path)
-            tb_logger_callback.on_train_begin(trainer=mock_trainer)
+            tb_logger_callback.on_train_begin() # No trainer arg needed
             mock_writer_instance = mock_writer_class.return_value
-            tb_logger_callback.on_step_end(step=2, global_step=20, logs=None)
+            # Pass empty metrics dictionary instead of None
+            tb_logger_callback.on_step_end(step=2, global_step=20, metrics={})
             mock_writer_instance.add_scalar.assert_not_called()
 
     def test_on_step_end_missing_keys(self, tb_logger_callback, mock_trainer, tmp_path):
@@ -143,23 +147,44 @@ class TestTensorBoardLogger:
             tb_logger_callback.set_trainer(mock_trainer)
             resolved_path = str(tmp_path / "resolved_logs_step_missing") # Use tmp_path
             tb_logger_callback.set_log_dir_absolute(resolved_path)
-            tb_logger_callback.on_train_begin(trainer=mock_trainer)
+            tb_logger_callback.on_train_begin() # No trainer arg needed
             mock_writer_instance = mock_writer_class.return_value
 
             step = 100
             global_step_val = 150
             # Case 1: Missing 'loss'
-            logs1_dict = {'lr': 0.001, 'another': 10}
-            # Pass logs as a dictionary
-            tb_logger_callback.on_step_end(step=step, global_step=global_step_val, logs=logs1_dict)
-            mock_writer_instance.add_scalar.assert_called_once_with('LearningRate/step', 0.001, global_step_val)
+            metrics1_dict = {'lr': 0.001, 'another': 10}
+            tb_logger_callback.on_step_end(step=step, global_step=global_step_val, metrics=metrics1_dict)
 
-            mock_writer_instance.reset_mock()
+            # Check that add_scalar was called for both lr and the other metric
+            expected_calls = [
+                call('LearningRate/step', 0.001, global_step=global_step_val),
+                call('Train/Another_step', 10, global_step=global_step_val) # Default tag includes Train/
+            ]
+            # Use assert_has_calls with any_order=True as the order might not be guaranteed
+            mock_writer_instance.add_scalar.assert_has_calls(expected_calls, any_order=True)
+            # Assert total number of calls
+            assert mock_writer_instance.add_scalar.call_count == 2
+
+            mock_writer_instance.add_scalar.reset_mock()
+
             # Case 2: Missing 'lr'
-            logs2_dict = {'loss': 0.5, 'another': 20}
-            # Pass logs as a dictionary
-            tb_logger_callback.on_step_end(step=step, global_step=global_step_val, logs=logs2_dict)
-            mock_writer_instance.add_scalar.assert_called_once_with('Loss/train_step', 0.5, global_step_val)
+            metrics2_dict = {'loss': 0.5, 'another': 20}
+            tb_logger_callback.on_step_end(step=step + 1, global_step=global_step_val + 1, metrics=metrics2_dict)
+
+            # Check that add_scalar was called for loss, the other metric, AND the LR fallback
+            expected_calls_2 = [
+                call('Loss/train_step', 0.5, global_step=global_step_val + 1), # Use the actual tag from logs
+                call('Train/Another_step', 20, global_step=global_step_val + 1),
+                call('LearningRate/step', ANY, global_step=global_step_val + 1) # Check fallback call
+            ]
+            mock_writer_instance.add_scalar.assert_has_calls(expected_calls_2, any_order=True)
+            assert mock_writer_instance.add_scalar.call_count == 3 # Expect 3 calls now
+
+            # Case 3: Empty metrics
+            mock_writer_instance.add_scalar.reset_mock()
+            tb_logger_callback.on_step_end(step=step + 2, global_step=global_step_val + 2, metrics={})
+            mock_writer_instance.add_scalar.assert_not_called()
 
     def test_on_epoch_end_logs_metrics(self, tb_logger_callback, mock_trainer, tmp_path):
         """Test logging of epoch-level metrics."""
@@ -171,13 +196,13 @@ class TestTensorBoardLogger:
             tb_logger_callback.set_trainer(mock_trainer)
             resolved_path = str(tmp_path / "resolved_logs_epoch") # Use tmp_path
             tb_logger_callback.set_log_dir_absolute(resolved_path)
-            tb_logger_callback.on_train_begin(trainer=mock_trainer)
+            tb_logger_callback.on_train_begin() # No trainer arg needed
             mock_writer_instance = mock_writer_class.return_value
 
             epoch = 5
             mock_trainer.global_step = 500
-            # Combine metrics into a single logs dictionary
-            logs = {
+            # Combine metrics into a single metrics dictionary
+            metrics_dict = {
                 "loss": 0.4, # Assume this is train loss if not prefixed
                 "perplexity": 8.0,
                 "epoch_time_sec": 120,
@@ -186,11 +211,11 @@ class TestTensorBoardLogger:
                 "final_global_step": mock_trainer.global_step # Include final step
             }
 
-            # Call with the unified logs dictionary
+            # Call with the unified metrics dictionary
             tb_logger_callback.on_epoch_end(
                 epoch=epoch,
                 global_step=mock_trainer.global_step, # Pass global_step
-                metrics=logs # Use 'metrics' keyword
+                metrics=metrics_dict # Use 'metrics' keyword
             )
 
             # Expected calls
@@ -223,23 +248,23 @@ class TestTensorBoardLogger:
             tb_logger_callback.set_trainer(mock_trainer)
             resolved_path = str(tmp_path / "resolved_logs_epoch_missing") # Use tmp_path
             tb_logger_callback.set_log_dir_absolute(resolved_path)
-            tb_logger_callback.on_train_begin(trainer=mock_trainer)
+            tb_logger_callback.on_train_begin() # No trainer arg needed
             mock_writer_instance = mock_writer_class.return_value
             mock_trainer.global_step = 600
             epoch = 6
 
-            # Case 1: Metrics are None (represented by empty logs dict)
+            # Case 1: Metrics are None (represented by empty metrics dict)
             tb_logger_callback.on_epoch_end(epoch=epoch, global_step=mock_trainer.global_step, metrics={}) # Use 'metrics', pass global_step
 
             # Case 2: Only some metrics present
-            logs2 = {"val_loss": 0.7}
-            tb_logger_callback.on_epoch_end(epoch=epoch, global_step=mock_trainer.global_step, metrics=logs2) # Use 'metrics', pass global_step
+            metrics2 = {"val_loss": 0.7}
+            tb_logger_callback.on_epoch_end(epoch=epoch, global_step=mock_trainer.global_step, metrics=metrics2) # Use 'metrics', pass global_step
 
             mock_writer_instance.reset_mock()
 
             # Case 3: Logs contain some valid metrics
-            logs_partial = {'loss': 0.1, "val_accuracy": 0.95, "final_global_step": 600}
-            tb_logger_callback.on_epoch_end(epoch=epoch, global_step=mock_trainer.global_step, metrics=logs_partial) # Use 'metrics', pass global_step
+            metrics_partial = {'loss': 0.1, "val_accuracy": 0.95, "final_global_step": 600}
+            tb_logger_callback.on_epoch_end(epoch=epoch, global_step=mock_trainer.global_step, metrics=metrics_partial) # Use 'metrics', pass global_step
 
             expected_calls_partial = [
                 call('Train/Loss_epoch', 0.1, global_step=600),
@@ -265,7 +290,7 @@ class TestTensorBoardLogger:
             tb_logger_callback.set_trainer(mock_trainer)
             resolved_path = str(tmp_path / "resolved_logs_close") # Use tmp_path
             tb_logger_callback.set_log_dir_absolute(resolved_path)
-            tb_logger_callback.on_train_begin(trainer=mock_trainer)
+            tb_logger_callback.on_train_begin()
             mock_writer_instance = mock_writer_class.return_value
             # Pass metrics= instead of logs=
             tb_logger_callback.on_train_end(metrics={}) # Removed trainer=, use metrics=
@@ -273,12 +298,19 @@ class TestTensorBoardLogger:
 
     # Add simple tests to ensure other required methods exist
     def test_other_methods_exist(self, tb_logger_callback, mock_trainer):
-        """Check that other abstract methods are implemented (even if empty)."""
-        assert hasattr(tb_logger_callback, 'on_epoch_begin')
-        assert hasattr(tb_logger_callback, 'on_step_begin')
-        assert hasattr(tb_logger_callback, 'set_trainer')
-        # Call them to ensure no error (set_trainer needs a mock)
-        # Pass mock_trainer where needed
-        tb_logger_callback.on_epoch_begin(trainer=mock_trainer, current_epoch=0, global_step=1)
+        """Test that other unused callback methods exist and are callable."""
+        # Set trainer before calling methods that might need it internally
+        tb_logger_callback.set_trainer(mock_trainer)
+        
+        # These should just run without error, matching BaseCallback signatures
+        tb_logger_callback.on_init_end()
+        tb_logger_callback.on_epoch_begin(epoch=0)
         tb_logger_callback.on_step_begin(step=0)
-        tb_logger_callback.set_trainer(mock_trainer) 
+        tb_logger_callback.on_evaluation_begin()
+        tb_logger_callback.on_evaluation_end(metrics={'eval_loss': 0.5})
+        tb_logger_callback.on_train_end()
+        # Save/Load require state and filename, use dummy values
+        mock_state = MagicMock()
+        tb_logger_callback.on_save_checkpoint(state=mock_state, filename="dummy.pt")
+        tb_logger_callback.on_load_checkpoint(state=mock_state, filename="dummy.pt")
+        tb_logger_callback.on_exception(exception=Exception("Test")) 

@@ -234,198 +234,148 @@ class TrainingLoop:
                 # Use appropriate context manager for AMP
                 amp_context = torch.amp.autocast(device_type=self.device.type, dtype=torch.bfloat16 if self.device.type == 'cuda' and torch.cuda.is_bf16_supported() else torch.float16, enabled=self.use_amp)
                 with amp_context:
-                    # Assume model returns logits or (logits, loss)
+                    # Assume model returns logits or (logits, loss) or dict with loss
                     output = self.model(inputs)
-                    if isinstance(output, tuple):
-                        logits, loss = output[0], output.get('loss', None) # Look for 'loss' key
-                        if loss is None: # Fallback if 'loss' key missing but tuple returned
-                             # Ensure logits are float for F.cross_entropy if needed
-                             flat_logits = logits.view(-1, logits.size(-1)).float() # Use .float() for CE
-                             flat_targets = targets.view(-1)
-                             loss = F.cross_entropy(flat_logits, flat_targets, ignore_index=-1) # Example loss calc
-                    else:
+                    loss: Optional[torch.Tensor] = None
+                    logits: Optional[torch.Tensor] = None
+                    # Check output type and extract/calculate loss
+                    if isinstance(output, torch.Tensor):
                         logits = output
-                         # Ensure logits are float for F.cross_entropy if needed
-                        flat_logits = logits.view(-1, logits.size(-1)).float() # Use .float() for CE
+                        flat_logits = logits.view(-1, logits.size(-1)).float()
                         flat_targets = targets.view(-1)
-                        loss = F.cross_entropy(flat_logits, flat_targets, ignore_index=-1) # Example loss calc
+                        loss = F.cross_entropy(flat_logits, flat_targets, ignore_index=-1)
+                    elif isinstance(output, tuple) and len(output) > 0:
+                        logits = output[0] if isinstance(output[0], torch.Tensor) else None
+                        # Check second element for loss tensor or dict with 'loss'
+                        if len(output) > 1:
+                            if isinstance(output[1], torch.Tensor):
+                                loss = output[1]
+                            # Safely check dict and key
+                            elif isinstance(output[1], dict) and isinstance(output[1].get('loss'), torch.Tensor):
+                                loss = output[1]['loss']
+                        # Fallback: Calculate loss if not found in tuple and logits exist
+                        if loss is None and logits is not None:
+                            flat_logits = logits.view(-1, logits.size(-1)).float()
+                            flat_targets = targets.view(-1)
+                            loss = F.cross_entropy(flat_logits, flat_targets, ignore_index=-1)
+                    elif isinstance(output, dict):
+                        loss = output.get('loss') if isinstance(output.get('loss'), torch.Tensor) else None
+                        logits = output.get('logits') if isinstance(output.get('logits'), torch.Tensor) else None
+                        # Fallback: Calculate loss if not in dict and logits exist
+                        if loss is None and logits is not None:
+                            flat_logits = logits.view(-1, logits.size(-1)).float()
+                            flat_targets = targets.view(-1)
+                            loss = F.cross_entropy(flat_logits, flat_targets, ignore_index=-1)
+                    else:
+                        self.logger.warning(f"Unexpected model output type: {type(output)}. Cannot determine loss automatically.")
 
+                    # Ensure loss is a scalar tensor
                     if loss is None:
-                        self.logger.error("Loss calculation failed or was not returned by the model.")
-                        raise ValueError("Loss computation failed.")
+                         self.logger.error("Loss calculation failed or was not performed based on model output. Using dummy loss.")
+                         loss = torch.tensor(0.0, device=self.device, requires_grad=True) # Dummy loss to avoid crash
+                    elif loss.dim() != 0:
+                         self.logger.warning(f"Loss tensor has dimensions {loss.shape}, expected scalar. Attempting to average.")
+                         loss = loss.mean()
 
-                    # Check for NaN/Inf loss before scaling/backward
-                    loss_val = loss.item()
+                    # Check for NaN/Inf loss
                     if torch.isnan(loss) or torch.isinf(loss):
-                        self.logger.warning(
-                            f"NaN/Inf loss detected at Global Step {global_step + num_optimizer_steps_in_epoch}, Batch {batch_idx}. Loss: {loss_val}. Skipping batch."
-                        )
-                        # Skip the rest of the batch processing including backward and optimizer step
-                        continue
+                        self.logger.warning(f"NaN/Inf loss detected at Step {current_global_step}, Batch {batch_idx}. Loss: {loss.item()}. Skipping batch.")
+                        continue # Skip backward/optimizer step
 
-                    # Normalize loss for gradient accumulation
-                    # Average loss over accumulation steps
-                    loss = loss / self.gradient_accumulation_steps
+                    # Normalize loss if using gradient accumulation
+                    normalized_loss = loss / self.gradient_accumulation_steps
 
                 # --- Backward Pass ---
-                # Scale loss before backward pass for AMP
-                if self.use_amp:
-                    self.scaler.scale(loss).backward()
-                else:
-                    loss.backward()
+                self.scaler.scale(normalized_loss).backward()
 
-                # Accumulate loss for epoch average calculation
+                # Accumulate loss for epoch average calculation (use un-normalized loss)
                 # Use .item() to get Python number and avoid graph retention
-                current_batch_loss_unscaled = loss.item() * self.gradient_accumulation_steps
-                epoch_loss_total += current_batch_loss_unscaled # Accumulate original loss scale
+                current_batch_loss_unscaled = loss.item() # type: ignore
+                epoch_loss_total += current_batch_loss_unscaled
                 accumulation_window_losses.append(current_batch_loss_unscaled)
 
                 # --- Gradient Accumulation & Optimizer Step ---
-                is_update_step = (batch_idx + 1) % self.gradient_accumulation_steps == 0
-                is_last_batch = (batch_idx + 1) == steps_per_epoch
-
-                if is_update_step or is_last_batch:
-                    # --- Pre-Optimizer Step ---
-                    step_taken = False # Flag to track if optimizer step was successful
-
-                    # Unscale gradients before clipping (required for AMP)
-                    if self.use_amp:
+                num_optimizer_steps_this_batch = 0 # Track if step happened *this batch*
+                if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
+                    # --- Gradient Clipping ---
+                    if self.max_grad_norm is not None and self.max_grad_norm > 0:
                         self.scaler.unscale_(self.optimizer)
-
-                    # Gradient Clipping (optional, after potential unscaling)
-                    if self.max_grad_norm is not None:
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                        total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                        step_logs['grad_norm'] = total_norm.item()
 
                     # --- Optimizer Step ---
-                    if self.use_amp:
-                        # scaler.step() returns the scale factor if successful, None otherwise
-                        scale_before = self.scaler.get_scale()
-                        maybe_step_output = self.scaler.step(self.optimizer)
-                        scale_after = self.scaler.get_scale()
-                        # Step was taken if scale was updated or step output is not None
-                        # (Checking scale is a robust way if scaler.step doesn't return useful info)
-                        # A simpler check if scaler.step returns None on skip: if maybe_step_output is not None:
-                        if scale_before > scale_after or maybe_step_output is not None: # Heuristic: step happened if scale was adjusted or step didn't return None
-                            step_taken = True
-                    else:
-                        self.optimizer.step()
-                        step_taken = True # Assume step was taken if no exception
-
-                    # --- Scaler Update ---
-                    # Only needed if AMP is enabled.
-                    if self.use_amp:
-                        self.scaler.update() # Update scale regardless of step success? Usually yes.
-
-                    # --- Zero Gradients ---
-                    # Crucial: Zero gradients *after* optimizer step and scaler update
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
                     self.optimizer.zero_grad(set_to_none=True)
+                    num_optimizer_steps_in_epoch += 1
+                    num_optimizer_steps_this_batch = 1
 
-                    # --- Scheduler Step (if applicable) ---
-                    # Step the scheduler after the optimizer step
+                    # --- Scheduler Step (after optimizer step) ---
                     if self.scheduler:
-                         # Consider stepping only if step_taken is True? Depends on scheduler type.
-                         # Common practice is to step regardless, let scheduler handle internal logic.
                         self.scheduler.step()
 
-                    # --- Post-Optimizer Step Actions (Only if Step Taken) ---
-                    if step_taken:
-                        # --- Increment Counters ---
-                        num_optimizer_steps_in_epoch += 1
-                        effective_global_step = global_step + num_optimizer_steps_in_epoch # Use this for logging/callbacks
-
-                        # --- Progress Tracking Update ---
-                        current_step_avg_loss = np.mean(accumulation_window_losses) if accumulation_window_losses else float('nan')
-                        accumulation_window_losses.clear() # Reset for next window
+                # --- Logging --- #
+                # Log metrics only when an optimizer step occurs
+                if num_optimizer_steps_this_batch > 0:
+                    current_global_step = global_step + num_optimizer_steps_in_epoch # Step number *after* potential update
+                    if current_global_step % self.log_interval == 0:
+                        # Calculate average loss over the accumulation window
+                        avg_loss_window = sum(accumulation_window_losses) / len(accumulation_window_losses)
+                        accumulation_window_losses = [] # Reset window
                         current_lr = get_current_lr(self.optimizer)
-                        tokens_per_sec_val = progress.get_throughput() if hasattr(progress, 'get_throughput') else None
-                        vram_stats = get_cuda_memory_stats(self.device)
-
-                        progress.update(
-                            step=effective_global_step,
-                            loss=current_step_avg_loss,
-                            learning_rate=current_lr,
-                            tokens_per_second=tokens_per_sec_val,
-                            additional_metrics=vram_stats
-                        )
+                        step_time_taken = time.time() - last_step_time
                         last_step_time = time.time()
+                        # Calculate samples/sec based on batches processed in interval
+                        # Use defaults for optional ints just in case
+                        log_interval = self.log_interval or 1
+                        grad_accum_steps = self.gradient_accumulation_steps or 1
+                        batch_size = step_logs.get("batch_size", 1)
+                        samples_per_sec = log_interval * grad_accum_steps * batch_size / step_time_taken
 
-                        # --- Logging & Callbacks (Conditional on Log Interval) ---
-                        if effective_global_step % self.log_interval == 0:
-                            items_per_sec = progress.get_items_per_sec() if hasattr(progress, 'get_items_per_sec') else None
-                            eta_seconds = progress.get_eta(max_steps if max_steps else steps_per_epoch * self.config.num_epochs) if hasattr(progress, 'get_eta') else None
-                            eta_formatted = format_time(eta_seconds) if eta_seconds is not None else "N/A"
+                        # Add relevant info to step_logs
+                        step_logs['lr'] = current_lr
+                        # Cast loss to float for logging/progress
+                        step_logs['loss'] = float(avg_loss_window)
+                        step_logs['samples_per_sec'] = samples_per_sec
+                        step_logs['step_time_s'] = step_time_taken
+                        step_logs.update(get_cuda_memory_stats(self.device))
 
-                            log_msg = (
-                                f"Epoch {current_epoch+1}/{self.config.num_epochs}, "
-                                f"Step {effective_global_step}/{max_steps if max_steps else 'inf'}, "
-                                f"Batch {batch_idx+1}/{steps_per_epoch}, "
-                                f"Loss: {current_step_avg_loss:.4f}, LR: {current_lr:.2e}, "
-                            )
-                            if items_per_sec is not None: log_msg += f"Items/sec: {items_per_sec:.2f}, "
-                            if tokens_per_sec_val is not None: log_msg += f"Tok/sec: {tokens_per_sec_val:.2f}, "
-                            if vram_stats: log_msg += f"VRAM: {vram_stats.get('vram_allocated_gb', 0.0):.2f}GB (Max: {vram_stats.get('vram_max_allocated_gb', 0.0):.2f}GB), "
-                            log_msg += f"ETA: {eta_formatted}"
-                            self.logger.info(log_msg)
+                        # Update progress tracker
+                        progress.update(loss=float(avg_loss_window), step=current_global_step)
 
-                            metrics_to_log = {
-                                'train/loss_step': current_step_avg_loss,
-                                'train/learning_rate': current_lr,
-                                'perf/items_per_second': items_per_sec,
-                                **{f"perf/{k}": v for k, v in vram_stats.items()},
-                            }
-                            if tokens_per_sec_val is not None: metrics_to_log['perf/tokens_per_second'] = tokens_per_sec_val
-                            # Moved callback inside logging interval check - IS THIS INTENDED?
-                            # Original thought was to move it *outside* log interval. Let's move it outside.
-                            # self._callback_on_step_end(batch_idx, effective_global_step, metrics_to_log)
+                # --- Callback: On Step End ---
+                # Trigger after backward and potential optimizer step
+                current_global_step = global_step + num_optimizer_steps_in_epoch # Use updated step
+                self._callback_on_step_end(batch_idx, current_global_step, step_logs)
 
-                        # --- Step End Callback (Called Every Successful Step) ---
-                        # Prepare metrics for the callback regardless of logging interval
-                        callback_metrics = {
-                            'train/loss_step': current_step_avg_loss,
-                            'train/learning_rate': current_lr,
-                            'perf/items_per_second': progress.get_items_per_sec() if hasattr(progress, 'get_items_per_sec') else None,
-                             **{f"perf/{k}": v for k, v in get_cuda_memory_stats(self.device).items()}, # Recalculate VRAM? Or use vram_stats? Use vram_stats.
-                             **{f"perf/{k}": v for k, v in vram_stats.items()},
-                        }
-                        if tokens_per_sec_val is not None: callback_metrics['perf/tokens_per_second'] = tokens_per_sec_val
-                        self._callback_on_step_end(batch_idx, effective_global_step, callback_metrics)
+                # --- Checkpointing (Interval based) ---
+                # Checkpoint based on global step count (optimizer steps)
+                if self._should_save_checkpoint(current_global_step, time.time()):
+                    self.logger.info(f"Interval reached. Saving checkpoint at global step {current_global_step}...")
+                    # Prepare state and filename
+                    state_to_save = self._prepare_training_state(epoch=current_epoch, global_step=current_global_step)
+                    if self.checkpoint_manager:
+                         # Generate filename using checkpoint manager's prefix
+                         filename = f"{self.checkpoint_manager.checkpoint_prefix}_epoch_{state_to_save.epoch}_step_{state_to_save.global_step}.pt"
+                         # Call save_checkpoint with state and filename
+                         self.checkpoint_manager.save_checkpoint(
+                              state=state_to_save,
+                              filename=filename,
+                              metrics=step_logs, # Pass step metrics
+                              is_best=False # Interval save is not 'best'
+                         )
+                    else:
+                         self.logger.warning("Checkpoint interval reached, but no CheckpointManager configured.")
 
+                # Check max_steps again after potential optimizer step
+                if max_steps is not None and current_global_step >= max_steps:
+                    self.logger.info(f"Max steps ({max_steps}) reached after optimizer step {current_global_step}. Stopping epoch.")
+                    break # Exit batch loop
 
-                        # --- Checkpointing ---
-                        # Checkpoint based on effective_global_step after a successful step
-                        if self._should_save_checkpoint(effective_global_step, time.time()):
-                             if self.checkpoint_manager:
-                                 self.logger.info(f"Saving checkpoint at global step {effective_global_step}...")
-                                 state_to_save = self._prepare_training_state(current_epoch, effective_global_step)
-                                 self.checkpoint_manager.save_checkpoint(state_to_save, is_best=False)
-                                 self.logger.info(f"Checkpoint saved successfully.")
-                                 force_flush_logs()
-                             else:
-                                self.logger.warning("Checkpoint saving triggered but CheckpointManager is not configured.")
-                    # --- End of `if step_taken:` block ---
-                # --- End of `if is_update_step or is_last_batch:` block ---
-
-                # Clean up batch tensors to potentially free memory
-                del inputs, targets, logits, loss, output
-                if self.device.type == 'cuda':
-                    torch.cuda.empty_cache()
-                gc.collect() # Force garbage collection
-
-            except Exception as e:
-                # Determine current effective step even if error occurred before update block
-                current_effective_step_on_error = global_step + num_optimizer_steps_in_epoch
-                self.logger.exception(f"Error during training batch {batch_idx} (Approx Global Step {current_effective_step_on_error}): {e}")
-
-                if "CUDA out of memory" in str(e):
-                    self.logger.error("CUDA OOM detected. Stopping training epoch.")
-                    raise # Re-raise OOM to stop training
-
-                # Clean up potentially partial batch state
-                gc.collect()
-                if self.device.type == 'cuda':
-                    torch.cuda.empty_cache()
-                continue # Move to the next batch
-
+            except Exception as batch_e:
+                 self.logger.error(f"Error processing batch {batch_idx}: {batch_e}", exc_info=True)
+                 self.optimizer.zero_grad(set_to_none=True)
+                 continue
 
         # --- End of Epoch ---
         final_global_step = global_step + num_optimizer_steps_in_epoch

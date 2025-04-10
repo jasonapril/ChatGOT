@@ -13,11 +13,13 @@ import torch
 from transformers import AutoTokenizer
 
 # Add the project root to the path
-project_root = Path(__file__).parent.parent
-sys.path.append(str(project_root))
+# project_root = Path(__file__).parent.parent # Commented out to avoid mypy path conflicts
+# sys.path.append(str(project_root))
 
-from src.models.transformer import create_transformer_model
-from src.data.dataset import load_data
+from craft.models.transformer import create_transformer_model
+# from craft.data.dataset import load_data # Removed old import
+from craft.data.datasets.text_dataset import TextDataset # Added TextDataset import
+from craft.data.tokenizers.char import CharTokenizer # Added CharTokenizer import
 
 # Set up logging
 logging.basicConfig(
@@ -181,21 +183,35 @@ def analyze_model_params(config_path=None):
 
 def check_dataset_vocab_size(data_path):
     """
-    Check the actual vocabulary size of a dataset.
+    Check the actual vocabulary size of a dataset using TextDataset.
     
     Args:
         data_path: Path to the text data
     """
     logger.info(f"Checking vocabulary size in {data_path}")
     
-    # Load the dataset
-    dataset = load_data(data_path)
+    # Instantiate a simple CharTokenizer (adjust if needed)
+    tokenizer = CharTokenizer()
     
+    # Load the dataset using TextDataset (assuming a small block_size is fine for vocab check)
+    # Note: This will read the whole file and tokenize it, which might be slow for large files.
+    try:
+        # Use a dummy block_size; we only care about the tokenizer's vocab built from the text
+        dataset = TextDataset(file_paths=[data_path], block_size=10, tokenizer=tokenizer)
+    except FileNotFoundError:
+        logger.error(f"Data file not found: {data_path}")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to load dataset to check vocab: {e}", exc_info=True)
+        return None
+
     # Print vocabulary size
-    logger.info(f"Actual vocabulary size: {dataset.vocab_size}")
-    logger.info(f"Characters in vocabulary: {sorted(dataset.char_to_idx.keys())}")
+    actual_vocab_size = dataset.vocab_size
+    logger.info(f"Actual vocabulary size from TextDataset tokenizer: {actual_vocab_size}")
+    if hasattr(tokenizer, 'char_to_idx'):
+         logger.info(f"Characters in vocabulary: {sorted(tokenizer.char_to_idx.keys())}")
     
-    return dataset.vocab_size
+    return actual_vocab_size
 
 
 def main():

@@ -288,7 +288,7 @@ def test_generate_text_char_encoding_fallback(mock_model, mock_dataset_char_only
     # Assert result is decoded correctly (output 'cde')
     assert results[0] == "cde"
     # Assert dataset.decode was called with the right indices
-    mock_dataset_char_only.decode.assert_called_once_with([4, 5, 6], skip_special_tokens=True)
+    mock_dataset_char_only.decode.assert_called_once_with([4, 5, 6])
 
 def test_generate_text_no_encoding(mock_model, mock_config):
     """Test ValueError is raised if dataset has neither tokenizer nor char_to_idx."""
@@ -377,10 +377,10 @@ def test_generate_text_special_token_inference(
     assert call_kwargs.get('pad_token_id') == expected_pad
     assert call_kwargs.get('eos_token_id') == expected_eos
 
-    # Optional: Check logger debug messages for token IDs
+    # Check the final effective ID logger messages
     mock_logger_instance = mock_getLogger.return_value
-    mock_logger_instance.debug.assert_any_call(f"Effective PAD token ID: {expected_pad}")
-    mock_logger_instance.debug.assert_any_call(f"Effective EOS token ID: {expected_eos}")
+    mock_logger_instance.debug.assert_any_call(f"Final Effective PAD token ID: {expected_pad}")
+    mock_logger_instance.debug.assert_any_call(f"Final Effective EOS token ID: {expected_eos}")
 
 def test_generate_text_greedy(mock_model, mock_dataset, mock_config):
     """Test generate_text with do_sample=False (greedy) (lines 154-158)."""
@@ -429,56 +429,36 @@ class MockDatasetSpecNoDecode:
     # Add char_to_idx to satisfy the initial encoding check in generate_text
     char_to_idx = {}
 
-def test_generate_text_no_dataset_decode(mock_model, mock_config):
-    """Test generate_text when dataset lacks a decode method (lines 171-172)."""
-    # Create a mock dataset *without* decode using spec_set
-    mock_dataset_no_decode = MagicMock(spec_set=MockDatasetSpecNoDecode)
-    # Configure the required attributes/methods
-    mock_dataset_no_decode.encode.return_value = torch.tensor([[1]], device='cpu')
-    mock_dataset_no_decode.vocab_size = 10 # Set required attribute
-    # char_to_idx is part of the spec now
-
-    # Patch the logger *before* creating the TextGenerator instance
-    with patch('craft.training.generation.logging.getLogger') as mock_get_logger:
-        mock_logger_instance = MagicMock()
-        mock_get_logger.return_value = mock_logger_instance
-
-        # Instantiate TextGenerator *inside* the patch context
-        generator = TextGenerator(
-            model=mock_model,
-            device=torch.device('cpu'),
-            config=mock_config,
-            dataset=mock_dataset_no_decode
-        )
-        # Mock generate return value (needed for the call to succeed up to the decode check)
-        mock_model.generate.return_value = torch.tensor([[1, 2, 3]], device='cpu')
-
-        result = generator.generate_text("start")
-
-        # Assert error was logged
-        mock_logger_instance.error.assert_called_once()
-        log_message = mock_logger_instance.error.call_args[0][0]
-        assert "Dataset does not have a required 'decode' method" in log_message
-
-        # Assert empty list is returned
-        assert result == ["Error: Decoding not possible."]
-
-@patch('craft.training.generation.logging.getLogger')
-def test_generate_text_decode_type_error_fallback(mock_get_logger, mock_model, mock_dataset, mock_config):
-    """Test decode fallback on TypeError (lines 181-182)."""
-    # Configure the mock logger instance that getLogger will return
+def test_generate_text_no_dataset_decode(mock_get_logger, mock_model, mock_config):
+    """Test warning log if dataset lacks a decode method (lines 176-178)."""
     mock_logger_instance = MagicMock()
     mock_get_logger.return_value = mock_logger_instance
+    mock_dataset_no_decode = MagicMock(spec=['tokenizer']) # No decode
+    mock_dataset_no_decode.tokenizer.encode.return_value = [[0]]
+    mock_model.generate.return_value = torch.tensor([[0, 1, 2]], device='cpu')
 
-    # Configure mock decode to raise TypeError only when skip_special_tokens is True
-    def decode_side_effect(ids, skip_special_tokens=False):
-        if skip_special_tokens and ids == [1, 2, 3]:
-            raise TypeError("Mock decode error with skip_special_tokens")
-        elif ids == [1, 2, 3]:
-            return "decoded text without skip"
-        else:
-             return "unexpected ids"
-    mock_dataset.decode.side_effect = decode_side_effect
+    generator = TextGenerator(
+        model=mock_model, device=torch.device('cpu'), config=mock_config, dataset=mock_dataset_no_decode
+    )
+    result = generator.generate_text("start")
+
+    # Assert that the error message indicating decode is unavailable is returned
+    # The function now returns a specific string in this case.
+    assert "[Decode unavailable: Dataset lacks decode method]" in result
+    # Check that an error or warning was logged.
+    mock_logger_instance.error.assert_called_once()
+    assert "Dataset does not have a required 'decode' method" in mock_logger_instance.error.call_args[0][0]
+
+@patch('craft.training.generation.logging.getLogger') # Patch logging.getLogger used within the module
+def test_generate_text_decode_exception(mock_get_logger, mock_model, mock_dataset, mock_config):
+    """Test generic Exception during the primary decode attempt."""
+    mock_logger_instance = MagicMock() # Mock the logger instance that getLogger returns
+    mock_get_logger.return_value = mock_logger_instance
+
+    # Configure tokenizer.decode (which is prioritized) to raise an Exception
+    decode_error_msg = "Primary decode failed"
+    mock_dataset.tokenizer.decode.side_effect = Exception(decode_error_msg)
+
     # Mock dataset.tokenizer.encode to return a List[List[int]]
     mock_dataset.tokenizer.encode.return_value = [[0]] # Corrected
 
@@ -486,93 +466,15 @@ def test_generate_text_decode_type_error_fallback(mock_get_logger, mock_model, m
     # Mock generate return value - Includes prompt
     mock_model.generate.return_value = torch.cat([torch.tensor([[0]]), generated_ids_part], dim=-1).to(torch.device('cpu'))
 
-    # Instantiate TextGenerator (uses default input_processor which calls mock_dataset.encode)
     generator = TextGenerator(
-        model=mock_model,
-        device=torch.device('cpu'),
-        config=mock_config,
-        dataset=mock_dataset
+        model=mock_model, device=torch.device('cpu'), config=mock_config, dataset=mock_dataset
     )
+    result = generator.generate_text("start")
 
-    result = generator.generate_text("start") # prompt_text content doesn't matter due to encode mock
-
-    # Assert warning was logged about the fallback
+    # Assert error was logged using the patched logger instance
     mock_logger_instance.warning.assert_called_once()
-    log_message = mock_logger_instance.warning.call_args[0][0]
-    # Update assertion to match actual log message format
-    assert "Decoding with skip_special_tokens=True failed" in log_message
-    assert "Trying without" in log_message
+    assert decode_error_msg in mock_logger_instance.warning.call_args.args[0]
 
-    # 3. Check the decoded result (should be from the fallback)
-    assert isinstance(result, list) and len(result) > 0, "Expected non-empty list result for fallback"
-    assert result[0] == "decoded text without skip"
-
-@patch('craft.training.generation.logging.getLogger')
-def test_generate_text_decode_exception_primary(mock_get_logger, mock_model, mock_dataset, mock_config):
-    """Test generic Exception during primary decode attempt (lines 196-198)."""
-    mock_logger_instance = MagicMock()
-    mock_get_logger.return_value = mock_logger_instance
-
-    # Configure decode to raise Exception on first call (skip_special_tokens=True)
-    mock_dataset.decode.side_effect = Exception("Primary decode failed")
-    # Mock dataset.tokenizer.encode to return a Tensor
-    mock_dataset.tokenizer.encode.return_value = [[0]] # Corrected
-
-    generated_ids_part = torch.tensor([[1, 2, 3]], device='cpu')
-    # Mock generate return value - Includes prompt
-    mock_model.generate.return_value = torch.cat([torch.tensor([[0]]), generated_ids_part], dim=-1).to(torch.device('cpu'))
-
-    generator = TextGenerator(
-        model=mock_model, device=torch.device('cpu'), config=mock_config, dataset=mock_dataset
-    )
-    result = generator.generate_text("start")
-
-    # Assert error was logged
-    mock_logger_instance.error.assert_called_once()
-    assert "Error decoding generated sequence" in mock_logger_instance.error.call_args[0][0]
-    assert "Primary decode failed" in mock_logger_instance.error.call_args[0][0]
-    # Assert result contains the error message in the first element
-    assert isinstance(result, list) and len(result) > 0, "Expected list with error message"
-    assert "Decoding error: Primary decode failed" in result[0]
-    assert "Raw IDs: [1, 2, 3]" in result[0]
-
-@patch('craft.training.generation.logging.getLogger')
-def test_generate_text_decode_exception_fallback(mock_get_logger, mock_model, mock_dataset, mock_config):
-    """Test generic Exception during fallback decode attempt (lines 193-195)."""
-    mock_logger_instance = MagicMock()
-    mock_get_logger.return_value = mock_logger_instance
-
-    # Configure decode: TypeError on first call, Exception on second
-    def decode_side_effect(ids, skip_special_tokens=False):
-        if skip_special_tokens and ids == [1, 2, 3]: # Compare with list
-            raise TypeError("Skip tokens error")
-        elif not skip_special_tokens and ids == [1, 2, 3]:
-            raise Exception("Fallback decode failed")
-        else:
-            return "unexpected ids"
-    mock_dataset.decode.side_effect = decode_side_effect
-    # Mock dataset.tokenizer.encode to return a List[List[int]]
-    mock_dataset.tokenizer.encode.return_value = [[0]] # Corrected
-
-    generated_ids_part = torch.tensor([[1, 2, 3]], device='cpu')
-    # Mock generate return value - Includes prompt
-    mock_model.generate.return_value = torch.cat([torch.tensor([[0]]), generated_ids_part], dim=-1).to(torch.device('cpu'))
-
-    generator = TextGenerator(
-        model=mock_model, device=torch.device('cpu'), config=mock_config, dataset=mock_dataset
-    )
-    result = generator.generate_text("start")
-
-    # Assert error was logged (from the second exception)
-    mock_logger_instance.error.assert_called_once()
-    assert "Error decoding generated sequence during fallback" in mock_logger_instance.error.call_args[0][0]
-    assert "Fallback decode failed" in mock_logger_instance.error.call_args[0][0]
-    # Assert result contains the error message in the first element
-    assert isinstance(result, list) and len(result) > 0, "Expected list with error message"
-    assert "Decoding error (fallback): Fallback decode failed" in result[0]
-    assert "Raw IDs: [1, 2, 3]" in result[0]
-
-    # Check decode was called twice with the correct generated part (as lists)
-    assert mock_dataset.decode.call_count == 2
-    mock_dataset.decode.assert_any_call([1, 2, 3], skip_special_tokens=True)
-    mock_dataset.decode.assert_called_with([1, 2, 3], skip_special_tokens=False)
+    # Also check the returned string indicates an error
+    assert isinstance(result, list) # Result should be a list
+    assert f"[Decoding error: {decode_error_msg} Raw IDs: [1, 2, 3]]" in result[0]

@@ -25,13 +25,13 @@ project_name: "Craft"
 # Add other top-level or default settings as needed
 
 # Configuration for data handling - MUST be defined by the loaded experiment config
-data: ???
+# data: ???
 
 # Configuration for tokenizer - MUST be defined by the loaded experiment config (usually via data)
 # tokenizer: ???
 
 # Configuration for the trainer - MUST be defined by the loaded experiment config
-training: ???
+# training: ???
 
 # General Run Settings
 seed: 42
@@ -70,8 +70,8 @@ formatters:
 # Note: Default values for sub-configs (model, data, etc.) are typically set
 #       within the chosen experiment file's defaults list.
 
-model: ???         # Placeholder: Actual model config chosen by experiment
-optimizer: ???     # Placeholder: Actual optimizer config chosen by experiment
+# model: ???         # REMOVED - Experiment config provides this under 'experiment' key
+# optimizer: ???     # REMOVED - Experiment config provides this under 'experiment' key
 scheduler: none    # Default: No scheduler unless specified by experiment
 callbacks: default # Default: Use callbacks defined in conf/callbacks/default.yaml
 checkpointing: default # Default: Use settings from conf/checkpointing/default.yaml

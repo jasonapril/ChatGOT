@@ -23,7 +23,7 @@ def generate_text_manual_sampling(
     temperature: float = 0.8,
     device: Optional[torch.device] = None,
     top_k: int = 0,
-    top_p: float = 0.0,
+    top_p: float = 1.0,
     repetition_penalty: float = 1.0
 ) -> str:
     """
@@ -66,7 +66,11 @@ def generate_text_manual_sampling(
         context = context[:, -model_max_length:]
         logger.warning(f"Initial seed text length ({len(context_ids)}) exceeded model max length ({model_max_length}). Truncating.")
 
-    generated_token_ids.extend(context.squeeze().tolist()) # Store initial context IDs
+    # Ensure initial_ids is always a list before extending
+    initial_ids = context.squeeze().tolist()
+    if not isinstance(initial_ids, list):
+        initial_ids = [initial_ids] # Wrap scalar in a list
+    generated_token_ids.extend(initial_ids) # Store initial context IDs
 
     with torch.no_grad():
         for _ in range(max_length):
@@ -90,7 +94,11 @@ def generate_text_manual_sampling(
                 # Use the full context tensor directly for checking previous tokens
                 for prev_token_id in context[0]:
                     if 0 <= prev_token_id.item() < next_token_logits.size(-1):
-                         next_token_logits[0, prev_token_id.item()] /= repetition_penalty
+                        # Apply penalty: divide positive logits, multiply negative logits
+                        if next_token_logits[0, prev_token_id.item()] > 0:
+                            next_token_logits[0, prev_token_id.item()] /= repetition_penalty
+                        else:
+                            next_token_logits[0, prev_token_id.item()] *= repetition_penalty # Multiply negative logits
 
             # Apply top-k and top-p filtering using the utility function
             next_token_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
@@ -125,8 +133,9 @@ def generate_samples_manual_sampling(
     model: torch.nn.Module,
     tokenizer: Tokenizer,
     num_samples: int = 5,
+    prompts: Optional[List[str]] = None,
     seed_text: str = "The ",
-    max_length: int = 500,
+    max_new_tokens: int = 500,
     temperature: float = 0.8,
     device: Optional[torch.device] = None,
     log_samples: bool = True,
@@ -138,9 +147,10 @@ def generate_samples_manual_sampling(
     Args:
         model: Trained model.
         tokenizer: Initialized tokenizer instance.
-        num_samples: Number of samples to generate.
-        seed_text: Initial text to condition the generation.
-        max_length: Maximum number of *new* characters/tokens per sample.
+        num_samples: Number of samples to generate. If prompts is provided and num_samples is not explicitly set, defaults to len(prompts).
+        prompts: List of prompts to condition the generation.
+        seed_text: Initial text to condition the generation if prompts is None.
+        max_new_tokens: Maximum number of *new* characters/tokens per sample.
         temperature: Sampling temperature (higher = more random).
         device: Device to run generation on.
         log_samples: Whether to log samples.
@@ -152,19 +162,53 @@ def generate_samples_manual_sampling(
     """
     samples = []
 
-    if log_samples:
-        logger.info(f"Generating {num_samples} samples via manual sampling with temperature {temperature}...")
-        logger.info(f"Seed text: '{seed_text}'")
+    if not hasattr(tokenizer, 'encode'):
+        logger.error("Tokenizer must have an 'encode' method to calculate max_length.")
+        return [] # Or raise error
 
-    for i in range(num_samples):
+    # Determine the actual number of samples to generate
+    if prompts and num_samples == 5: # Check against the actual default value
+        effective_num_samples = len(prompts)
+    else:
+        effective_num_samples = num_samples
+
+    # Determine the prompts to use
+    actual_prompts = prompts if prompts else [seed_text] * effective_num_samples
+
+    # Ensure we generate the requested number of samples, even if prompts list is shorter/longer
+    if prompts:
+        if len(actual_prompts) < effective_num_samples:
+            actual_prompts.extend([actual_prompts[-1]] * (effective_num_samples - len(actual_prompts))) # Pad if needed
+        elif len(actual_prompts) > effective_num_samples:
+            actual_prompts = actual_prompts[:effective_num_samples] # Truncate if needed
+
+    if log_samples:
+        logger.info(f"Generating {effective_num_samples} samples via manual sampling with temperature {temperature}...")
+        # Log first prompt only if using default seed_text for all
+        log_prompt = seed_text if prompts is None else "(Using provided prompts)"
+        logger.info(f"Seed text: '{log_prompt}'")
+
+    # Iterate through the actual prompts to use
+    for i, current_prompt in enumerate(actual_prompts):
         start_time = time.time()
 
-        # Generate the sample, passing through extra kwargs
+        # Calculate total max_length for the inner function
+        try:
+            # Note: assumes encode returns a list or object with __len__
+            prompt_tokens = tokenizer.encode(current_prompt)
+            prompt_len = len(prompt_tokens)
+        except Exception as e:
+            logger.warning(f"Could not encode prompt to determine length, using max_new_tokens as total length. Error: {e}")
+            prompt_len = 0 # Fallback or default?
+
+        total_max_length = prompt_len + max_new_tokens
+
+        # Generate the sample, passing through extra kwargs, use current_prompt
         sample = generate_text_manual_sampling(
             model=model,
             tokenizer=tokenizer,
-            seed_text=seed_text,
-            max_length=max_length,
+            seed_text=current_prompt, # Use the prompt from the list
+            max_length=total_max_length, # Pass calculated total length
             temperature=temperature,
             device=device,
             **kwargs # Pass top_k, top_p, etc.
@@ -176,10 +220,10 @@ def generate_samples_manual_sampling(
         if log_samples:
             generation_time = time.time() - start_time
             # Calculate length excluding seed text for meaningful throughput
-            generated_part_len = len(sample) - len(seed_text)
+            generated_part_len = (len(sample) - len(current_prompt)) if isinstance(sample, str) else 0
             chars_per_sec = generated_part_len / generation_time if generation_time > 0 else float('inf')
 
-            logger.info(f"\nSample {i+1}/{num_samples} (generated {generated_part_len} new tokens in {generation_time:.2f}s, {chars_per_sec:.1f} tokens/s):")
+            logger.info(f"\nSample {i+1}/{effective_num_samples} (generated {generated_part_len} new tokens in {generation_time:.2f}s, {chars_per_sec:.1f} tokens/s):")
             logger.info(f"{'-' * 40}")
             logger.info(sample)
             logger.info(f"{'-' * 40}\n")

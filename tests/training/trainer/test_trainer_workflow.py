@@ -1,15 +1,28 @@
 import pytest
 import torch
+import torch.nn as nn
+from torch.optim import AdamW
+from omegaconf import OmegaConf, DictConfig
 from unittest.mock import MagicMock, patch, ANY, call
 import logging
-from omegaconf import OmegaConf, DictConfig
-
-from craft.training.trainer import Trainer
-from craft.training.callbacks import CallbackList
-from craft.training.checkpointing import CheckpointManager, TrainingState
-from craft.config.schemas import TrainingConfig
+import tempfile
+import copy
+import types
+from pathlib import Path
+from typing import Dict, Any
+from pydantic import ValidationError
+from craft.config.schemas import TrainingConfig, LanguageModelConfig
 from craft.models.base import LanguageModel
+from craft.training.callbacks import Callback, CallbackList
+from craft.training.evaluation import Evaluator
+from craft.training.checkpointing import CheckpointManager, TrainingState
+from craft.training.progress import ProgressTracker
+from craft.training.training_loop import TrainingLoop
+from craft.training.trainer import Trainer, initialize_callbacks
+from craft.data.base import BaseDataset
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from craft.training.callbacks.sample_generation import SampleGenerationCallback
 from craft.data.tokenizers.base import Tokenizer
 
 # Define simple mock classes for target resolution if needed
@@ -37,10 +50,11 @@ def minimal_training_config_dict():
 @pytest.fixture
 def minimal_model_config_dict():
     return {
-        '_target_': 'tests.training.trainer.test_trainer_train.MockTarget', # Use mock target
-        'architecture': 'mock_arch',
-        'vocab_size': 100 # Example value
+        '_target_': 'unittest.mock.MagicMock',
+        'config': { # Nested block
+            'architecture': 'mock'
         }
+    }
 
 @pytest.fixture
 def minimal_data_config_dict():
@@ -83,272 +97,491 @@ def minimal_experiment_config_node(minimal_training_config_dict,
     }
     return OmegaConf.create(conf_dict)
 
+@pytest.fixture
+def setup_trainer_test_environment(minimal_model_config_dict):
+    # --- Create TrainingConfig object --- #
+    training_args = {
+        "batch_size": 4,
+        "num_epochs": 2,
+        "use_amp": False,
+        "gradient_accumulation_steps": 1,
+        "log_interval": 10,
+        "eval_interval": 50,
+        "save_interval": 100,
+        "keep_last": 2,
+        "resume_from_checkpoint": None,
+        "log_level": "DEBUG",
+        "seed": 42,
+        "device": "cpu",
+        "max_steps": None,
+        "learning_rate": 1e-4,
+        "max_grad_norm": 1.0,
+        "torch_compile": False,
+        "sample_max_new_tokens": 100,
+        "sample_temperature": 0.8,
+        "sample_start_text": "Once upon a time",
+        "val_metric": "loss",
+        "time_save_interval_seconds": 0,
+        "time_eval_interval_seconds": 0,
+        "mixed_precision": False,
+        "save_steps_interval": 0,
+        "compile_model": False,
+    }
+    try:
+        pydantic_config = TrainingConfig(**training_args)
+    except ValidationError as e:
+        pytest.fail(f"Failed to create valid TrainingConfig in fixture: {e}")
 
-# Patch the instantiate function used *within* trainer.py
-@patch('craft.training.trainer.instantiate')
-# Patch other classes instantiated/used by Trainer or its methods
-@patch('craft.training.trainer.TrainingLoop')
-@patch('craft.training.trainer.torch.amp.GradScaler')
-@patch('craft.training.trainer.logging.getLogger')
+    # --- Mock components --- #
+    mock_model = MagicMock(spec=LanguageModel)
+    mock_model.parameters = MagicMock(return_value=iter([torch.nn.Parameter(torch.randn(1))]))
+    mock_model.config = MagicMock()
+    mock_model.config.vocab_size = 50
+    mock_optimizer = MagicMock(spec=AdamW)
+    mock_train_dataset = MagicMock(spec=BaseDataset)
+    mock_train_dataset.__len__.return_value = 100
+    mock_val_dataset = MagicMock(spec=BaseDataset)
+    mock_val_dataset.__len__.return_value = 20
+    mock_train_loader = DataLoader(mock_train_dataset, batch_size=training_args['batch_size'])
+    mock_val_loader = DataLoader(mock_val_dataset, batch_size=training_args['batch_size'])
+    mock_tokenizer = MagicMock(spec=Tokenizer)
+    mock_tokenizer.get_vocab_size.return_value = 50257 # Example vocab size
+    mock_tokenizer.vocab_size = 50
+    mock_scaler = MagicMock(spec=torch.cuda.amp.GradScaler)
+    mock_scaler.state_dict.return_value = {}
+    mock_scheduler = MagicMock(spec=torch.optim.lr_scheduler._LRScheduler)
+    mock_checkpoint_manager = MagicMock(spec=CheckpointManager)
+    mock_evaluator = MagicMock(spec=Evaluator)
+    mock_tensorboard_logger = MagicMock(spec=SummaryWriter)
+    mock_sample_generator = MagicMock(spec=SampleGenerationCallback)
+    mock_callback_list = MagicMock(spec=CallbackList)
+    # Create mock callbacks explicitly for easier assertion later
+    mock_callbacks_instance = [
+        mock_tensorboard_logger,
+        mock_sample_generator,
+    ]
+    mock_callback_list.callbacks = mock_callbacks_instance
+
+    # --- Create Experiment Config Node (Mimicking Hydra Structure) --- #
+    experiment_inner_dict = {
+        'name': 'test_experiment',
+        'output_dir': 'outputs/test_experiment',
+        'device': training_args['device'],
+        'training': OmegaConf.create(training_args),
+        'model': OmegaConf.create(minimal_model_config_dict),
+        'data': OmegaConf.create({
+            'tokenizer': { '_target_': 'unittest.mock.MagicMock' },
+            'batch_size': training_args['batch_size'],
+            'num_workers': 0,
+             'datasets': {
+                'train': {
+                    'dataset': { '_target_': 'unittest.mock.MagicMock' }
+                },
+                'val': {
+                     'dataset': { '_target_': 'unittest.mock.MagicMock' }
+                },
+                'test': None
+                }
+        }),
+        'optimizer': OmegaConf.create({
+            '_target_': 'unittest.mock.MagicMock',
+            'lr': training_args['learning_rate']
+            }),
+        'scheduler': None,
+        'validation': OmegaConf.create({
+            'enable': False,
+            'val_interval': 1
+        }),
+        'callbacks': {
+             'tensorboard_logger': {'_target_': 'path.to.TensorBoardLogger'},
+             'sample_generation': {'_target_': 'path.to.SampleGenerationCallback'},
+        },
+        'checkpointing': OmegaConf.create({
+            '_target_': 'craft.training.checkpointing.CheckpointManager',
+            'checkpoint_dir': './pytest_trainer_cm_dir',
+            'experiment_name': 'test_fixture_exp',
+            'keep_last_n': training_args['keep_last'],
+        }),
+        'eval': OmegaConf.create({
+            '_target_': 'craft.training.evaluation.Evaluator',
+            'config': {}
+        }),
+    }
+    experiment_conf_dict = {
+         'experiment': experiment_inner_dict
+    }
+    experiment_config_node = OmegaConf.create(experiment_conf_dict)
+
+    return {
+        "experiment_config": experiment_config_node,
+        "expected_training_config": pydantic_config,
+        "mock_model": mock_model,
+        "mock_optimizer": mock_optimizer,
+        "mock_train_loader": mock_train_loader,
+        "mock_val_loader": mock_val_loader,
+        "mock_tokenizer": mock_tokenizer,
+        "mock_scaler": mock_scaler,
+        "mock_scheduler": mock_scheduler,
+        "mock_checkpoint_manager": mock_checkpoint_manager,
+        "mock_evaluator": mock_evaluator,
+        "mock_tensorboard_logger": mock_tensorboard_logger,
+        "mock_sample_generator": mock_sample_generator,
+        "mock_callback_list": mock_callback_list,
+    }
+
+# Remove Old Fixtures
+# @pytest.fixture
+# def minimal_training_config_dict():
+# ... (rest of old fixture)
+
+# @pytest.fixture
+# def minimal_model_config_dict():
+# ... (rest of old fixture)
+
+# @pytest.fixture
+# def minimal_data_config_dict():
+# ... (rest of old fixture)
+
+# @pytest.fixture
+# def minimal_optimizer_config_dict():
+# ... (rest of old fixture)
+
+# @pytest.fixture
+# def minimal_experiment_config_node(...):
+# ... (rest of old fixture)
+
+
+# Remove Class Patches
+# @patch('craft.training.trainer.instantiate')
+# @patch('craft.training.trainer.TrainingLoop')
+# @patch('craft.training.trainer.torch.amp.GradScaler')
+# @patch('craft.training.trainer.logging.getLogger')
 class TestTrainerTrain:
     """Tests for the Trainer.train() method."""
 
-    @pytest.fixture
-    def trainer_for_train_test(self,
-                               mock_logger, # Patched via class decorator
-                               mock_scaler, # Patched via class decorator
-                               mock_training_loop, # Patched via class decorator
-                               mock_instantiate, # Patched via class decorator
-                               minimal_experiment_config_node, # Use the config fixture
-                               mock_model, mock_optimizer, mock_dataloader, mock_tokenizer, # Mocks to be RETURNED by instantiate
-                               mock_callback_list, mock_checkpoint_manager): # Other mocks
-        """Fixture to provide a Trainer instance initialized via config."""
+    # Remove Old Fixture
+    # @pytest.fixture
+    # def trainer_for_train_test(self, ...):
+    # ... (rest of old fixture)
 
-        # Configure mock_instantiate to return specific mocks based on config section
-        def instantiate_side_effect(config_node, **kwargs):
-            # This function mimics hydra.utils.instantiate based on the passed config node
-            # We check the _target_ or structure to decide which mock to return
-            target = getattr(config_node, '_target_', None)
-            if target == 'craft.config.schemas.TrainingConfig':
-                 # Instantiate the actual TrainingConfig pydantic model
-                 return TrainingConfig(**OmegaConf.to_container(config_node, resolve=True)) # type: ignore
-            elif config_node == minimal_experiment_config_node.model:
-                 return mock_model
-            elif config_node == minimal_experiment_config_node.optimizer:
-                 return mock_optimizer
-            elif config_node == minimal_experiment_config_node.data.tokenizer:
-                 return mock_tokenizer
-            elif config_node == minimal_experiment_config_node.data.datasets.train:
-                 # Trainer wraps dataset in DataLoader if instantiate returns Dataset
-                 # Simulate returning a mock dataset first
-                 mock_dataset = MagicMock(spec=torch.utils.data.Dataset)
-                 return mock_dataset # Trainer's logic will wrap this
-            elif config_node == minimal_experiment_config_node.get('checkpointing'): # Handle None case
-                # Return the specific mock needed for checkpointing tests
-                return mock_checkpoint_manager
-            elif config_node == minimal_experiment_config_node.get('callbacks'): # Handle None case
-                 # Return individual mock callbacks if callbacks were configured
-                 # For None config, Trainer creates an empty CallbackList internally
-                 return None # Or return [] ? Check Trainer logic
-            # Add more elif branches for scheduler, evaluator if needed by tests
-            else:
-                # Default fallback or raise error if unexpected config node
-                # print(f"WARN: Unexpected instantiate call in test fixture: {config_node}")
-                # Return a generic mock if needed for other calls
-                return MagicMock()
-
-        mock_instantiate.side_effect = instantiate_side_effect
-
-        # Instantiate Trainer using the DictConfig
-        trainer = Trainer(
-            cfg=minimal_experiment_config_node,
-            # CLI args can still be passed if needed by tests
-            # resume_from_checkpoint=None,
-            # compile_model=False,
-            # experiment_name='test_exp_override'
-        )
-
-        # --- Post-init adjustments / overrides for testing ---
-        # Trainer now creates its own CallbackList, but we might want to mock its methods
-        # Replace the internally created one with our mock if needed for assertion checking
-        trainer.callbacks = mock_callback_list
-        trainer.callbacks.callbacks = [] # Ensure inner list exists
-
-        # Manually assign the mocked CheckpointManager IF trainer didn't instantiate one
-        # (based on the mocked instantiate logic above)
-        # Check if the mock was returned correctly
-        if trainer.checkpoint_manager is None or not isinstance(trainer.checkpoint_manager, MagicMock):
-             trainer.checkpoint_manager = mock_checkpoint_manager # Force assign our mock
-
-        # Ensure the dataloader assigned by Trainer (after wrapping) is our mock
-        # Trainer's logic wraps the dataset returned by instantiate
-        # We need to ensure the final dataloader is the mock we want to assert on
-        # This assumes the fixture's mock_dataloader IS the DataLoader instance
-        trainer.train_dataloader = mock_dataloader # Override the wrapped one
-
-        # Mock the .to call that happens after model instantiation
-        trainer.model.to.assert_called_once_with(trainer.device)
-        trainer.model.to = MagicMock(return_value=trainer.model) # Mock subsequent calls if any
-
-        yield trainer, mock_logger # Yield the configured trainer AND the mock logger
-
-
+    # --- Tests will be refactored below --- #
+    @patch("craft.training.trainer.TrainingLoop")
+    @patch("craft.training.trainer.initialize_device")
+    @patch("craft.training.trainer.initialize_tokenizer")
+    @patch("craft.training.trainer.initialize_model")
+    @patch("craft.training.trainer.initialize_dataloaders")
+    @patch("craft.training.trainer.initialize_optimizer")
+    @patch("craft.training.trainer.initialize_scheduler")
+    @patch("craft.training.trainer.initialize_amp_scaler")
+    @patch("craft.training.trainer.initialize_callbacks")
+    @patch("craft.training.trainer.initialize_checkpoint_manager")
+    @patch("craft.training.trainer.initialize_evaluator")
+    @patch("craft.training.trainer.compile_model_if_enabled")
+    @patch("craft.training.trainer.CallbackList")
     def test_train_basic_loop(self,
-                              mock_logger, # Patched
-                              mock_scaler, # Patched
-                              mock_training_loop, # Patched
-                              mock_instantiate, # Patched
-                              trainer_for_train_test # Use the fixture
-                             ):
-        """Test the basic training loop structure and callback calls."""
-        # --- Setup --- #
-        trainer, _ = trainer_for_train_test # Unpack trainer
-        mock_loop_instance = mock_training_loop.return_value # Get the instance created by Trainer
+                              # Patched initializers (in reverse order)
+                              MockCallbackList,
+                              mock_compile_model,
+                              mock_initialize_evaluator,
+                              mock_initialize_checkpoint_manager,
+                              mock_initialize_callbacks,
+                              mock_initialize_amp_scaler,
+                              mock_initialize_scheduler,
+                              mock_initialize_optimizer,
+                              mock_initialize_dataloaders,
+                              mock_initialize_model,
+                              mock_initialize_tokenizer,
+                              mock_initialize_device,
+                              MockTrainingLoop, # Patched TrainingLoop class
+                              # Fixture
+                              setup_trainer_test_environment):
+        """Test the basic training loop structure and callback calls (refactored)."""
+        # --- Setup from Fixture --- #
+        fixture_data = setup_trainer_test_environment
+        experiment_config = fixture_data["experiment_config"]
+        expected_training_config = fixture_data["expected_training_config"]
 
-        # Mock the run() method of the TrainingLoop instance
-        final_step_simulated = 20
-        final_epoch_simulated = 1
-        mock_loop_instance.run.return_value = {
-            'global_step': final_step_simulated,
-            'epoch': final_epoch_simulated,
-            'total_train_time': 123.45,
-            'metrics': {'loss': 0.5}
-        }
+        # --- Configure mocks for patched initializers (similar to test_training.py) --- #
+        mock_initialize_device.return_value = torch.device("cpu")
+        mock_initialize_tokenizer.return_value = fixture_data["mock_tokenizer"]
+        mock_initialize_model.return_value = fixture_data["mock_model"]
+        mock_initialize_dataloaders.return_value = (
+            fixture_data["mock_train_loader"],
+            fixture_data["mock_val_loader"]
+        )
+        mock_initialize_optimizer.return_value = fixture_data["mock_optimizer"]
+        mock_initialize_scheduler.return_value = fixture_data["mock_scheduler"]
+        mock_initialize_amp_scaler.return_value = fixture_data["mock_scaler"]
+        mock_raw_callback_list = [
+            fixture_data["mock_tensorboard_logger"],
+            fixture_data["mock_sample_generator"]
+        ]
+        mock_initialize_callbacks.return_value = mock_raw_callback_list
+        mock_checkpoint_manager_instance = fixture_data["mock_checkpoint_manager"]
+        mock_initialize_checkpoint_manager.return_value = mock_checkpoint_manager_instance
+        mock_evaluator_instance = fixture_data["mock_evaluator"]
+        mock_initialize_evaluator.return_value = mock_evaluator_instance
+        mock_compile_model.side_effect = lambda model, *args, **kwargs: model
 
-        # --- Execute --- #
-        trainer.train()
+        # --- Configure mocks for Patched Classes --- #
+        mock_training_loop_instance = MockTrainingLoop.return_value
+        mock_callback_list_instance = MagicMock(spec=CallbackList)
+        mock_callback_list_instance.callbacks = mock_raw_callback_list
+        # Mock all required callback methods
+        mock_callback_list_instance.on_train_begin = MagicMock()
+        mock_callback_list_instance.on_epoch_begin = MagicMock()
+        mock_callback_list_instance.on_step_begin = MagicMock() # Assuming TrainingLoop calls this
+        mock_callback_list_instance.on_step_end = MagicMock()   # Assuming TrainingLoop calls this
+        mock_callback_list_instance.on_validation_begin = MagicMock()
+        mock_callback_list_instance.on_validation_end = MagicMock()
+        mock_callback_list_instance.on_epoch_end = MagicMock()
+        mock_callback_list_instance.on_train_end = MagicMock()
+        mock_callback_list_instance.on_exception = MagicMock()
+        MockCallbackList.return_value = mock_callback_list_instance
+
+        # --- Configure TrainingLoop.train_epoch mock return --- #
+        epoch_return_dict = {"loss": 0.5}
+        mock_training_loop_instance.train_epoch.return_value = epoch_return_dict
+
+        # --- Instantiate Trainer --- #
+        trainer = Trainer(cfg=experiment_config)
+
+        # --- Call train --- #
+        training_result = trainer.train()
 
         # --- Assertions --- #
-        # Assert Trainer-level callbacks
-        trainer.callbacks.on_train_begin.assert_called_once()
-        trainer.callbacks.on_train_end.assert_called_once_with(metrics={'loss': 0.5})
+        # Assert TrainingLoop was instantiated correctly
+        MockTrainingLoop.assert_called_once_with(
+            model=fixture_data["mock_model"],
+            optimizer=fixture_data["mock_optimizer"],
+            train_dataloader=fixture_data["mock_train_loader"],
+            device=mock_initialize_device.return_value,
+            config=trainer.config,
+            scheduler=fixture_data["mock_scheduler"],
+            callbacks=mock_callback_list_instance,
+            checkpoint_manager=mock_checkpoint_manager_instance
+        )
+        # Assert TrainingLoop.train_epoch() was called correct number of times
+        assert mock_training_loop_instance.train_epoch.call_count == expected_training_config.num_epochs
 
-        # Assert TrainingLoop was instantiated correctly within Trainer.train
-        # Get the arguments passed to TrainingLoop constructor
-        loop_call_args, loop_call_kwargs = mock_training_loop.call_args
-        assert loop_call_kwargs['model'] == trainer.model
-        assert loop_call_kwargs['optimizer'] == trainer.optimizer
-        assert loop_call_kwargs['train_dataloader'] == trainer.train_dataloader
-        assert loop_call_kwargs['device'] == trainer.device
-        assert loop_call_kwargs['config'] == trainer.config # Should be the Pydantic TrainingConfig
-        assert loop_call_kwargs['scheduler'] == trainer.scheduler
-        assert loop_call_kwargs['checkpoint_manager'] == trainer.checkpoint_manager
-        assert isinstance(loop_call_kwargs['callbacks'], list) # Inner list is passed
+        # Assert Trainer callbacks were called
+        mock_callback_list_instance.on_train_begin.assert_called_once()
+        assert mock_callback_list_instance.on_epoch_begin.call_count == expected_training_config.num_epochs
+        # Add more specific callback call checks if needed
+        mock_callback_list_instance.on_train_end.assert_called_once()
 
-        # Assert TrainingLoop.run() was called
-        mock_loop_instance.run.assert_called_once()
-
-    # Patch instantiate specifically for this test's scope
-    @patch('craft.training.trainer.instantiate')
+    @patch("craft.training.trainer.TrainingLoop")
+    @patch("craft.training.trainer.initialize_device")
+    @patch("craft.training.trainer.initialize_tokenizer")
+    @patch("craft.training.trainer.initialize_model")
+    @patch("craft.training.trainer.initialize_dataloaders")
+    @patch("craft.training.trainer.initialize_optimizer")
+    @patch("craft.training.trainer.initialize_scheduler")
+    @patch("craft.training.trainer.initialize_amp_scaler")
+    @patch("craft.training.trainer.initialize_callbacks")
+    @patch("craft.training.trainer.initialize_checkpoint_manager")
+    @patch("craft.training.trainer.initialize_evaluator")
+    @patch("craft.training.trainer.compile_model_if_enabled")
+    @patch("craft.training.trainer.CallbackList")
     def test_train_with_validation(self,
-                                   mock_instantiate_val, # Patched instantiate for this test
-                                   mock_logger, # Patched via class decorator
-                                   mock_scaler, # Patched via class decorator
-                                   mock_training_loop, # Patched via class decorator
-                                   # Mocks needed for side effect config
-                                   mock_model,
-                                   mock_optimizer,
-                                   mock_dataloader, # Train dataloader mock
-                                   mock_val_dataloader, # Val dataloader mock
-                                   mock_tokenizer,
-                                   mock_evaluator, # Evaluator mock
-                                   mock_checkpoint_manager, # Checkpoint manager mock
-                                   mock_callback_list, # Callback list mock
-                                   # Config fixtures
-                                   minimal_training_config_dict,
-                                   minimal_model_config_dict,
-                                   minimal_data_config_dict,
-                                   minimal_optimizer_config_dict):
-        """Test the training loop including validation and best checkpoint saving."""
-        # --- Setup --- #
-        # Create a config for this specific test with validation enabled
-        test_training_config_dict = {
-            **minimal_training_config_dict,
-            'eval_interval': 1,
-            'val_metric': "loss",
-            'checkpoint_dir': "/fake/mock/dir", # Needed by CheckpointManager typically
-            'save_interval': 10, # Example save interval
-        }
-        test_data_config_dict = {
-             **minimal_data_config_dict,
-             'datasets': {
-                 'train': minimal_data_config_dict['datasets']['train'],
-                 'val': {'_target_': 'tests.training.trainer.test_trainer_train.MockTarget'}, # Add val target
-                 'test': None
-             }
-        }
-        test_eval_config_dict = {'_target_': 'tests.training.trainer.test_trainer_train.MockTarget'}
-        test_checkpointing_config_dict = {'_target_': 'tests.training.trainer.test_trainer_train.MockTarget'}
+                                   # Patched initializers (in reverse order)
+                                   MockCallbackList,
+                                   mock_compile_model,
+                                   mock_initialize_evaluator,
+                                   mock_initialize_checkpoint_manager,
+                                   mock_initialize_callbacks,
+                                   mock_initialize_amp_scaler,
+                                   mock_initialize_scheduler,
+                                   mock_initialize_optimizer,
+                                   mock_initialize_dataloaders,
+                                   mock_initialize_model,
+                                   mock_initialize_tokenizer,
+                                   mock_initialize_device,
+                                   MockTrainingLoop, # Patched TrainingLoop class
+                                   # Fixture
+                                   setup_trainer_test_environment):
+        """Test the training loop including validation setup (refactored)."""
+        # --- Setup from Fixture --- #
+        fixture_data = setup_trainer_test_environment
+        experiment_config_copy = copy.deepcopy(fixture_data["experiment_config"])
 
-        test_config = OmegaConf.create({
-            'training': test_training_config_dict,
-            'model': minimal_model_config_dict,
-            'data': test_data_config_dict,
-            'optimizer': minimal_optimizer_config_dict,
-            'eval': test_eval_config_dict,
-            'checkpointing': test_checkpointing_config_dict,
-            'callbacks': None,
-            'scheduler': None,
-            'device': 'cpu',
-            'seed': 42,
-            'log_level': 'INFO',
-            'experiment_name': 'test_val_exp'
-        })
+        # --- Modify Config for Validation --- #
+        experiment_config_copy.experiment.validation.enable = True
+        experiment_config_copy.experiment.validation.val_interval = 1 # Eval every epoch
+        experiment_config_copy.experiment.training.eval_interval = 1 # Ensure eval is triggered
+        experiment_config_copy.experiment.training.save_interval = 0 # Disable saving for this test
 
-        # Configure the mocked instantiate for this test's specific needs
-        def instantiate_val_side_effect(config_node, **kwargs):
-            target = getattr(config_node, '_target_', None)
-            if target == 'craft.config.schemas.TrainingConfig':
-                 return TrainingConfig(**OmegaConf.to_container(config_node, resolve=True)) # type: ignore
-            elif config_node == test_config.model: return mock_model
-            elif config_node == test_config.optimizer: return mock_optimizer
-            elif config_node == test_config.data.tokenizer: return mock_tokenizer
-            elif config_node == test_config.data.datasets.train: return MagicMock(spec=torch.utils.data.Dataset) # Train Dataset
-            elif config_node == test_config.data.datasets.val: return MagicMock(spec=torch.utils.data.Dataset) # Val Dataset
-            elif config_node == test_config.eval: return mock_evaluator
-            elif config_node == test_config.checkpointing: return mock_checkpoint_manager
-            # Add scheduler etc. if needed
-            else: return MagicMock() # Default mock
-        mock_instantiate_val.side_effect = instantiate_val_side_effect
+        # --- Configure mocks for patched initializers --- #
+        mock_initialize_device.return_value = torch.device("cpu")
+        mock_initialize_tokenizer.return_value = fixture_data["mock_tokenizer"]
+        mock_initialize_model.return_value = fixture_data["mock_model"]
+        mock_initialize_dataloaders.return_value = (
+            fixture_data["mock_train_loader"],
+            fixture_data["mock_val_loader"] # Make sure val_loader is provided
+        )
+        mock_initialize_optimizer.return_value = fixture_data["mock_optimizer"]
+        mock_initialize_scheduler.return_value = fixture_data["mock_scheduler"]
+        mock_initialize_amp_scaler.return_value = fixture_data["mock_scaler"]
+        mock_raw_callback_list = [
+            fixture_data["mock_tensorboard_logger"],
+            fixture_data["mock_sample_generator"]
+        ]
+        mock_initialize_callbacks.return_value = mock_raw_callback_list
+        mock_checkpoint_manager_instance = fixture_data["mock_checkpoint_manager"]
+        mock_initialize_checkpoint_manager.return_value = mock_checkpoint_manager_instance
+        # Evaluator should be returned since validation is enabled
+        mock_evaluator_instance = fixture_data["mock_evaluator"]
+        mock_initialize_evaluator.return_value = mock_evaluator_instance
+        mock_compile_model.side_effect = lambda model, *args, **kwargs: model
 
-        # Instantiate Trainer
-        trainer = Trainer(cfg=test_config)
+        # --- Configure mocks for Patched Classes --- #
+        mock_training_loop_instance = MockTrainingLoop.return_value
+        mock_callback_list_instance = MagicMock(spec=CallbackList)
+        mock_callback_list_instance.callbacks = mock_raw_callback_list
+        # Mock all required callback methods
+        mock_callback_list_instance.on_train_begin = MagicMock()
+        mock_callback_list_instance.on_epoch_begin = MagicMock()
+        mock_callback_list_instance.on_step_begin = MagicMock()
+        mock_callback_list_instance.on_step_end = MagicMock()
+        mock_callback_list_instance.on_validation_begin = MagicMock()
+        mock_callback_list_instance.on_validation_end = MagicMock()
+        mock_callback_list_instance.on_epoch_end = MagicMock()
+        mock_callback_list_instance.on_train_end = MagicMock()
+        mock_callback_list_instance.on_exception = MagicMock()
+        MockCallbackList.return_value = mock_callback_list_instance
 
-        # Post-init adjustments/overrides
-        trainer.callbacks = mock_callback_list # Use shared mock
-        trainer.callbacks.callbacks = []
-        trainer.train_dataloader = mock_dataloader # Override wrapped loader
-        trainer.val_dataloader = mock_val_dataloader # Override wrapped loader
+        # --- Configure TrainingLoop.train_epoch mock return (including val metrics) --- #
+        epoch_return_dict = {"loss": 0.5}
+        mock_training_loop_instance.train_epoch.return_value = epoch_return_dict
 
-        # Get the TrainingLoop instance created by Trainer.train
-        mock_loop_instance = mock_training_loop.return_value
+        # --- Configure Evaluator mock --- #
+        if mock_evaluator_instance:
+            mock_evaluator_instance.evaluate.return_value = {"val_loss": 0.6}
 
-        # Configure TrainingLoop.run return value
-        mock_loop_instance.run.return_value = {
-            'global_step': 20, 'epoch': 1, 'metrics': {'loss': 0.5, 'val_loss': 0.4}
-        }
+        # --- Instantiate Trainer --- #
+        trainer = Trainer(cfg=experiment_config_copy)
 
-        # --- Execute --- #
-        trainer.train()
+        # --- Call train --- #
+        training_result = trainer.train()
 
         # --- Assertions --- #
-        trainer.callbacks.on_train_begin.assert_called_once()
-        trainer.callbacks.on_train_end.assert_called_once()
-        mock_loop_instance.run.assert_called_once()
+        # Assert initialization happened correctly (ensure Evaluator was created)
+        mock_initialize_evaluator.assert_called_once()
+        assert trainer.evaluator is mock_evaluator_instance
 
-        # Check that evaluator and checkpoint manager were instantiated (via mock_instantiate)
-        eval_call = call(test_config.eval, model=mock_model, val_dataloader=mock_val_dataloader, device=trainer.device, tokenizer=mock_tokenizer)
-        ckpt_call = call(test_config.checkpointing, config=trainer.config, experiment_config=test_config, model=mock_model, optimizer=mock_optimizer, callbacks=trainer.callbacks, scheduler=None, scaler=mock_scaler.return_value, tokenizer=mock_tokenizer)
+        # Assert TrainingLoop was instantiated correctly
+        MockTrainingLoop.assert_called_once_with(
+            model=fixture_data["mock_model"],
+            optimizer=fixture_data["mock_optimizer"],
+            train_dataloader=fixture_data["mock_train_loader"],
+            device=mock_initialize_device.return_value,
+            config=trainer.config,
+            scheduler=fixture_data["mock_scheduler"],
+            callbacks=mock_callback_list_instance,
+            checkpoint_manager=mock_checkpoint_manager_instance
+        )
+        # Assert TrainingLoop.train_epoch() was called for each epoch
+        assert mock_training_loop_instance.train_epoch.call_count == experiment_config_copy.experiment.training.num_epochs
 
-        # Check if these specific calls were made to the mocked instantiate
-        # Note: Order might matter depending on implementation details of __init__
-        # assert eval_call in mock_instantiate_val.call_args_list
-        # assert ckpt_call in mock_instantiate_val.call_args_list
-        # Simpler check: Ensure instantiate was called for eval and checkpointing configs
-        assert any(c.args[0] == test_config.eval for c in mock_instantiate_val.call_args_list)
-        assert any(c.args[0] == test_config.checkpointing for c in mock_instantiate_val.call_args_list)
+        # Assert Evaluator.evaluate was called (since eval_interval=1)
+        if mock_evaluator_instance:
+            assert mock_evaluator_instance.evaluate.call_count == experiment_config_copy.experiment.training.num_epochs
 
+        # Assert callbacks related to validation were called
+        assert mock_callback_list_instance.on_validation_begin.call_count == experiment_config_copy.experiment.training.num_epochs
+        assert mock_callback_list_instance.on_validation_end.call_count == experiment_config_copy.experiment.training.num_epochs
 
+        # Assert other callbacks
+        mock_callback_list_instance.on_train_begin.assert_called_once()
+        assert mock_callback_list_instance.on_epoch_begin.call_count == experiment_config_copy.experiment.training.num_epochs
+        mock_callback_list_instance.on_train_end.assert_called_once()
+
+    @patch("craft.training.trainer.TrainingLoop")
+    @patch("craft.training.trainer.initialize_device")
+    @patch("craft.training.trainer.initialize_tokenizer")
+    @patch("craft.training.trainer.initialize_model")
+    @patch("craft.training.trainer.initialize_dataloaders")
+    @patch("craft.training.trainer.initialize_optimizer")
+    @patch("craft.training.trainer.initialize_scheduler")
+    @patch("craft.training.trainer.initialize_amp_scaler")
+    @patch("craft.training.trainer.initialize_callbacks")
+    @patch("craft.training.trainer.initialize_checkpoint_manager")
+    @patch("craft.training.trainer.initialize_evaluator")
+    @patch("craft.training.trainer.compile_model_if_enabled")
+    @patch("craft.training.trainer.CallbackList")
     def test_train_handles_exception(self,
-                                     mock_logger, # Patched
-                                     mock_scaler, # Patched
-                                     mock_training_loop, # Patched
-                                     mock_instantiate, # Patched
-                                     trainer_for_train_test):
-        """Test that exceptions during training loop are caught and callbacks called."""
-        # --- Setup --- #
-        trainer, logger_instance = trainer_for_train_test # Get trainer and logger mock
-        mock_loop_instance = mock_training_loop.return_value
-        test_exception = ValueError("Training Loop Failed!")
-        mock_loop_instance.run.side_effect = test_exception
+                                     # Patched initializers (in reverse order)
+                                     MockCallbackList,
+                                     mock_compile_model,
+                                     mock_initialize_evaluator,
+                                     mock_initialize_checkpoint_manager,
+                                     mock_initialize_callbacks,
+                                     mock_initialize_amp_scaler,
+                                     mock_initialize_scheduler,
+                                     mock_initialize_optimizer,
+                                     mock_initialize_dataloaders,
+                                     mock_initialize_model,
+                                     mock_initialize_tokenizer,
+                                     mock_initialize_device,
+                                     MockTrainingLoop, # Patched TrainingLoop class
+                                     # Fixture
+                                     setup_trainer_test_environment):
+        """Test that exceptions during training loop are caught and callbacks called (refactored)."""
+        # --- Setup from Fixture --- #
+        fixture_data = setup_trainer_test_environment
+        experiment_config = fixture_data["experiment_config"]
+
+        # --- Configure mocks for patched initializers --- #
+        # (Most return values don't matter for this specific test, but set them up)
+        mock_initialize_device.return_value = torch.device("cpu")
+        mock_initialize_tokenizer.return_value = fixture_data["mock_tokenizer"]
+        mock_initialize_model.return_value = fixture_data["mock_model"]
+        mock_initialize_dataloaders.return_value = (
+            fixture_data["mock_train_loader"],
+            fixture_data["mock_val_loader"]
+        )
+        mock_initialize_optimizer.return_value = fixture_data["mock_optimizer"]
+        mock_initialize_scheduler.return_value = fixture_data["mock_scheduler"]
+        mock_initialize_amp_scaler.return_value = fixture_data["mock_scaler"]
+        mock_raw_callback_list = [MagicMock(spec=Callback)]
+        mock_initialize_callbacks.return_value = mock_raw_callback_list
+        mock_checkpoint_manager_instance = fixture_data["mock_checkpoint_manager"]
+        mock_initialize_checkpoint_manager.return_value = mock_checkpoint_manager_instance
+        mock_evaluator_instance = fixture_data["mock_evaluator"]
+        mock_initialize_evaluator.return_value = mock_evaluator_instance
+        mock_compile_model.side_effect = lambda model, *args, **kwargs: model
+
+        # --- Configure mocks for Patched Classes --- #
+        mock_training_loop_instance = MockTrainingLoop.return_value
+        mock_callback_list_instance = MagicMock(spec=CallbackList)
+        # Add methods expected by Trainer.train()
+        mock_callback_list_instance.on_train_begin = MagicMock()
+        mock_callback_list_instance.on_epoch_begin = MagicMock()
+        mock_callback_list_instance.on_step_begin = MagicMock()
+        mock_callback_list_instance.on_step_end = MagicMock()
+        mock_callback_list_instance.on_evaluation_begin = MagicMock()
+        mock_callback_list_instance.on_evaluation_end = MagicMock()
+        mock_callback_list_instance.on_epoch_end = MagicMock()
+        mock_callback_list_instance.on_train_end = MagicMock()
+        mock_callback_list_instance.on_exception = MagicMock()
+        mock_callback_list_instance.callbacks = mock_raw_callback_list
+        MockCallbackList.return_value = mock_callback_list_instance
+
+        # --- Configure TrainingLoop.train_epoch to raise exception --- #
+        test_exception = ValueError("Training Epoch Failed!")
+        mock_training_loop_instance.train_epoch.side_effect = test_exception
+
+        # --- Instantiate Trainer --- #
+        trainer = Trainer(cfg=experiment_config)
+        assert trainer.callbacks is mock_callback_list_instance # Verify mock setup
 
         # --- Execute & Assert --- #
-        with pytest.raises(ValueError, match="Training Loop Failed!"):
+        try:
             trainer.train()
+        except Exception as e:
+            pytest.fail(f"Trainer.train raised an unexpected exception: {e}")
 
-        # Assertions
-        trainer.callbacks.on_train_begin.assert_called_once()
-        trainer.callbacks.on_train_error.assert_called_once_with(test_exception)
-        # on_train_end should NOT be called if run() raises an exception before finishing
-        trainer.callbacks.on_train_end.assert_not_called()
-        logger_instance.error.assert_any_call(f"An error occurred during training: {test_exception}", exc_info=True)
+        # Assert that on_exception was called on the callback list instance
+        mock_callback_list_instance.on_exception.assert_called_once_with(exception=test_exception)
+        # Assert train_end was still called
+        mock_callback_list_instance.on_train_end.assert_called_once()

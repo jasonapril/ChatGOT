@@ -9,14 +9,17 @@ from typing import Optional, Tuple, Union, Dict, Any, cast
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn import TransformerEncoderLayer # <-- ADD IMPORT
 
 # Import base class, new config type, and registration decorator
 from .base import LanguageModel # Import only the base model class
 from ..config.schemas import LanguageModelConfig # Config location changed
+from pydantic import ValidationError # For error handling
 # from .registry import register_model # REMOVE registry import
 # Import the generation utility
 from ..utils.generation import autoregressive_generate
 
+logger = logging.getLogger(__name__)
 
 class PositionalEncoding(nn.Module):
     """
@@ -70,71 +73,60 @@ class TransformerModel(LanguageModel):
     Configured via Pydantic LanguageModelConfig.
     """
     
-    def __init__(self, config: LanguageModelConfig):
+    def __init__(self, **kwargs):
         """
-        Initialize the transformer model using a LanguageModelConfig.
+        Initialize the transformer model using keyword arguments parsed into LanguageModelConfig.
         """
-        # Ensure config is the correct Pydantic type
-        if not isinstance(config, LanguageModelConfig):
-             raise TypeError(f"Expected config to be LanguageModelConfig, got {type(config)}")
+        try:
+            # Parse kwargs into the expected Pydantic model
+            config = LanguageModelConfig(**kwargs)
+        except ValidationError as e:
+            logger.error(f"Configuration validation failed for TransformerModel: {e}")
+            # Re-raise or handle as appropriate for the application context
+            raise ValueError(f"Invalid configuration provided to TransformerModel: {e}") from e
 
+        # Pass the validated Pydantic config object to the parent class
         super().__init__(config)
-        
-        # Access parameters directly from the validated config object
-        self.vocab_size = config.vocab_size
-        if self.vocab_size is None:
-            raise ValueError("TransformerModel requires config.vocab_size to be set.")
-        self.d_model = config.d_model
-        self.n_head = config.n_head
-        self.d_hid = config.d_hid if config.d_hid is not None else config.d_model * 4
-        self.n_layers = config.n_layers
-        self.dropout_rate = config.dropout
-        # Ensure max_seq_length is set on the instance, required by autoregressive_generate
-        self.max_seq_length = config.max_seq_length 
-        self.layer_norm_eps = config.layer_norm_eps
-        self.activation = config.activation
-        self.bias = config.bias
-        self.norm_first = config.norm_first
-        
-        # --- Model Layers --- #
-        # Token embedding
-        self.token_embedding = nn.Embedding(self.vocab_size, self.d_model)
-        
-        # Position embedding (learnable)
-        self.position_embedding = nn.Embedding(self.max_seq_length, self.d_model)
 
-        # Dropout for embeddings
-        self.dropout = nn.Dropout(self.dropout_rate)
-        
-        # Create standard transformer decoder layer
-        decoder_layers = nn.TransformerDecoderLayer(
-            d_model=self.d_model,
-            nhead=self.n_head,
-            dim_feedforward=self.d_hid,
-            dropout=self.dropout_rate,
-            activation=self.activation,
-            batch_first=True, # Important: ensure batch dimension is first
-            norm_first=self.norm_first, # Use pre-norm or post-norm based on config
-            bias=self.bias,
-            layer_norm_eps=self.layer_norm_eps
-        )
-        
-        # Create standard transformer decoder
-        self.transformer_decoder = nn.TransformerDecoder(
-            decoder_layers,
-            num_layers=self.n_layers,
-            norm=nn.LayerNorm(self.d_model, eps=self.layer_norm_eps) # Final norm layer
-        )
-        
-        # Output layer (ties weights with token embedding if configured)
-        self.output_layer = nn.Linear(self.d_model, self.vocab_size, bias=False)
-        # self.token_embedding.weight = self.output_layer.weight # Weight tying
-        
+        # Store config if needed elsewhere in this class
+        self.config = config
+
+        # Layer definitions using validated config attributes
+        self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
+        self.position_embedding = nn.Embedding(config.max_seq_length, config.d_model)
+        self.dropout = nn.Dropout(config.dropout)
+        # Ensure d_hid is calculated or provided
+        d_hid = config.d_hid if config.d_hid is not None else config.d_model * 4
+
+        # Use nn.TransformerEncoderLayer
+        self.transformer_layers = nn.ModuleList([
+            TransformerEncoderLayer( # <-- USE TORCH LAYER
+                d_model=config.d_model,
+                nhead=config.n_head,
+                dim_feedforward=d_hid,
+                dropout=config.dropout,
+                activation=config.activation,
+                layer_norm_eps=config.layer_norm_eps,
+                batch_first=True,
+                norm_first=config.norm_first,
+                bias=config.bias
+            )
+            for _ in range(config.n_layers)
+        ])
+        self.layer_norm = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps, bias=config.bias)
+        self.output_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+
+        # Optional weight tying
+        self.token_embedding.weight = self.output_head.weight
+
         # Initialize weights
         self.apply(self._init_weights)
-        
-        # Log model size is handled by factory
-        # self._log_model_size()
+        # Apply special scaled init to the residual projections, per GPT-2 paper
+        for pn, p in self.named_parameters():
+            if pn.endswith('c_proj.weight'):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layers))
+
+        logger.info(f"TransformerModel initialized with d_model={config.d_model}, n_layers={config.n_layers}, n_head={config.n_head}")
     
     def _init_weights(self, module: nn.Module) -> None:
         """Initialize the weights of the model."""
@@ -150,14 +142,16 @@ class TransformerModel(LanguageModel):
             if module.weight is not None: 
                 module.weight.data.fill_(1.0)
     
-    def _generate_square_subsequent_mask(self, sz: int) -> torch.Tensor:
+    def _generate_square_subsequent_mask(self, sz: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
         """
         Generate a square mask for the sequence (causal mask).
         Ensures attention is only paid to previous tokens.
         """
         # Use float('-inf') for positions to be masked
-        mask: torch.Tensor = torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
-        return mask # type: ignore[no-any-return]
+        mask = torch.full((sz, sz), float('-inf'), device=device, dtype=dtype)
+        mask = torch.triu(mask, diagonal=1)
+        # mask = torch.triu(torch.ones((sz, sz), device=device, dtype=torch.bool), diagonal=1)
+        return mask
     
     def forward(self, x: torch.Tensor, targets: Optional[torch.Tensor] = None) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
@@ -171,38 +165,34 @@ class TransformerModel(LanguageModel):
             Logits [batch_size, seq_len, vocab_size], or (Logits, Loss) if targets are provided.
         """
         batch_size, seq_len = x.size()
-        if seq_len > self.max_seq_length:
-            raise ValueError(f"Input sequence length ({seq_len}) exceeds model's max sequence length ({self.max_seq_length})")
+        if seq_len > self.config.max_seq_length:
+            raise ValueError(f"Input sequence length ({seq_len}) exceeds model's max sequence length ({self.config.max_seq_length})")
         
         # Get token embeddings
-        tok_emb = self.token_embedding(x) * math.sqrt(self.d_model) # Scale embedding
+        tok_emb = self.token_embedding(x) * math.sqrt(self.config.d_model) # Scale embedding
         
         # Get position embeddings
         positions = torch.arange(0, seq_len, dtype=torch.long, device=x.device)
-        # positions = torch.clamp(positions, max=self.max_seq_length-1) # Clamp if using fixed PE
+        # positions = torch.clamp(positions, max=self.config.max_seq_length-1) # Clamp if using fixed PE
         pos_emb = self.position_embedding(positions) # [seq_len, d_model]
         
         # Combine embeddings and apply dropout
         x = self.dropout(tok_emb + pos_emb) # type: ignore[index] # [batch_size, seq_len, d_model]
         
-        # Create attention mask for the decoder
-        # Shape should be [seq_len, seq_len]
-        tgt_mask = self._generate_square_subsequent_mask(seq_len).to(x.device)
-        
-        # The standard TransformerDecoder expects no memory for decoder-only setup
-        # It doesn't explicitly take a memory_mask or memory_key_padding_mask in this case.
-        # tgt_key_padding_mask could be added if needed based on input padding.
-        output = self.transformer_decoder(
-            tgt=x,
-            memory=torch.zeros((batch_size, 0, self.d_model), device=x.device), # No memory needed
-            tgt_mask=tgt_mask,
-            # memory_mask=None, # Not used without memory
-            # tgt_key_padding_mask=None, # Optional: Add if input can be padded
-            # memory_key_padding_mask=None # Not used without memory
-        )
-        
+        # Create attention mask for the decoder (used as src_mask for EncoderLayer)
+        attn_mask = self._generate_square_subsequent_mask(sz=seq_len, device=x.device, dtype=x.dtype)
+
+        # Pass input through the transformer layers
+        output = x
+        for layer in self.transformer_layers:
+             # Pass attn_mask to src_mask argument
+             output = layer(output, src_mask=attn_mask) # <-- APPLY EACH LAYER
+
+        # Apply final layer norm
+        output = self.layer_norm(output) # <-- APPLY FINAL NORM
+
         # Generate logits
-        logits: torch.Tensor = self.output_layer(output) # [batch_size, seq_len, vocab_size]
+        logits: torch.Tensor = self.output_head(output) # [batch_size, seq_len, vocab_size]
         
         # Calculate loss if targets provided
         if targets is not None:

@@ -195,7 +195,7 @@ class TestSubwordTokenizer:
         
         # Test save raises RuntimeError when tokenizer is None
         with pytest.raises(RuntimeError, match="Tokenizer not initialized. Cannot save."):
-             tokenizer.save("some_dir")
+             tokenizer.save("some_dir") # TODO: Save to temp dir
 
     # Helper method to set up an initialized tokenizer
     def _setup_initialized_tokenizer(self, vocab_size, mock_hf_tokenizer_instance):

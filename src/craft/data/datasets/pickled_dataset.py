@@ -265,4 +265,13 @@ class PickledDataset(BaseDataset):
 
         else:
             self.logger.warning(f"Decode not implemented for tokenizer type: {tokenizer_type}")
-            return "[Decode unavailable: Unknown tokenizer type]" 
+            return "[Decode unavailable: Unknown tokenizer type]"
+
+def _get_index_path(output_dir: str, split: str) -> str:
+    """Constructs the expected path for a pickled split file."""
+    # Cast Path object to string before returning
+    return str(Path(output_dir) / f"{split}.pkl") # type: ignore
+
+# Entry point check for direct execution (if needed, though CLI is preferred)
+# if __name__ == "__main__":
+#     dataset_app() 

@@ -94,20 +94,23 @@ def processed_data_dir(tmp_path_factory):
 @pytest.fixture
 def pickled_dataset_test_setup(tmp_path):
     file_path = tmp_path / "test.pkl"
-    vocab_path = tmp_path / "vocab.json"
+    metadata_path = tmp_path / "metadata.json"
     block_size = 5
     token_ids = list(range(20))
     with open(file_path, "wb") as f: pickle.dump(token_ids, f)
     idx_to_char = {i: chr(ord('a')+i) for i in range(26)}
-    vocab_data = {'vocab_size': 50, 'idx_to_char': {str(k): v for k, v in idx_to_char.items()}}
-    with open(vocab_path, "w") as f: json.dump(vocab_data, f)
-    return file_path, vocab_path, block_size, token_ids, idx_to_char
+    metadata_content = {
+        'vocab_size': 50, 
+        'tokenizer_type': 'CharTokenizer',
+        'idx_to_char': {str(k): v for k, v in idx_to_char.items()}
+    }
+    with open(metadata_path, "w") as f: json.dump(metadata_content, f)
+    return file_path, metadata_path, block_size, token_ids, idx_to_char
 
 def test_pickled_dataset_standalone_init_len_getitem(pickled_dataset_test_setup):
-    file_path, vocab_path, block_size, token_ids, _ = pickled_dataset_test_setup
-    dataset = PickledDataset(str(file_path), block_size, str(vocab_path))
+    file_path, _, block_size, token_ids, _ = pickled_dataset_test_setup
+    dataset = PickledDataset(str(file_path), block_size)
     assert len(dataset.token_ids) == len(token_ids)
-    # Corrected expected length calculation to match __len__
     expected_len = (len(token_ids) - 1) // block_size
     assert len(dataset) == expected_len
     if len(dataset) > 0:
@@ -116,25 +119,26 @@ def test_pickled_dataset_standalone_init_len_getitem(pickled_dataset_test_setup)
         assert y.shape == (block_size,)
 
 def test_pickled_dataset_standalone_get_metadata(pickled_dataset_test_setup):
-    # This test now uses the fixture which provides vocab_path
-    file_path, vocab_path, block_size, _, _ = pickled_dataset_test_setup
-    dataset = PickledDataset(str(file_path), block_size, str(vocab_path))
+    file_path, _, block_size, _, _ = pickled_dataset_test_setup
+    dataset = PickledDataset(str(file_path), block_size)
     metadata = dataset.get_metadata()
     assert isinstance(metadata, dict)
-    assert metadata.get('vocab_size') == 50 
-    assert dataset.vocab_size == 50 
+    assert metadata.get('vocab_size') == 50
+    assert dataset.vocab_size == 50
 
 def test_pickled_dataset_standalone_metadata_not_found(pickled_dataset_test_setup):
-    # Test cases where metadata should not be found
     file_path, _, block_size, _, _ = pickled_dataset_test_setup
-    # Case 1: No vocab_path provided
-    dataset_no_path = PickledDataset(str(file_path), block_size)
-    assert dataset_no_path.get_metadata() == {}
-    assert dataset_no_path.vocab_size is None
-    # Case 2: Invalid vocab_path provided
-    dataset_bad_path = PickledDataset(str(file_path), block_size, "bad_path.json")
-    assert dataset_bad_path.get_metadata() == {}
-    assert dataset_bad_path.vocab_size is None
+    dataset_with_metadata = PickledDataset(str(file_path), block_size)
+    assert dataset_with_metadata.get_metadata().get('vocab_size') == 50
+    
+    non_metadata_dir = file_path.parent / "nometa"
+    non_metadata_dir.mkdir()
+    non_metadata_pkl = non_metadata_dir / "data.pkl"
+    with open(non_metadata_pkl, "wb") as f: pickle.dump([1,2,3], f)
+    
+    dataset_no_meta = PickledDataset(str(non_metadata_pkl), block_size)
+    assert dataset_no_meta.get_metadata() == {}
+    assert dataset_no_meta.vocab_size is None
 
 # --- Tests for create_dataloaders factory function --- COMMENTED OUT DUE TO PATH ISSUES ---
 ''' 

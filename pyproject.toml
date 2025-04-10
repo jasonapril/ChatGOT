@@ -60,11 +60,16 @@ multi_line_output = 3
 line_length = 100
 
 [tool.mypy]
+mypy_path = "src"
 python_version = "3.8"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "transformers.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

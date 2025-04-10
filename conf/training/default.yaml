@@ -1,6 +1,6 @@
 # conf/training/default.yaml
 
-epochs: 1 # Default to 1 epoch, override in experiment if needed
+num_epochs: 1 # Default to 1 epoch, override in experiment if needed
 use_amp: true
 gradient_accumulation_steps: 1 # Number of steps to accumulate gradients before optimizer step
 max_grad_norm: 1.0
@@ -20,7 +20,6 @@ warmup_steps: 100
 # --- Generation settings specific to training loop evaluation/sampling ---
 generation:
   _target_: craft.config.schemas.GenerationConfig # Corrected path
-  prompt: ${experiment.training.generation.start_prompt} # Interpolate directly from experiment config
   top_k: 50 # Default Top-K for sampling during training
   top_p: 0.9 # Default Top-P for sampling
   # repetition_penalty: 1.1 # REMOVED Default repetition penalty 

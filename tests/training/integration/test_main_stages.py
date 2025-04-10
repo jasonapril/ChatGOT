@@ -8,6 +8,7 @@ import os
 import tempfile
 import json
 import shutil
+from craft.data.tokenizers.char import CharTokenizer
 
 # Ensure the config directory is discoverable by Hydra
 # Assuming tests are run from the project root

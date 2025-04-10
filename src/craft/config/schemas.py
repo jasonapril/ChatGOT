@@ -33,6 +33,8 @@ class GenerativeModelConfig(BaseModelConfig):
 
 class LanguageModelConfig(GenerativeModelConfig):
     """Base Config for most Language Models (e.g., Transformer)"""
+    # Revert to allow/ignore extra fields to bypass validation issue with unexpected keys
+    # model_config = ConfigDict(extra='forbid') # Forbid extra fields <-- REMOVE/COMMENT OUT
     architecture: Literal["transformer"] = Field("transformer", description="Architecture set to transformer.") # Discriminator value
     vocab_size: Optional[int] = Field(None, description="Size of the vocabulary (often inferred).")
     d_model: int = Field(768, description="Model dimension.")
@@ -78,6 +80,8 @@ class LanguageModelConfig(GenerativeModelConfig):
 
 class SimpleRNNConfig(GenerativeModelConfig):
     """Config for Simple RNN Models"""
+    # Revert to allow/ignore extra fields
+    # model_config = ConfigDict(extra='forbid') # Forbid extra fields <-- REMOVE/COMMENT OUT
     architecture: Literal["simple_rnn"] = Field("simple_rnn", description="Architecture set to simple_rnn.") # Discriminator value
     # Add back fields previously inherited from LanguageModelConfig that are needed
     vocab_size: Optional[int] = Field(None, description="Size of the vocabulary (often inferred).")
@@ -115,6 +119,8 @@ class SimpleRNNConfig(GenerativeModelConfig):
 
 class VisionModelConfig(BaseModelConfig):
     """Placeholder Config for Vision Models"""
+    # Revert to allow/ignore extra fields
+    # model_config = ConfigDict(extra='forbid') # Forbid extra fields <-- REMOVE/COMMENT OUT
     architecture: Literal["vision_transformer"] = Field("vision_transformer", description="Example vision architecture.") # Discriminator value
     # model_type: str = Field("vision", description="Model type set to vision.")
     image_size: Tuple[int, int] = Field((224, 224), description="Input image dimensions (height, width).")
@@ -124,6 +130,8 @@ class VisionModelConfig(BaseModelConfig):
 
 class MultiModalModelConfig(BaseModelConfig):
     """Placeholder Config for Multi-Modal Models"""
+    # Revert to allow/ignore extra fields
+    # model_config = ConfigDict(extra='forbid') # Forbid extra fields <-- REMOVE/COMMENT OUT
     architecture: Literal["clip_style"] = Field("clip_style", description="Example multimodal architecture.") # Discriminator value
     # model_type: str = Field("multimodal", description="Model type set to multimodal.")
     # References to language and vision configs, or combined fields
@@ -181,16 +189,18 @@ CallbacksConfig = Optional[Dict[str, CallbackConfigEntry]]
 
 class DataConfig(BaseModel):
     model_config = _model_config_shared.copy()
+    type: Optional[str] = None # Add type field to match YAML
+
     # Define the structure for individual dataset splits (train/val/test)
     class DatasetSplitConfig(BaseModel):
         # This inner model also needs the shared config
         model_config = _model_config_shared.copy()
-        # dataset: Dict[str, Any] # Expects a dictionary, target is inside -> Let's make target explicit
-        dataset_target: Optional[str] = Field(None, validation_alias='dataset._target_', description="Target class/function for the dataset")
-        dataset_params: Dict[str, Any] = Field(default_factory=dict, validation_alias='dataset', description="Parameters for the dataset target (excluding _target_)")
+        # Remove validation_alias, rely on the validator to create these fields
+        dataset_target: Optional[str] = Field(None, description="Target class/function for the dataset")
+        dataset_params: Dict[str, Any] = Field(default_factory=dict, description="Parameters for the dataset target (excluding _target_)")
 
-        dataloader_target: Optional[str] = Field(None, validation_alias='dataloader._target_', description="Optional target class for the dataloader")
-        dataloader_params: Dict[str, Any] = Field(default_factory=dict, validation_alias='dataloader', description="Parameters for the dataloader target (excluding _target_)")
+        dataloader_target: Optional[str] = Field(None, description="Optional target class for the dataloader")
+        dataloader_params: Dict[str, Any] = Field(default_factory=dict, description="Parameters for the dataloader target (excluding _target_)")
 
         @model_validator(mode='before')
         @classmethod # Need classmethod for model_validator
@@ -239,13 +249,35 @@ class DataConfig(BaseModel):
     # model_config['extra'] = 'allow'
 
 
+# --- Checkpointing Configuration --- #
+
+class CheckpointingConfig(BaseModel):
+    """Configuration specific to checkpointing behavior."""
+    model_config = _model_config_shared.copy()
+    checkpoint_dir: Optional[str] = Field(None, description="Base directory to save checkpoints. If None, derived from output_dir.")
+    keep_last: Optional[int] = Field(3, ge=1, description="Number of recent checkpoints to keep.")
+    keep_best: Optional[int] = Field(1, ge=0, description="Number of best checkpoints to keep based on metric.")
+    save_best_only: bool = Field(False, description="If True, only saves checkpoints that improve the monitored metric.")
+    save_weights_only: bool = Field(False, description="If True, save only the model weights.")
+    val_metric: Optional[str] = Field("val_loss", description="Metric name used to determine the 'best' checkpoint.")
+    mode: Literal['min', 'max'] = Field('min', description="Mode for comparing the validation metric ('min' or 'max').")
+    time_save_interval_seconds: Optional[int] = Field(None, ge=0, description="Save checkpoint every N seconds (0 or None to disable). Prioritized over step/epoch intervals if non-zero.")
+    checkpoint_prefix: str = Field("checkpoint", description="Prefix for checkpoint filenames.")
+
+
 # --- Generation Configuration (Existing) ---
 class GenerationConfig(BaseModel):
     model_config = _model_config_shared.copy()
-    start_prompt: str = "\\n"
+    start_prompt: str = "\\\\n"
     max_new_tokens: int = Field(200, gt=0)
     temperature: float = Field(0.8, ge=0)
     top_k: Optional[int] = Field(None, ge=1)
+    top_p: Optional[float] = Field(None, ge=0.0, le=1.0, description="Nucleus sampling probability.")
+    repetition_penalty: Optional[float] = Field(1.0, ge=1.0, description="Penalty for repeating tokens (1.0 means no penalty).")
+    use_beam_search: bool = Field(False, description="Whether to use beam search for generation.")
+    num_beams: Optional[int] = Field(None, ge=1, description="Number of beams for beam search.")
+    length_penalty: Optional[float] = Field(1.0, description="Length penalty for beam search.")
+    early_stopping: Optional[bool] = Field(False, description="Whether to stop beam search early.")
 
 
 # --- Training Configuration (Refined) ---
@@ -297,6 +329,8 @@ class ExperimentConfig(BaseModel):
     callbacks: CallbacksConfig = None # Callbacks are optional
     # Add experiment_name here
     experiment_name: Optional[str] = Field("default_experiment", description="Name of the experiment, used for logging and checkpointing.")
+    # Add the checkpointing config here
+    checkpointing: Optional[CheckpointingConfig] = Field(None, description="Checkpointing configuration.")
     # Allow extra fields? Keep ignore for now.
     # model_config['extra'] = 'allow'
 
@@ -319,115 +353,3 @@ class AppConfig(BaseModel):
 
     # Allow other top-level fields? Keep ignore for now.
     # model_config['extra'] = 'allow'
-
-
-# Example usage (for testing schemas) - Update example dict structure
-# REMOVE THIS ENTIRE BLOCK
-# if __name__ == '__main__':
-#    # Example raw dictionary mimicking Hydra output for a Transformer
-#    test_conf_dict_transformer = {
-#        'experiment': {
-#            'model': {
-#                'architecture': 'transformer', # Discriminator
-#                '_target_': 'craft.models.transformer.TransformerLanguageModel', # Example target
-#                'vocab_size': 50257, # Example value
-#                'max_seq_length': 1024,
-#                'd_model': 768,
-#                'n_head': 12,
-#                # d_hid should be automatically calculated
-#                'n_layers': 12,
-#                # other LanguageModelConfig fields...
-#            },
-#            'training': {
-#                '_target_': 'craft.some.training.target', # Example placeholder
-#                'batch_size': 32,
-#                'num_epochs': 5,
-#                'use_amp': True,
-#                # ... other training params
-#            },
-#            'data': {
-#                'batch_size': 32, # Redundant?
-#                'num_workers': 4,
-#                'block_size': 1024,
-#                'datasets': {
-#                    'train': {
-#                        'dataset': {
-#                            '_target_': 'craft.data.datasets.TextDataset',
-#                            'file_path': '/path/to/train.txt',
-#                            'tokenizer_name': 'gpt2',
-#                        },
-#                        'dataloader': {
-#                            'shuffle': True
-#                        }
-#                    },
-#                    'val': {
-#                        'dataset': {
-#                            '_target_': 'craft.data.datasets.TextDataset',
-#                            'file_path': '/path/to/val.txt',
-#                            'tokenizer_name': 'gpt2',
-#                        },
-#                        'dataloader': {
-#                            'shuffle': False
-#                        }
-#                    }
-#                }
-#            },
-#            'optimizer': {
-#                '_target_': 'torch.optim.AdamW',
-#                'lr': 1e-4,
-#                'weight_decay': 0.01
-#            },
-#            'scheduler': {
-#                '_target_': 'torch.optim.lr_scheduler.CosineAnnealingLR',
-#                'T_max': 10000 # Example
-#            },
-#            'callbacks': {
-#                'tensorboard': {
-#                    '_target_': 'craft.training.callbacks.TensorBoardLogger'
-#                },
-#                'checkpointing': {
-#                    '_target_': 'craft.training.callbacks.ModelCheckpoint',
-#                    'monitor': 'val_loss',
-#                    'save_top_k': 1
-#                }
-#            }
-#        },
-#        # Top level app config
-#        'project_name': 'TestCraft',
-#        'experiment_name': 'transformer_test',
-#        'device': 'cuda'
-#    }
-#    try:
-#        app_config = AppConfig(**test_conf_dict_transformer)
-#        print("Transformer Config Parsed Successfully:")
-#        print(app_config.model_dump_json(indent=2))
-#        # Access nested fields
-#        print(f"Model Architecture: {app_config.experiment.model.architecture}")
-#        print(f"Training batch size: {app_config.experiment.training.batch_size}")
-#        print(f"Train dataset target: {app_config.experiment.data.datasets['train'].dataset_target}")
-#        print(f"Optimizer LR: {app_config.experiment.optimizer.lr}")
-#    except Exception as e:
-#        print(f"Error parsing Transformer config: {e}")
-#    print("-"*20)
-#
-#    # Example for SimpleRNN
-#    test_conf_dict_rnn = test_conf_dict_transformer.copy() # Start from transformer example
-#    test_conf_dict_rnn['experiment']['model'] = {
-#        'architecture': 'simple_rnn',
-#        '_target_': 'craft.models.simple_rnn.SimpleRNNLanguageModel',
-#        'vocab_size': 50257,
-#        'max_seq_length': 512,
-#        'd_model': 256, # Input embedding size
-#        'hidden_size': 512, # RNN hidden size
-#        'num_layers': 2, # RNN layers
-#        'dropout': 0.1
-#    }
-#    try:
-#        app_config_rnn = AppConfig(**test_conf_dict_rnn)
-#        print("SimpleRNN Config Parsed Successfully:")
-#        print(app_config_rnn.model_dump_json(indent=2))
-#        print(f"Model Architecture: {app_config_rnn.experiment.model.architecture}")
-#        if isinstance(app_config_rnn.experiment.model, SimpleRNNConfig):
-#             print(f"RNN Hidden Size: {app_config_rnn.experiment.model.hidden_size}")
-#    except Exception as e:
-#        print(f"Error parsing SimpleRNN config: {e}") 

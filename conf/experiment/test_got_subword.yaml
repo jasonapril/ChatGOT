@@ -3,38 +3,40 @@
 
 # @package _global_
 defaults:
+  # Load base defaults FIRST
   - /data: got_subword      # Include base got_subword config
-  - /model: transformer_debug  # Fix: Use 'transformer_debug'
+  # - /model: transformer_debug  # REMOVED - Define model params directly below
   - /optimizer: adamw        # Fix: Use 'adamw', not 'adamw_common'
   - /training: default      # Fix: Use 'default', not 'default_train'
-  - _self_                  # Include local settings from this file last
   # Inherit scheduler (often None by default)
   # Inherit model, training, optimizer, scheduler, generation defaults from main config
+  - _self_                  # Include local settings from this file last
 
 # Configuration for the experiment run
 experiment_name: test_got_subword
 resume_from: null
 
-# Data configuration (Override block_size if needed, inherits tokenizer from got_subword)
-data:
-  block_size: 256 # Define top-level block size
+experiment:
+  # Data configuration (Override block_size if needed, inherits tokenizer from got_subword)
+  data:
+    block_size: 256 # Define top-level block size
 
-# Training configuration (Override for minimal run, enable checkpointing/sampling)
-training:
-  batch_size: 32          # Ensure batch_size is defined here or inherited
-  num_epochs: 1           # Run for only 1 epoch
-  max_steps: 10           # Limit to only ~10 training steps for speed
-  log_interval: 1         # Log every step
-  save_steps_interval: 5  # Save checkpoint every 5 steps
-  time_save_interval_seconds: 0 # Disable time-based saving for this short test
-  compile_model: False
-  torch_compile: False
-  activation_checkpointing: false # Keep false for speed unless testing this feature specifically
+  # Training configuration (Override for minimal run, enable checkpointing/sampling)
+  training:
+    batch_size: 32          # Ensure batch_size is defined here or inherited
+    num_epochs: 1           # Run for only 1 epoch
+    max_steps: 10           # Limit to only ~10 training steps for speed
+    log_interval: 1         # Log every step
+    save_steps_interval: 5  # Save checkpoint every 5 steps
+    time_save_interval_seconds: 0 # Disable time-based saving for this short test
+    compile_model: False
+    torch_compile: False
+    activation_checkpointing: false # Keep false for speed unless testing this feature specifically
 
-  # Use minimal generation settings for sample callback test
-  generation:
-    max_new_tokens: 20 # Generate very short samples
-    start_prompt: "The " # Add default start prompt
+    # Use minimal generation settings for sample callback test
+    generation:
+      max_new_tokens: 20 # Generate very short samples
+      start_prompt: "The " # Add default start prompt
 
 # Callbacks configuration (Enable minimal necessary callbacks)
 callbacks:
@@ -43,7 +45,8 @@ callbacks:
     _target_: craft.training.callbacks.TensorBoardLogger
   sample_generation: # Minimal SampleGenerationCallback
     _target_: craft.training.callbacks.SampleGenerationCallback
-    start_prompt: ${experiment.training.generation.start_prompt} # Correct interpolation
+    # Define prompt directly instead of interpolating for simplicity in test config
+    start_prompt: "The "
   # progress_bar: # Optionally add progress bar if desired for visibility
   #   _target_: craft.training.callbacks.ProgressBarCallback
 
@@ -54,11 +57,11 @@ mlflow:
 
 # Explicitly override model block_size if needed for memory, otherwise inherit
 model:
-  _target_: craft.models.transformer.TransformerModel
-  config:
-    _target_: craft.config.schemas.LanguageModelConfig # Use the Pydantic schema for validation
-    architecture: transformer # Required discriminator
-    vocab_size: null # Will be inferred from data
-    d_model: 128
-    n_layers: 2
+  architecture: transformer # Required discriminator
+  vocab_size: null # Will be inferred from data
+  d_model: 128
+  n_layers: 2
+  n_head: 4 # Example, ensure divisible
+  dropout: 0.1
+  max_seq_length: 256 # Explicitly define model max length
  

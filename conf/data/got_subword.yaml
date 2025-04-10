@@ -3,6 +3,7 @@
 type: subword_pickle
 batch_size: 32
 num_workers: 4
+block_size: 256 # Define at this level for DataConfig schema
 # block_size: ${experiment.data.block_size} # Interpolation issue with _group_, hardcoding below
 
 # Tokenizer Config (if needed, often defined elsewhere or loaded with data)

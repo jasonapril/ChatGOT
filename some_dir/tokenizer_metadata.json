@@ -1,0 +1,14 @@
+{
+    "model_prefix": "sp_fixture_model",
+    "vocab_size": 1000,
+    "model_type": "unknown",
+    "character_coverage": 0.9995,
+    "special_tokens_map": {
+        "pad": "<pad>",
+        "unk": "<unk>",
+        "bos": "<bos>",
+        "eos": "<eos>"
+    },
+    "add_bos_as_control": false,
+    "add_eos_as_control": false
+}

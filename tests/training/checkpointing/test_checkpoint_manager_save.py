@@ -39,6 +39,7 @@ class MockModel(Model):
 
 class MockPydanticConfig(BaseModelConfig):
     param: int = 10
+    architecture: str = "mock_arch"
 
 # Duplicate the helper function here
 def create_dummy_checkpoint(path: Path, data: dict):
@@ -68,8 +69,8 @@ def mock_logger_fixture():
 @pytest.fixture
 def mock_objects_for_cm(mock_tokenizer_fixture):
     """Provides common mock objects needed for CheckpointManager."""
-    mock_config = {'param': 20}
-    mock_model = MockModel(config=MockPydanticConfig(param=10))
+    model_config = MockPydanticConfig(param=10)
+    mock_model = MockModel(config=model_config)
     mock_optimizer = MagicMock(spec=torch.optim.Optimizer)
     mock_optimizer.state_dict = MagicMock(return_value={"opt_state": 1})
     mock_scheduler = MagicMock(spec=torch.optim.lr_scheduler._LRScheduler)
@@ -88,7 +89,7 @@ def mock_objects_for_cm(mock_tokenizer_fixture):
         "optimizer": mock_optimizer,
         "scheduler": mock_scheduler,
         "scaler": mock_scaler,
-        "config": mock_config,
+        "config": model_config.model_dump(),
         "callbacks": mock_callbacks,
         "tokenizer": mock_tokenizer,
         "device": 'cpu'
@@ -100,11 +101,12 @@ def checkpoint_manager(mock_objects_for_cm, tmp_path):
     exp_name = "test_save_exp"
     # Patch getcwd for the duration of the manager's life in this fixture
     with patch('os.getcwd', return_value=str(tmp_path)):
-         # Pass the dictionary directly to CheckpointManager
-         # Add experiment_name
-         manager = CheckpointManager(**mock_objects_for_cm, experiment_name=exp_name)
-         # Override checkpoint_dir to ensure it uses tmp_path absolutely for the test logic
-         manager.checkpoint_dir = tmp_path # Now uses Path object directly
+         # Pass tmp_path positionally as the first argument
+         manager = CheckpointManager(
+             str(tmp_path), # Pass checkpoint_dir positionally
+             **mock_objects_for_cm,
+             experiment_name=exp_name
+         )
          yield manager # Yield the manager instance
 
 # Helper to create TrainingState from mocks
